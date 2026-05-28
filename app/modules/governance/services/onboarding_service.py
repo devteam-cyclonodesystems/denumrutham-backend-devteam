@@ -435,8 +435,13 @@ class OnboardingService:
         result = await db.execute(stmt)
         seq = result.scalar_one()
 
-        seq.last_val += 1
-        return f"TMP-{date_str}-{str(seq.last_val).zfill(3)}"
+        while True:
+            seq.last_val += 1
+            code = f"TMP-{date_str}-{str(seq.last_val).zfill(3)}"
+            # Verify code is not already in use by a production temple (Fix code collision)
+            chk = await db.execute(select(Temple).filter(Temple.temple_code == code))
+            if not chk.scalars().first():
+                return code
 
     # ── Domain Resolution with History Fallback (Hardening #2) ────────
     @staticmethod
