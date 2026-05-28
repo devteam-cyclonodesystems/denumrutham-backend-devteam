@@ -13,7 +13,7 @@ from app.core.pagination import PaginationParams, get_pagination
 router = APIRouter()
 
 
-@router.get("/")
+@router.get("")
 async def list_temples(
     search: Optional[str] = None,
     pagination: PaginationParams = Depends(get_pagination),

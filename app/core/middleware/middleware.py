@@ -58,7 +58,7 @@ class RequestLoggingMiddleware(BaseHTTPMiddleware):
         # Skip noisy health checks from access logs
         if request.url.path != "/health":
             logger.info(
-                "%s %s → %s (%sms)",
+                "%s %s -> %s (%sms)",
                 request.method,
                 request.url.path,
                 response.status_code,
@@ -91,3 +91,41 @@ class SecurityHeadersMiddleware(BaseHTTPMiddleware):
         response.headers["Referrer-Policy"] = "strict-origin-when-cross-origin"
         response.headers["Permissions-Policy"] = "camera=(), microphone=(), geolocation=()"
         return response
+
+
+# ---------------------------------------------------------------------------
+# 4. HTTPS Redirect Headers Middleware (fixes trailing slash redirects)
+# ---------------------------------------------------------------------------
+class HTTPSRedirectHeadersMiddleware:
+    def __init__(self, app):
+        self.app = app
+
+    async def __call__(self, scope, receive, send):
+        if scope["type"] in ("http", "websocket"):
+            headers = dict(scope.get("headers", []))
+            
+            # Extract forwarded header values
+            x_forwarded_proto = headers.get(b"x-forwarded-proto")
+            x_forwarded_for = headers.get(b"x-forwarded-for")
+            
+            if x_forwarded_proto:
+                proto_str = x_forwarded_proto.decode("utf-8", "ignore").lower()
+                path = scope.get("path", "")
+                
+                # Log proxy status for observability
+                logger.info(
+                    "[ProxyAwareMiddleware] Forwarded Proto=%s | Path=%s | Forwarded For=%s",
+                    proto_str,
+                    path,
+                    x_forwarded_for.decode("utf-8", "ignore") if x_forwarded_for else "-",
+                    extra={
+                        "forwarded_proto": proto_str,
+                        "forwarded_for": x_forwarded_for.decode("utf-8", "ignore") if x_forwarded_for else "-",
+                        "path": path
+                    }
+                )
+                
+                if proto_str == "https":
+                    scope["scheme"] = "https"
+                    
+        await self.app(scope, receive, send)

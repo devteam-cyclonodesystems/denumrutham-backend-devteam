@@ -19,6 +19,7 @@ from app.core.middleware import (
     RequestIdMiddleware,
     RequestLoggingMiddleware,
     SecurityHeadersMiddleware,
+    HTTPSRedirectHeadersMiddleware,
 )
 from app.core.integrity import validate_on_startup
 
@@ -136,6 +137,9 @@ app.add_middleware(RequestLoggingMiddleware)
 
 # 4. Request ID generation
 app.add_middleware(RequestIdMiddleware)
+
+# 5. HTTPS Redirect / Proxy-Awareness (Outer-most wrapper, executes first)
+app.add_middleware(HTTPSRedirectHeadersMiddleware)
 
 
 # ---------------------------------------------------------------------------
