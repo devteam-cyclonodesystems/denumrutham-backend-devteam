@@ -17,6 +17,11 @@ class PaymentStatus(str, enum.Enum):
     FAILED = "FAILED"
 
 
+class PaymentMethod(str, enum.Enum):
+    UPI_QR = "UPI_QR"
+    CASH = "CASH"
+    CARD = "CARD"
+    NET_BANKING = "NET_BANKING"
 
 
 class Donation(Base):
