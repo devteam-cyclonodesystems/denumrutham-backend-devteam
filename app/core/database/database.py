@@ -3,16 +3,35 @@ from sqlalchemy.ext.asyncio import create_async_engine, AsyncSession, async_sess
 from sqlalchemy.orm import DeclarativeBase
 from sqlalchemy import text
 from fastapi import Request
+import urllib.parse
 from app.core.config import settings
 
+# Parse and sanitize DATABASE_URL for asyncpg (which does not support sslmode directly)
+db_url = settings.DATABASE_URL
+connect_args = {}
+
+if db_url.startswith("postgresql+asyncpg"):
+    parsed = urllib.parse.urlparse(db_url)
+    query_params = urllib.parse.parse_qs(parsed.query)
+    if "sslmode" in query_params:
+        sslmode = query_params["sslmode"][0]
+        del query_params["sslmode"]
+        if sslmode in ("require", "prefer", "allow"):
+            connect_args["ssl"] = True
+    new_query = urllib.parse.urlencode(query_params, doseq=True)
+    parsed = parsed._replace(query=new_query)
+    db_url = urllib.parse.urlunparse(parsed)
+
 engine = create_async_engine(
-    settings.DATABASE_URL,
+    db_url,
     echo=False,
     pool_size=20,
     max_overflow=10,
     pool_pre_ping=True,
     pool_recycle=300,
+    connect_args=connect_args,
 )
+
 
 AsyncSessionLocal = async_sessionmaker(
     bind=engine,
