@@ -17,6 +17,14 @@ class TempleApprovalStatus(str, enum.Enum):
     REJECTED = "REJECTED"
 
 
+class ServiceType(str, enum.Enum):
+    ARCHANA = "ARCHANA"
+    OFFERING = "OFFERING"
+    HALL_BOOKING = "HALL_BOOKING"
+    DONATION = "DONATION"
+    STORE = "STORE"
+
+
 
 
 class Temple(Base):
