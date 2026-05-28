@@ -715,7 +715,12 @@ class OnboardingService:
         if not rejection_reason or len(rejection_reason) < 10:
             raise HTTPException(status_code=400, detail="Rejection reason must be at least 10 characters")
 
-        async with db.begin():
+        try:
+            if not db.in_transaction():
+                tx = await db.begin()
+            else:
+                tx = None
+
             # 1. Fetch temple request
             result = await db.execute(
                 select(TempleRequest).filter(TempleRequest.id == request_id).with_for_update()
@@ -771,7 +776,19 @@ class OnboardingService:
                 details=f"Temple '{temple_req.temple_name}' rejected: {rejection_reason}",
             )
 
-        # 5. Automatic commit at end of db.begin()
+            if tx:
+                await tx.commit()
+            else:
+                await db.commit()
+
+        except Exception as e:
+            if not db.in_transaction():
+                await db.rollback()
+            logger.error(f"Rejection transaction failed: {str(e)}")
+            if isinstance(e, HTTPException):
+                raise
+            raise HTTPException(status_code=500, detail=f"Rejection failed: {str(e)}")
+
         logger.info(
             "Temple rejected: %s (domain=%s) by approver %s — reason: %s",
             temple_req.temple_name, temple_req.domain, approver_id, rejection_reason,
@@ -783,3 +800,4 @@ class OnboardingService:
             "status": "REJECTED",
             "rejection_reason": rejection_reason,
         }
+
