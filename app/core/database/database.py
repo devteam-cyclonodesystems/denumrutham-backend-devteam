@@ -13,14 +13,27 @@ connect_args = {}
 if db_url.startswith("postgresql+asyncpg"):
     parsed = urllib.parse.urlparse(db_url)
     query_params = urllib.parse.parse_qs(parsed.query)
+    
+    # Map sslmode to connect_args
     if "sslmode" in query_params:
         sslmode = query_params["sslmode"][0]
-        del query_params["sslmode"]
         if sslmode in ("require", "prefer", "allow"):
             connect_args["ssl"] = True
+            
+    # Remove libpq parameters not supported by asyncpg connect()
+    disallowed = {
+        "sslmode", "channel_binding", "target_session_attrs", 
+        "gssencmode", "sslcert", "sslkey", "sslrootcert", "sslcrl",
+        "application_name"
+    }
+    for param in list(query_params.keys()):
+        if param in disallowed:
+            del query_params[param]
+            
     new_query = urllib.parse.urlencode(query_params, doseq=True)
     parsed = parsed._replace(query=new_query)
     db_url = urllib.parse.urlunparse(parsed)
+
 
 engine = create_async_engine(
     db_url,
