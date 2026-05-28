@@ -6,6 +6,8 @@ from sqlalchemy.dialects.postgresql import UUID
 from sqlalchemy.orm import relationship
 from app.core.database.base import Base
 from app.models.operational_states import TempleOperationalState
+from app.modules.bookings.models.booking_models import PaymentMethod
+
 
 def utcnow():
     return datetime.now(timezone.utc)
