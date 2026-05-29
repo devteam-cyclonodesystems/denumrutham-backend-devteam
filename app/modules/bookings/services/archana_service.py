@@ -42,6 +42,7 @@ from datetime import datetime, timezone, timedelta
 from app.repositories.archana_repository import ArchanaRepository
 from app.services.accounting_service import AccountingService
 from app.utils.timezone_utils import local_to_utc
+from app.core.database import engine
 
 
 
@@ -333,7 +334,7 @@ class ArchanaService:
             RitualQueue.id == None
         ).order_by(EnterpriseArchanaBooking.ritual_time.asc())
 
-        if db.bind.dialect.name != "sqlite":
+        if engine.dialect.name != "sqlite":
             query = query.with_for_update(of=EnterpriseArchanaBooking)
 
         res = await db.execute(query)
