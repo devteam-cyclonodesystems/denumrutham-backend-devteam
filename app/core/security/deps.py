@@ -201,6 +201,7 @@ def require_permission(resource_key: str, required_access: str = 'read'):
         user_uuid = UUID(current_user.sub)
         temple_uuid = UUID(temple_id)
         
+        from app.modules.auth.services.rbac_service import RBACService
         has_perm = await RBACService.has_permission(db, user_uuid, temple_uuid, resource_key, required_access)
         if not has_perm:
             raise HTTPException(

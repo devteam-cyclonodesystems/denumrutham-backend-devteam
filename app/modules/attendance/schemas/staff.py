@@ -11,6 +11,7 @@ class StaffCreate(BaseModel):
     shift: Optional[str] = None
     temporary_password: str
     notes: Optional[str] = None
+    role_id: Optional[UUID] = None
 
 class StaffResponse(BaseModel):
     id: UUID

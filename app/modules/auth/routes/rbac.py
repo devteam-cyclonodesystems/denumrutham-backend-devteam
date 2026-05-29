@@ -10,7 +10,7 @@ from sqlalchemy.ext.asyncio import AsyncSession
 from app.api.deps import get_db, get_current_active_admin, get_current_user
 from app.schemas.domain import TokenData
 from app.schemas.rbac import (
-    RoleCreate, RoleUpdate, RoleResponse,
+    RoleCreate, RoleUpdate, RoleResponse, RoleClone,
     PermissionCreate, PermissionResponse,
     RolePermissionCreate, RolePermissionResponse,
     UserRoleCreate, UserRoleResponse,
@@ -56,6 +56,18 @@ async def delete_role(
     current_user: TokenData = Depends(get_current_active_admin),
 ):
     await RbacService.delete_role(db, current_user.temple_id, role_id)
+
+
+@router.post("/roles/{role_id}/clone", response_model=RoleResponse, status_code=201)
+async def clone_role(
+    role_id: str,
+    payload: RoleClone,
+    db: AsyncSession = Depends(get_db),
+    current_user: TokenData = Depends(get_current_active_admin),
+):
+    return await RbacService.clone_role(
+        db, current_user.temple_id, role_id, payload.name, payload.description
+    )
 
 
 # ─── Permissions ────────────────────────────────────────

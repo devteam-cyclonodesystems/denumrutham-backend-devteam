@@ -15,6 +15,11 @@ class RoleUpdate(BaseModel):
     is_active: Optional[bool] = None
 
 
+class RoleClone(BaseModel):
+    name: str
+    description: Optional[str] = None
+
+
 class RoleResponse(BaseModel):
     model_config = ConfigDict(from_attributes=True)
     id: UUID4
@@ -35,7 +40,7 @@ class PermissionCreate(BaseModel):
 class PermissionResponse(BaseModel):
     model_config = ConfigDict(from_attributes=True)
     id: UUID4
-    temple_id: UUID4
+    temple_id: Optional[UUID4] = None
     resource_type: str
     resource_key: str
     description: Optional[str] = ""

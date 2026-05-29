@@ -154,6 +154,11 @@ class SuperAdminService:
             description=body.description or "",
         )
         db.add(profile)
+        
+        # Seed default roles & permissions (Mandatory Change 1)
+        from app.services.staff_service import StaffService
+        await StaffService.seed_default_temple_roles(db, temple.id)
+        
         await db.commit()
         await db.refresh(temple)
 

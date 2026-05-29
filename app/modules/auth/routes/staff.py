@@ -3,7 +3,7 @@ from sqlalchemy.ext.asyncio import AsyncSession
 from typing import List
 from uuid import UUID
 
-from app.api.deps import get_db, get_current_user, get_current_temple_id
+from app.api.deps import get_db, get_current_user, get_current_temple_id, require_permission
 from app.schemas.domain import TokenData
 from app.schemas.staff import StaffCreate, StaffResponse, StaffUpdate, StaffCounts
 from app.services.staff_service import StaffService
@@ -14,13 +14,10 @@ router = APIRouter()
 async def create_staff(
     staff_in: StaffCreate,
     db: AsyncSession = Depends(get_db),
-    current_user: TokenData = Depends(get_current_user),
+    current_user: TokenData = Depends(require_permission("staff", "manage_employees")),
     temple_id: str = Depends(get_current_temple_id),
 ):
     """Manager-driven staff provisioning."""
-    if current_user.role not in ["TEMPLE_MANAGER", "ADMIN", "SUPER_ADMIN"]:
-        raise HTTPException(status_code=403, detail="Not authorized to create staff")
-    
     return await StaffService.create_staff(
         db=db, 
         staff_in=staff_in, 
@@ -31,7 +28,7 @@ async def create_staff(
 @router.get("", response_model=List[StaffResponse])
 async def list_staff(
     db: AsyncSession = Depends(get_db),
-    current_user: TokenData = Depends(get_current_user),
+    current_user: TokenData = Depends(require_permission("staff", "manage_employees")),
     temple_id: str = Depends(get_current_temple_id),
 ):
     return await StaffService.get_staff_list(db=db, temple_id=UUID(temple_id))
@@ -39,7 +36,7 @@ async def list_staff(
 @router.get("/counts", response_model=StaffCounts)
 async def get_staff_counts(
     db: AsyncSession = Depends(get_db),
-    current_user: TokenData = Depends(get_current_user),
+    current_user: TokenData = Depends(require_permission("staff", "manage_employees")),
     temple_id: str = Depends(get_current_temple_id),
 ):
     return await StaffService.get_staff_counts(db=db, temple_id=UUID(temple_id))
@@ -48,7 +45,7 @@ async def get_staff_counts(
 async def suspend_staff(
     staff_id: UUID,
     db: AsyncSession = Depends(get_db),
-    current_user: TokenData = Depends(get_current_user),
+    current_user: TokenData = Depends(require_permission("staff", "manage_employees")),
     temple_id: str = Depends(get_current_temple_id),
 ):
     return await StaffService.update_staff_status(
@@ -59,7 +56,7 @@ async def suspend_staff(
 async def reactivate_staff(
     staff_id: UUID,
     db: AsyncSession = Depends(get_db),
-    current_user: TokenData = Depends(get_current_user),
+    current_user: TokenData = Depends(require_permission("staff", "manage_employees")),
     temple_id: str = Depends(get_current_temple_id),
 ):
     return await StaffService.update_staff_status(
@@ -71,7 +68,7 @@ async def reset_password(
     staff_id: UUID,
     new_password: str, # Should be in a schema really, but keeping it simple for now
     db: AsyncSession = Depends(get_db),
-    current_user: TokenData = Depends(get_current_user),
+    current_user: TokenData = Depends(require_permission("staff", "manage_employees")),
     temple_id: str = Depends(get_current_temple_id),
 ):
     return await StaffService.reset_password(

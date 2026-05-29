@@ -204,6 +204,18 @@ class InventoryItemRequest(Base):
     status = Column(String, default="Request Completed")
     created_by = Column(String, default="Admin")
     created_at = Column(DateTime(timezone=True), default=utcnow)
+    
+    # Material Request fields
+    priority = Column(String, default="Medium")
+    purpose = Column(String, default="")
+    requested_by_user_id = Column(UUID(as_uuid=True), ForeignKey("users.id"), nullable=True)
+    approved_by_user_id = Column(UUID(as_uuid=True), ForeignKey("users.id"), nullable=True)
+    issued_by_user_id = Column(UUID(as_uuid=True), ForeignKey("users.id"), nullable=True)
+
+    # Relationships
+    requested_by_user = relationship("User", foreign_keys=[requested_by_user_id])
+    approved_by_user = relationship("User", foreign_keys=[approved_by_user_id])
+    issued_by_user = relationship("User", foreign_keys=[issued_by_user_id])
 
 
 

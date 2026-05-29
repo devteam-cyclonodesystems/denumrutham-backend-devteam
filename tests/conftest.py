@@ -12,17 +12,6 @@ from httpx import AsyncClient, ASGITransport
 from sqlalchemy.ext.asyncio import create_async_engine, AsyncSession, async_sessionmaker
 from sqlalchemy.pool import StaticPool
 
-from app.core.database import Base, get_db
-from app.core.security import get_password_hash
-from app.models.domain import Temple, User
-
-@pytest.fixture(scope="session")
-def event_loop():
-    loop = asyncio.new_event_loop()
-    yield loop
-    loop.close()
-
-
 TEST_DB_URL = "sqlite+aiosqlite:///:memory:"
 
 test_engine = create_async_engine(
@@ -33,10 +22,25 @@ test_engine = create_async_engine(
 )
 TestSessionLocal = async_sessionmaker(test_engine, class_=AsyncSession, expire_on_commit=False)
 
-# Override the database engine and sessionmaker globally for tests
+# Override database engine and sessionmaker globally BEFORE any other imports can capture the Postgres engine
+import app.core.database.database
+app.core.database.database.engine = test_engine
+app.core.database.database.AsyncSessionLocal = TestSessionLocal
+
 import app.core.database
 app.core.database.engine = test_engine
 app.core.database.AsyncSessionLocal = TestSessionLocal
+
+from app.core.database import Base, get_db
+from app.core.security import get_password_hash
+from app.models.domain import Temple, User
+
+@pytest.fixture(scope="session")
+def event_loop():
+    loop = asyncio.new_event_loop()
+    yield loop
+    loop.close()
+
 
 # Disable rate limiting for tests
 from app.core.limiter import limiter
@@ -86,6 +90,11 @@ async def seed_data(setup_database):
         session.add(temple)
         await session.commit()
 
+        # Seed global permissions and default roles for testing
+        from app.services.staff_service import StaffService
+        await StaffService.seed_global_permissions(session)
+        await StaffService.seed_default_temple_roles(session, TEMPLE_ID)
+
         admin = User(
             user_id=ADMIN_USER_ID,
             password_hash=get_password_hash(ADMIN_PASSWORD),
@@ -93,6 +102,22 @@ async def seed_data(setup_database):
             temple_id=TEMPLE_ID,
         )
         session.add(admin)
+        await session.flush()
+
+        from app.models.rbac import Role, UserRole
+        from sqlalchemy.future import select
+        role_res = await session.execute(
+            select(Role).filter(Role.temple_id == TEMPLE_ID, Role.name == "Manager")
+        )
+        manager_role = role_res.scalars().first()
+        if manager_role:
+            ur = UserRole(
+                user_id=admin.id,
+                role_id=manager_role.id,
+                temple_id=TEMPLE_ID
+            )
+            session.add(ur)
+        
         await session.commit()
 
 

@@ -825,7 +825,7 @@ class InventoryService:
     # --- Item Requests & Issue Sessions ---
     @staticmethod
     async def create_item_request(
-        db: AsyncSession, req_in: ItemRequestCreate, temple_id: str, created_by: str = "Admin"
+        db: AsyncSession, req_in: ItemRequestCreate, temple_id: str, created_by: str = "Admin", user_id: UUID = None
     ) -> InventoryItemRequest:
         """REFACTORED: Request is now BUSINESS INTENT ONLY. Stock NOT deducted yet."""
         tid = UUID(str(temple_id))
@@ -848,6 +848,17 @@ class InventoryService:
         seq = str(count_today + 1).zfill(2)
         req_code = f"KR{date_str}-{seq}"
 
+        items_list = []
+        for line in req_in.items_data:
+            items_list.append({
+                "itemId": line.get("itemId") or line.get("item_id"),
+                "qty": float(line.get("qty", 0.0)),
+                "approvedQty": 0.0,
+                "issuedQty": 0.0,
+                "remarks": line.get("remarks", ""),
+                "unit": line.get("unit", "piece")
+            })
+
         req = InventoryItemRequest(
             temple_id=tid,
             req_code=req_code,
@@ -856,10 +867,13 @@ class InventoryService:
             role=req_in.role,
             department=req_in.department,
             items_summary=req_in.items_summary,
-            items_data=req_in.items_data,
+            items_data=items_list,
             remarks=req_in.remarks,
             status="PENDING", # Initial status for layered evolution
             created_by=created_by,
+            priority=req_in.priority or "Medium",
+            purpose=req_in.purpose or "",
+            requested_by_user_id=user_id or req_in.requested_by_user_id,
         )
         db.add(req)
         await db.commit()
@@ -1148,12 +1162,246 @@ class InventoryService:
             request.remarks = request.remarks + " | " + return_log
         else:
             request.remarks = return_log
-           
+            
         request.status = "RETURNED"
-       
+        
         await db.commit()
         await db.refresh(request)
         return {"status": "success", "message": "Return logged successfully", "request_status": request.status}
+
+    @staticmethod
+    async def approve_item_request(
+        db: AsyncSession, request_id: UUID, approved_items: list, temple_id: str, user_id: UUID
+    ) -> InventoryItemRequest:
+        tid = UUID(str(temple_id))
+        result = await db.execute(
+            select(InventoryItemRequest).filter(
+                InventoryItemRequest.id == request_id,
+                InventoryItemRequest.temple_id == tid
+            )
+        )
+        req = result.scalars().first()
+        if not req:
+            from fastapi import HTTPException
+            raise HTTPException(status_code=404, detail="Request not found")
+        
+        # update approved qty
+        approved_map = {str(item.get("itemId") or item.get("item_id")): float(item.get("approvedQty", 0.0)) for item in approved_items}
+        
+        items_copy = []
+        for itm in (req.items_data or []):
+            new_itm = dict(itm)
+            iid = str(new_itm.get("itemId") or new_itm.get("item_id"))
+            if iid in approved_map:
+                new_itm["approvedQty"] = approved_map[iid]
+            else:
+                new_itm["approvedQty"] = float(new_itm.get("qty", 0.0)) # Default to full requested quantity if not specified
+            items_copy.append(new_itm)
+        
+        req.items_data = items_copy
+        from sqlalchemy.orm.attributes import flag_modified
+        flag_modified(req, "items_data")
+        req.status = "APPROVED"
+        req.approved_by_user_id = user_id
+        
+        from datetime import datetime, timedelta, timezone
+        ist = timezone(timedelta(hours=5, minutes=30))
+        timestamp_str = datetime.now(ist).strftime("%d %b %Y, %I:%M:%S %p")
+        log_str = f"[Approval: Approved at {timestamp_str}]"
+        req.remarks = (req.remarks + " | " + log_str) if req.remarks else log_str
+
+        # Add Audit log
+        from app.models.domain import AuditLog
+        audit = AuditLog(
+            temple_id=tid,
+            user_id=user_id,
+            action="MATERIAL_REQUEST_APPROVED",
+            action_type="UPDATE",
+            entity_id=str(req.id),
+            details=f"Material request {req.req_code} approved."
+        )
+        db.add(audit)
+
+        await db.commit()
+        await db.refresh(req)
+        return req
+
+    @staticmethod
+    async def reject_item_request(
+        db: AsyncSession, request_id: UUID, remarks: str, temple_id: str, user_id: UUID
+    ) -> InventoryItemRequest:
+        tid = UUID(str(temple_id))
+        result = await db.execute(
+            select(InventoryItemRequest).filter(
+                InventoryItemRequest.id == request_id,
+                InventoryItemRequest.temple_id == tid
+            )
+        )
+        req = result.scalars().first()
+        if not req:
+            from fastapi import HTTPException
+            raise HTTPException(status_code=404, detail="Request not found")
+        
+        req.status = "REJECTED"
+        req.approved_by_user_id = user_id
+        
+        from datetime import datetime, timedelta, timezone
+        ist = timezone(timedelta(hours=5, minutes=30))
+        timestamp_str = datetime.now(ist).strftime("%d %b %Y, %I:%M:%S %p")
+        log_str = f"[Approval: Rejected: {remarks} at {timestamp_str}]"
+        req.remarks = (req.remarks + " | " + log_str) if req.remarks else log_str
+
+        # Add Audit log
+        from app.models.domain import AuditLog
+        audit = AuditLog(
+            temple_id=tid,
+            user_id=user_id,
+            action="MATERIAL_REQUEST_REJECTED",
+            action_type="UPDATE",
+            entity_id=str(req.id),
+            details=f"Material request {req.req_code} rejected. Remarks: {remarks}"
+        )
+        db.add(audit)
+
+        await db.commit()
+        await db.refresh(req)
+        return req
+
+    @staticmethod
+    async def cancel_item_request(
+        db: AsyncSession, request_id: UUID, remarks: str, temple_id: str, user_id: UUID
+    ) -> InventoryItemRequest:
+        tid = UUID(str(temple_id))
+        result = await db.execute(
+            select(InventoryItemRequest).filter(
+                InventoryItemRequest.id == request_id,
+                InventoryItemRequest.temple_id == tid
+            )
+        )
+        req = result.scalars().first()
+        if not req:
+            from fastapi import HTTPException
+            raise HTTPException(status_code=404, detail="Request not found")
+        
+        req.status = "CANCELLED"
+        
+        from datetime import datetime, timedelta, timezone
+        ist = timezone(timedelta(hours=5, minutes=30))
+        timestamp_str = datetime.now(ist).strftime("%d %b %Y, %I:%M:%S %p")
+        log_str = f"[Cancellation: Cancelled: {remarks} at {timestamp_str}]"
+        req.remarks = (req.remarks + " | " + log_str) if req.remarks else log_str
+
+        # Add Audit log
+        from app.models.domain import AuditLog
+        audit = AuditLog(
+            temple_id=tid,
+            user_id=user_id,
+            action="MATERIAL_REQUEST_CANCELLED",
+            action_type="UPDATE",
+            entity_id=str(req.id),
+            details=f"Material request {req.req_code} cancelled. Remarks: {remarks}"
+        )
+        db.add(audit)
+
+        await db.commit()
+        await db.refresh(req)
+        return req
+
+    @staticmethod
+    async def issue_item_request_stock(
+        db: AsyncSession, request_id: UUID, issued_items: list, location_id: str, temple_id: str, user_id: UUID
+    ) -> InventoryItemRequest:
+        tid = UUID(str(temple_id))
+        result = await db.execute(
+            select(InventoryItemRequest).filter(
+                InventoryItemRequest.id == request_id,
+                InventoryItemRequest.temple_id == tid
+            )
+        )
+        req = result.scalars().first()
+        if not req:
+            from fastapi import HTTPException
+            raise HTTPException(status_code=404, detail="Request not found")
+        
+        # Verify status is APPROVED or PARTIALLY ISSUED
+        if req.status not in ["APPROVED", "PARTIALLY ISSUED"]:
+            from fastapi import HTTPException
+            raise HTTPException(status_code=400, detail=f"Cannot issue stock for a request in status {req.status}")
+            
+        # Create issue session record
+        session = InventoryIssueSession(
+            temple_id=tid,
+            request_id=request_id,
+            issued_by=user_id,
+            location_id=location_id,
+            status=InventoryIssueStatus.COMPLETED,
+            remarks=f"Stock issuance for request {req.req_code}"
+        )
+        db.add(session)
+        await db.flush()
+
+        # Update issued quantities and record movements
+        issued_map = {str(item.get("itemId") or item.get("item_id")): float(item.get("qty", 0.0)) for item in issued_items}
+        
+        items_copy = []
+        fully_issued = True
+        
+        for itm in (req.items_data or []):
+            new_itm = dict(itm)
+            iid_str = str(new_itm.get("itemId") or new_itm.get("item_id"))
+            approved = float(new_itm.get("approvedQty", 0.0))
+            current_issued = float(new_itm.get("issuedQty", 0.0))
+            
+            to_issue = issued_map.get(iid_str, 0.0)
+            
+            if to_issue > 0:
+                # Stock deduction check
+                await InventoryService.record_movement(
+                    db=db,
+                    temple_id=tid,
+                    item_id=UUID(iid_str),
+                    qty_change=-to_issue, # Negative to deduct
+                    movement_type=InventoryMovementType.ISSUE,
+                    performed_by=user_id,
+                    location_id=location_id,
+                    reference_type="REQUEST",
+                    reference_id=req.req_code,
+                    remarks=f"Issued via Session {session.id}"
+                )
+                current_issued += to_issue
+                new_itm["issuedQty"] = current_issued
+
+            if current_issued < approved:
+                fully_issued = False
+            items_copy.append(new_itm)
+
+        req.items_data = items_copy
+        from sqlalchemy.orm.attributes import flag_modified
+        flag_modified(req, "items_data")
+        req.status = "ISSUED" if fully_issued else "PARTIALLY ISSUED"
+        req.issued_by_user_id = user_id
+        
+        from datetime import datetime, timedelta, timezone
+        ist = timezone(timedelta(hours=5, minutes=30))
+        timestamp_str = datetime.now(ist).strftime("%d %b %Y, %I:%M:%S %p")
+        log_str = f"[Issue: Stock issued (Session: {session.id}) at {timestamp_str}]"
+        req.remarks = (req.remarks + " | " + log_str) if req.remarks else log_str
+
+        # Add Audit log
+        from app.models.domain import AuditLog
+        audit = AuditLog(
+            temple_id=tid,
+            user_id=user_id,
+            action="MATERIAL_REQUEST_ISSUED",
+            action_type="UPDATE",
+            entity_id=str(req.id),
+            details=f"Material request {req.req_code} stock issued. Status: {req.status}"
+        )
+        db.add(audit)
+
+        await db.commit()
+        await db.refresh(req)
+        return req
 
 def import_date():
     from datetime import datetime

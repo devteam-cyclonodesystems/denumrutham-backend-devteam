@@ -43,12 +43,30 @@ logger = setup_logging()
 @asynccontextmanager
 async def lifespan(app: FastAPI):
     """Startup / shutdown lifecycle."""
+    import os
+    build_commit = os.getenv("RAILWAY_GIT_COMMIT_SHA") or os.getenv("COMMIT_SHA") or "4cf6efdfb0032b49eb12818c1db2dfec94cb1fec"
+    logger.warning(
+        "ARCHANA HOTFIX BUILD ACTIVE",
+        extra={
+            "build_commit": build_commit,
+            "build_timestamp": "2026-05-29T18:25:44+05:30"
+        }
+    )
     logger.info("Starting TMS API v%s", settings.VERSION)
     
     # Phase 5: Runtime Schema Validation
     is_valid = await validate_on_startup()
     if not is_valid:
         logger.critical("APPLICATION STARTUP BLOCKED: Schema Integrity Failure.")
+        
+    # Seed global permissions catalog (Mandatory Change 1)
+    try:
+        from app.services.staff_service import StaffService
+        async with AsyncSessionLocal() as db:
+            await StaffService.seed_global_permissions(db)
+            logger.info("Global permissions catalog seeded successfully.")
+    except Exception as e:
+        logger.error("Failed to seed global permissions on startup: %s", str(e))
     
     # Phase 3: Notification Listeners
     register_notification_listeners()

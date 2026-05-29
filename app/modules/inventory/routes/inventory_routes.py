@@ -3,7 +3,7 @@ from fastapi import APIRouter, Depends
 from sqlalchemy.ext.asyncio import AsyncSession
 from typing import List, Optional
 from uuid import UUID
-from app.api.deps import get_db, get_current_user, get_current_temple_id
+from app.api.deps import get_db, get_current_user, get_current_temple_id, require_permission
 from app.schemas.domain import TokenData
 from app.schemas.inventory import (
     InventoryItemCreate, InventoryItemResponse,
@@ -164,12 +164,13 @@ async def cancel_invoice(
 async def create_item_request(
     req_in: ItemRequestCreate,
     db: AsyncSession = Depends(get_db),
-    current_user: TokenData = Depends(get_current_user),
+    current_user: TokenData = Depends(require_permission("inventory", "create_request")),
     temple_id: str = Depends(get_current_temple_id),
 ):
     return await InventoryService.create_item_request(
         db=db, req_in=req_in, temple_id=temple_id,
         created_by=current_user.username or "Admin",
+        user_id=UUID(current_user.sub) if current_user.sub else None
     )
 
 
@@ -178,10 +179,69 @@ async def list_item_requests(
     skip: int = 0,
     limit: int = 500,
     db: AsyncSession = Depends(get_db),
-    current_user: TokenData = Depends(get_current_user),
+    current_user: TokenData = Depends(require_permission("inventory", "view_request")),
     temple_id: str = Depends(get_current_temple_id),
 ):
     return await InventoryService.get_item_requests(db=db, temple_id=temple_id, skip=skip, limit=limit)
+
+
+@router.post("/item-requests/{request_id}/approve", response_model=ItemRequestResponse, tags=["inventory"])
+async def approve_item_request(
+    request_id: UUID,
+    approved_items: List[dict],
+    db: AsyncSession = Depends(get_db),
+    current_user: TokenData = Depends(require_permission("inventory", "approve_request")),
+    temple_id: str = Depends(get_current_temple_id),
+):
+    return await InventoryService.approve_item_request(
+        db=db, request_id=request_id, approved_items=approved_items,
+        temple_id=temple_id, user_id=UUID(current_user.sub)
+    )
+
+
+@router.post("/item-requests/{request_id}/reject", response_model=ItemRequestResponse, tags=["inventory"])
+async def reject_item_request(
+    request_id: UUID,
+    payload: dict,
+    db: AsyncSession = Depends(get_db),
+    current_user: TokenData = Depends(require_permission("inventory", "approve_request")),
+    temple_id: str = Depends(get_current_temple_id),
+):
+    return await InventoryService.reject_item_request(
+        db=db, request_id=request_id, remarks=payload.get("remarks", ""),
+        temple_id=temple_id, user_id=UUID(current_user.sub)
+    )
+
+
+@router.post("/item-requests/{request_id}/cancel", response_model=ItemRequestResponse, tags=["inventory"])
+async def cancel_item_request(
+    request_id: UUID,
+    payload: dict,
+    db: AsyncSession = Depends(get_db),
+    current_user: TokenData = Depends(require_permission("inventory", "cancel_request")),
+    temple_id: str = Depends(get_current_temple_id),
+):
+    return await InventoryService.cancel_item_request(
+        db=db, request_id=request_id, remarks=payload.get("remarks", ""),
+        temple_id=temple_id, user_id=UUID(current_user.sub)
+    )
+
+
+@router.post("/item-requests/{request_id}/issue", response_model=ItemRequestResponse, tags=["inventory"])
+async def issue_item_request(
+    request_id: UUID,
+    payload: dict,
+    db: AsyncSession = Depends(get_db),
+    current_user: TokenData = Depends(require_permission("inventory", "issue_stock")),
+    temple_id: str = Depends(get_current_temple_id),
+):
+    issued_items = payload.get("issued_items", [])
+    location_id = payload.get("location_id")
+    location_uuid = UUID(str(location_id)) if location_id else None
+    return await InventoryService.issue_item_request_stock(
+        db=db, request_id=request_id, issued_items=issued_items,
+        location_id=location_uuid, temple_id=temple_id, user_id=UUID(current_user.sub)
+    )
 
 
 # --- Enterprise Features ---

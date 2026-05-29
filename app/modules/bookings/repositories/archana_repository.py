@@ -331,13 +331,32 @@ class ArchanaRepository:
         
         queue.status = status
         if priest_id:
-            queue.priest_id = priest_id
+            import logging
+            logger = logging.getLogger("tms.repositories.archana")
+            logger.info(
+                "Legacy priest_id received and ignored in queue status update",
+                extra={
+                    "priest_id": str(priest_id),
+                    "queue_id": str(queue_id)
+                }
+            )
+        queue.priest_id = None
         
         if status == QueueStatus.IN_PROGRESS or status == QueueStatus.ACTIVE:
             queue.actual_start_time = datetime.now(timezone.utc)
         elif status == QueueStatus.COMPLETED:
             queue.completed_at = datetime.now(timezone.utc)
             
+        import logging
+        logger = logging.getLogger("tms.repositories.archana")
+        logger.error(
+            "PRE-COMMIT QUEUE STATE",
+            extra={
+                "queue_id": str(queue.id),
+                "priest_id": str(queue.priest_id),
+                "status": str(queue.status)
+            }
+        )
         await db.commit()
         await db.refresh(queue)
         return queue

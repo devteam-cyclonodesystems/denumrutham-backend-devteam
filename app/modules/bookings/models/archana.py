@@ -218,6 +218,9 @@ class ArchanaExecution(Base):
     execution_group_id = Column(UUID(as_uuid=True), ForeignKey("archana_execution_groups.id"), nullable=True, index=True)
     version_number = Column(Integer, default=1) # Optimistic locking
     
+    started_by_user_id = Column(UUID(as_uuid=True), ForeignKey("users.id", ondelete="SET NULL"), nullable=True)
+    completed_by_user_id = Column(UUID(as_uuid=True), ForeignKey("users.id", ondelete="SET NULL"), nullable=True)
+    
     group = relationship("ArchanaExecutionGroup", back_populates="executions")
     
     created_at = Column(DateTime(timezone=True), default=utcnow)
@@ -226,6 +229,8 @@ class ArchanaExecution(Base):
     item = relationship("ArchanaBookingItem", back_populates="execution")
     queue = relationship("RitualQueue", back_populates="executions")
     priest = relationship("Employee")
+    started_by = relationship("User", foreign_keys=[started_by_user_id])
+    completed_by = relationship("User", foreign_keys=[completed_by_user_id])
 
 
 class ArchanaBookingPayment(Base):

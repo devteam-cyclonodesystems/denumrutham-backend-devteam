@@ -610,6 +610,24 @@ class OnboardingService:
             )
             db.add(mapping)
 
+            # Seed default roles & permissions (Mandatory Change 1)
+            from app.services.staff_service import StaffService
+            await StaffService.seed_default_temple_roles(db, temple.id)
+            
+            # Map manager user to the default Manager role
+            from app.models.rbac import Role, UserRole
+            role_res = await db.execute(
+                select(Role).filter(Role.temple_id == temple.id, Role.name == "Manager")
+            )
+            manager_role = role_res.scalars().first()
+            if manager_role:
+                ur = UserRole(
+                    user_id=user.id,
+                    role_id=manager_role.id,
+                    temple_id=temple.id
+                )
+                db.add(ur)
+
             # 9. Mark staging records as APPROVED
             temple_req.status = "APPROVED"
             temple_req.reviewed_by = approver_id

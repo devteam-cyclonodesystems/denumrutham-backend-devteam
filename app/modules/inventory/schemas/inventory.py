@@ -110,8 +110,11 @@ class ItemRequestCreate(BaseModel):
     role: str = ""
     department: str = ""
     items_summary: str = ""
-    items_data: List[dict] = []  # [{itemId, qty}]
+    items_data: List[dict] = []  # [{itemId, qty, approvedQty, issuedQty, unit, remarks}]
     remarks: str = ""
+    priority: Optional[str] = "Medium"
+    purpose: Optional[str] = ""
+    requested_by_user_id: Optional[UUID4] = None
 
 
 class ItemRequestResponse(BaseModel):
@@ -129,6 +132,11 @@ class ItemRequestResponse(BaseModel):
     status: str
     created_by: str
     created_at: datetime
+    priority: Optional[str] = "Medium"
+    purpose: Optional[str] = ""
+    requested_by_user_id: Optional[UUID4] = None
+    approved_by_user_id: Optional[UUID4] = None
+    issued_by_user_id: Optional[UUID4] = None
 
 
 # ---------- Inventory Location ----------

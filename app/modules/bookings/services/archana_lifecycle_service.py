@@ -59,8 +59,8 @@ class ArchanaLifecycleService:
     async def start_ritual(
         db: AsyncSession, 
         execution_id: UUID, 
-        priest_id: UUID,
-        actor_id: UUID
+        actor_id: UUID,
+        priest_id: Optional[UUID] = None
     ) -> ArchanaExecution:
         result = await db.execute(
             select(ArchanaExecution).filter(ArchanaExecution.id == execution_id)
@@ -85,7 +85,17 @@ class ArchanaLifecycleService:
         
         # Optimistic Locking check
         execution.status = QueueStatus.IN_PROGRESS
-        execution.priest_id = priest_id
+        if priest_id:
+            logger.info(
+                "Legacy priest_id received and ignored",
+                extra={
+                    "priest_id": str(priest_id),
+                    "user_id": str(actor_id),
+                    "execution_id": str(execution_id)
+                }
+            )
+        execution.priest_id = None
+        execution.started_by_user_id = actor_id
         execution.start_time = now
         execution.expected_completion_time = now + timedelta(minutes=duration)
         execution.version_number = (execution.version_number or 1) + 1
@@ -109,7 +119,15 @@ class ArchanaLifecycleService:
             }
         )
         db.add(audit)
-        
+        logger.error(
+            "PRE-COMMIT EXECUTION STATE",
+            extra={
+                "execution_id": str(execution.id),
+                "priest_id": str(execution.priest_id),
+                "started_by_user_id": str(execution.started_by_user_id),
+                "status": str(execution.status)
+            }
+        )
         await db.commit()
         await db.refresh(execution)
         return execution
@@ -118,9 +136,9 @@ class ArchanaLifecycleService:
     async def start_grouped_rituals(
         db: AsyncSession,
         execution_ids: List[UUID],
-        priest_id: UUID,
         actor_id: UUID,
-        temple_id: UUID
+        temple_id: UUID,
+        priest_id: Optional[UUID] = None
     ) -> List[ArchanaExecution]:
         """
         Starts multiple rituals together (Internal grouping).
@@ -167,7 +185,17 @@ class ArchanaLifecycleService:
                 continue
                 
             ex.status = QueueStatus.IN_PROGRESS
-            ex.priest_id = priest_id
+            if priest_id:
+                logger.info(
+                    "Legacy priest_id received and ignored",
+                    extra={
+                        "priest_id": str(priest_id),
+                        "user_id": str(actor_id),
+                        "execution_id": str(ex.id)
+                    }
+                )
+            ex.priest_id = None
+            ex.started_by_user_id = actor_id
             ex.start_time = now
             ex.expected_completion_time = group.expected_completion_at
             ex.execution_group_id = group.id
@@ -194,7 +222,16 @@ class ArchanaLifecycleService:
             }
         )
         db.add(audit)
-        
+        for ex in started_rituals:
+            logger.error(
+                "PRE-COMMIT EXECUTION STATE",
+                extra={
+                    "execution_id": str(ex.id),
+                    "priest_id": str(ex.priest_id),
+                    "started_by_user_id": str(ex.started_by_user_id),
+                    "status": str(ex.status)
+                }
+            )
         await db.commit()
         return started_rituals
 
@@ -230,6 +267,8 @@ class ArchanaLifecycleService:
         execution.status = QueueStatus.COMPLETED
         execution.completed_at = now
         execution.auto_completed = is_auto
+        if not is_auto and actor_id:
+            execution.completed_by_user_id = actor_id
         execution.completion_mode = CompletionMode.AUTO if is_auto else CompletionMode.MANUAL
         execution.version_number = (execution.version_number or 1) + 1
 
@@ -282,7 +321,15 @@ class ArchanaLifecycleService:
             }
         )
         db.add(audit)
-        
+        logger.error(
+            "PRE-COMMIT EXECUTION STATE",
+            extra={
+                "execution_id": str(execution_id),
+                "priest_id": str(execution.priest_id),
+                "started_by_user_id": str(execution.started_by_user_id) if execution.started_by_user_id else None,
+                "status": str(execution.status)
+            }
+        )
         await db.commit()
         await db.refresh(execution)
         return execution

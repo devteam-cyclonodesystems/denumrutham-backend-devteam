@@ -56,11 +56,41 @@ class RBACService:
         db: AsyncSession, user_id: UUID, temple_id: UUID,
         resource_key: str, required_access: str = "read",
     ) -> bool:
+        from app.models.domain import User
+        user_res = await db.execute(select(User).filter(User.id == user_id))
+        user = user_res.scalar_one_or_none()
+        if user and user.role in ("SUPERADMIN", "SUPER_ADMIN"):
+            return True
+
         user_perms = await RBACService.get_user_permissions(db, user_id, temple_id)
+        
+        target_keys = []
+        if ":" in resource_key:
+            target_keys.append(resource_key)
+        else:
+            if required_access == "execute":
+                target_keys.extend([f"{resource_key}:start_ritual", f"{resource_key}:complete_ritual", f"{resource_key}:execute"])
+            elif required_access in ("read", "view"):
+                target_keys.extend([f"{resource_key}:view", f"{resource_key}:view_queue", f"{resource_key}:view_stock", f"{resource_key}:view_bookings"])
+            elif required_access == "create":
+                target_keys.extend([f"{resource_key}:create", f"{resource_key}:create_booking", f"{resource_key}:create_sale", f"{resource_key}:receive_donation"])
+            elif required_access == "edit":
+                target_keys.extend([f"{resource_key}:edit", f"{resource_key}:edit_booking", f"{resource_key}:adjust_stock", f"{resource_key}:modify_donation"])
+            elif required_access == "delete":
+                target_keys.extend([f"{resource_key}:delete", f"{resource_key}:cancel_booking"])
+            elif required_access == "approve":
+                target_keys.extend([f"{resource_key}:approve", f"{resource_key}:approve_requests", f"{resource_key}:approve_booking", f"{resource_key}:approve_corrections"])
+            else:
+                target_keys.append(f"{resource_key}:{required_access}")
+            
+            target_keys.append(f"{resource_key}:all")
+            target_keys.append(resource_key)
+
         for p in user_perms:
-            if p["resource_key"] == resource_key:
-                if required_access == "full" and p["access_level"] != "full":
-                    return False
+            r_key = p["resource_key"]
+            if r_key in ("all", "all:all"):
+                return True
+            if r_key in target_keys:
                 return True
         return False
 
@@ -118,12 +148,61 @@ class RbacService:
         await db.delete(role)
         await db.commit()
 
+    @staticmethod
+    async def clone_role(db: AsyncSession, temple_id: str, role_id: str, new_name: str, new_description: Optional[str] = None) -> Role:
+        # 1. Fetch source role
+        result = await db.execute(
+            select(Role).filter(Role.id == UUID(role_id), Role.temple_id == UUID(temple_id))
+        )
+        source_role = result.scalars().first()
+        if not source_role:
+            raise HTTPException(status_code=404, detail="Source role not found")
+
+        # 2. Check if new role name is already taken in this temple
+        existing_result = await db.execute(
+            select(Role).filter(Role.temple_id == UUID(temple_id), Role.name == new_name)
+        )
+        if existing_result.scalars().first():
+            raise HTTPException(status_code=400, detail=f"Role with name '{new_name}' already exists")
+
+        # 3. Create cloned role
+        cloned_role = Role(
+            temple_id=UUID(temple_id),
+            name=new_name,
+            description=new_description if new_description is not None else f"Cloned from {source_role.name}",
+            is_active=source_role.is_active
+        )
+        db.add(cloned_role)
+        await db.flush() # flush to get cloned_role.id
+
+        # 4. Fetch source role permissions
+        rp_result = await db.execute(
+            select(RolePermission).filter(RolePermission.role_id == source_role.id)
+        )
+        source_rps = rp_result.scalars().all()
+
+        # 5. Map permissions to cloned role
+        for rp in source_rps:
+            cloned_rp = RolePermission(
+                role_id=cloned_role.id,
+                permission_id=rp.permission_id,
+                access_level=rp.access_level
+            )
+            db.add(cloned_rp)
+
+        await db.commit()
+        await db.refresh(cloned_role)
+        return cloned_role
+
     # --- Permissions -----------------------------------------------------
 
     @staticmethod
     async def list_permissions(db: AsyncSession, temple_id: str) -> List[Permission]:
+        from sqlalchemy import or_
         result = await db.execute(
-            select(Permission).filter(Permission.temple_id == UUID(temple_id)).order_by(Permission.resource_key)
+            select(Permission).filter(
+                or_(Permission.temple_id == None, Permission.temple_id == UUID(temple_id))
+            ).order_by(Permission.resource_key)
         )
         return result.scalars().all()
 

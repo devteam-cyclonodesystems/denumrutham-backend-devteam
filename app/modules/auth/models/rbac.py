@@ -33,14 +33,14 @@ class Permission(Base):
     __tablename__ = "permissions"
 
     id = Column(UUID(as_uuid=True), primary_key=True, default=uuid.uuid4)
-    temple_id = Column(UUID(as_uuid=True), ForeignKey("temples.id"), nullable=False, index=True)
+    temple_id = Column(UUID(as_uuid=True), ForeignKey("temples.id"), nullable=True, index=True)
     resource_type = Column(String, nullable=False)   # 'module' | 'tab' | 'button' | 'feature'
     resource_key = Column(String, nullable=False)     # e.g. 'dashboard', 'archana', 'delete_booking'
     description = Column(Text, default="")
     created_at = Column(DateTime(timezone=True), default=utcnow)
 
     __table_args__ = (
-        UniqueConstraint("temple_id", "resource_type", "resource_key", name="uq_perm_tenant_resource"),
+        UniqueConstraint("resource_type", "resource_key", name="uq_perm_resource"),
     )
 
 

@@ -6,7 +6,7 @@ from sqlalchemy.ext.asyncio import AsyncSession
 from sqlalchemy import select
 from typing import List, Optional, Dict, Any
 from uuid import UUID
-from app.api.deps import get_db, get_current_user, get_current_temple_id
+from app.api.deps import get_db, get_current_user, get_current_temple_id, require_permission
 from app.schemas.domain import TokenData
 from app.schemas.archana import (
     EnterpriseArchanaBookingCreate, 
@@ -279,9 +279,9 @@ async def update_queue_status(
 @router.post("/executions/{execution_id}/start")
 async def start_execution(
     execution_id: UUID,
-    priest_id: UUID = Body(..., embed=True),
+    priest_id: Optional[UUID] = Body(None, embed=True),
     db: AsyncSession = Depends(get_db),
-    current_user: TokenData = Depends(get_current_user),
+    current_user: TokenData = Depends(require_permission("archana", "start_ritual")),
 ):
     import logging
     logger = logging.getLogger("tms.api.archana")
@@ -290,7 +290,7 @@ async def start_execution(
     from app.services.archana_lifecycle_service import ArchanaLifecycleService
     try:
         data = await ArchanaLifecycleService.start_ritual(
-            db, execution_id, priest_id, UUID(current_user.sub)
+            db, execution_id, UUID(current_user.sub), priest_id
         )
         return api_response(data=data, message="Ritual started.")
     except Exception as e:
@@ -300,9 +300,9 @@ async def start_execution(
 @router.post("/executions/start-selected")
 async def start_selected_executions(
     execution_ids: List[UUID] = Body(..., embed=True),
-    priest_id: UUID = Body(..., embed=True),
+    priest_id: Optional[UUID] = Body(None, embed=True),
     db: AsyncSession = Depends(get_db),
-    current_user: TokenData = Depends(get_current_user),
+    current_user: TokenData = Depends(require_permission("archana", "start_ritual")),
     temple_id: str = Depends(get_current_temple_id),
 ):
     import logging
@@ -312,7 +312,7 @@ async def start_selected_executions(
     from app.services.archana_lifecycle_service import ArchanaLifecycleService
     try:
         data = await ArchanaLifecycleService.start_grouped_rituals(
-            db, execution_ids, priest_id, UUID(current_user.sub), UUID(temple_id)
+            db, execution_ids, UUID(current_user.sub), UUID(temple_id), priest_id
         )
         return api_response(data=data, message=f"{len(data)} rituals started together.")
     except Exception as e:
@@ -323,7 +323,7 @@ async def start_selected_executions(
 async def complete_execution(
     execution_id: UUID,
     db: AsyncSession = Depends(get_db),
-    current_user: TokenData = Depends(get_current_user),
+    current_user: TokenData = Depends(require_permission("archana", "complete_ritual")),
 ):
     import logging
     logger = logging.getLogger("tms.api.archana")

@@ -51,6 +51,16 @@ class StaffService:
         )
         db.add(mapping)
 
+        # Assign Role (if role_id is provided)
+        if hasattr(staff_in, 'role_id') and staff_in.role_id:
+            from app.models.rbac import UserRole
+            ur = UserRole(
+                user_id=user.id,
+                role_id=staff_in.role_id,
+                temple_id=temple_id
+            )
+            db.add(ur)
+
         # Audit log
         audit = AuditLog(
             temple_id=temple_id,
@@ -170,3 +180,192 @@ class StaffService:
         
         await db.commit()
         return {"status": "success", "message": "Password updated"}
+
+    @staticmethod
+    async def seed_global_permissions(db: AsyncSession):
+        from app.models.rbac import Permission
+        
+        global_perms = [
+            # Archana Module
+            ("feature", "archana:view_queue", "View Ritual Queue"),
+            ("feature", "archana:create_booking", "Create Archana Booking"),
+            ("feature", "archana:edit_booking", "Edit Archana Booking"),
+            ("feature", "archana:start_ritual", "Start Ritual Execution"),
+            ("feature", "archana:complete_ritual", "Complete Ritual Execution"),
+            ("feature", "archana:issue_refund", "Approve Archana Refund (Sensitive)"),
+            ("feature", "archana:manage_services", "Manage Archana Catalog Services"),
+            ("feature", "archana:daily_closing", "Perform Archana Daily closing (Sensitive)"),
+            ("feature", "archana:manage_deities", "Manage Deities Master List"),
+
+            # Inventory Module
+            ("feature", "inventory:view_stock", "View Kalavara Stock List"),
+            ("feature", "inventory:request_materials", "Request Materials for Rituals"),
+            ("feature", "inventory:approve_requests", "Approve Material Requests (Sensitive)"),
+            ("feature", "inventory:issue_stock", "Issue Stock to Department (Sensitive)"),
+            ("feature", "inventory:receive_stock", "Receive New Procurement Stock"),
+            ("feature", "inventory:create_po", "Create Purchase Orders (Sensitive)"),
+            ("feature", "inventory:manage_suppliers", "Manage Suppliers Directory"),
+            ("feature", "inventory:adjust_stock", "Adjust Inventory Stock Levels (Sensitive)"),
+            ("feature", "inventory:view_request_history", "View Material Requests History"),
+            ("feature", "inventory:view_purchase_history", "View Procurement Invoices History"),
+            ("feature", "inventory:create_request", "Create Material Request"),
+            ("feature", "inventory:view_request", "View Material Requests"),
+            ("feature", "inventory:approve_request", "Approve / Reject Material Requests"),
+            ("feature", "inventory:cancel_request", "Cancel Material Request"),
+
+            # Temple Store
+            ("feature", "store:create_sale", "Create Store Sale / POS Checkout"),
+            ("feature", "store:issue_refund", "Issue Store Sale Refund (Sensitive)"),
+            ("feature", "store:manage_products", "Manage Store Products Catalog"),
+            ("feature", "store:manage_categories", "Manage Store Product Categories"),
+            ("feature", "store:adjust_stock", "Adjust Store Inventory Stock (Sensitive)"),
+            ("feature", "store:manage_pricing", "Configure Store Product Pricing"),
+
+            # Hall Booking
+            ("feature", "hallbooking:view_bookings", "View Hall Bookings"),
+            ("feature", "hallbooking:create_booking", "Create Hall Booking"),
+            ("feature", "hallbooking:edit_booking", "Edit Hall Booking Details"),
+            ("feature", "hallbooking:cancel_booking", "Cancel Hall Booking"),
+            ("feature", "hallbooking:approve_booking", "Approve Hall Booking Request (Sensitive)"),
+
+            # Donations
+            ("feature", "donations:receive_donation", "Receive Devotee Donation"),
+            ("feature", "donations:issue_receipt", "Issue Donation Receipt"),
+            ("feature", "donations:modify_donation", "Modify Donation Record"),
+            ("feature", "donations:approve_corrections", "Approve Donation Corrections (Sensitive)"),
+
+            # Finance
+            ("feature", "finance:view_reports", "View Financial Ledger Reports"),
+            ("feature", "finance:daily_closing", "Perform Daily closing (Sensitive)"),
+            ("feature", "finance:approve_expenses", "Approve Operational Expenses (Sensitive)"),
+            ("feature", "finance:modify_records", "Modify Financial Records (Sensitive)"),
+
+            # Generic Modules
+            ("feature", "dashboard:view", "View Manager Dashboard"),
+            ("feature", "nss:view", "View NSS Karayogam Member List"),
+            ("feature", "nss:manage", "Manage NSS Karayogam Operations"),
+            ("feature", "hr_payroll:view", "View Employee Directory & Attendance"),
+            ("feature", "hr_payroll:manage", "Manage Payroll & Leaves"),
+            ("feature", "reports:view", "View System Analytics Reports"),
+            ("feature", "governance:view", "View Audits and Approvals Dashboard"),
+            ("feature", "governance:manage", "Configure Workflows and Rules"),
+            ("feature", "settings:view", "View Temple Profile Settings"),
+            ("feature", "settings:manage", "Configure Temple Rules & RBAC Permissions"),
+            ("feature", "staff:manage_roles", "Manage Staff Roles & Permissions"),
+            ("feature", "staff:manage_employees", "Manage Staff Accounts"),
+        ]
+
+        for r_type, r_key, desc in global_perms:
+            existing = await db.execute(
+                select(Permission).filter(Permission.resource_key == r_key)
+            )
+            perm = existing.scalar_one_or_none()
+            if not perm:
+                perm = Permission(
+                    temple_id=None,
+                    resource_type=r_type,
+                    resource_key=r_key,
+                    description=desc
+                )
+                db.add(perm)
+        
+        await db.commit()
+
+    @staticmethod
+    async def seed_default_temple_roles(db: AsyncSession, temple_id: UUID):
+        from app.models.rbac import Role, Permission, RolePermission
+        
+        templates = {
+            "Priest": [
+                "dashboard:view",
+                "archana:view_queue",
+                "archana:start_ritual",
+                "archana:complete_ritual",
+                "inventory:view_stock",
+                "inventory:request_materials",
+                "inventory:view_request_history",
+                "inventory:create_request",
+                "inventory:view_request"
+            ],
+            "Counter Staff": [
+                "dashboard:view",
+                "archana:view_queue",
+                "archana:create_booking",
+                "archana:edit_booking",
+                "donations:receive_donation",
+                "donations:issue_receipt"
+            ],
+            "Kalavara Staff": [
+                "archana:view_queue",
+                "inventory:view_stock",
+                "inventory:approve_requests",
+                "inventory:issue_stock",
+                "inventory:receive_stock",
+                "inventory:adjust_stock",
+                "inventory:manage_suppliers",
+                "inventory:create_po",
+                "inventory:view_request",
+                "inventory:approve_request",
+                "inventory:cancel_request"
+            ],
+            "Store Staff": [
+                "store:create_sale",
+                "store:manage_products",
+                "store:manage_categories"
+            ],
+            "Accountant": [
+                "dashboard:view",
+                "finance:view_reports",
+                "donations:receive_donation",
+                "donations:issue_receipt",
+                "reports:view"
+            ],
+            "Hall Booking Staff": [
+                "dashboard:view",
+                "hallbooking:view_bookings",
+                "hallbooking:create_booking",
+                "hallbooking:edit_booking",
+                "hallbooking:cancel_booking"
+            ],
+            "Manager": [
+                # Manager has all permissions
+            ]
+        }
+
+        perms_result = await db.execute(select(Permission))
+        perms_map = {p.resource_key: p for p in perms_result.scalars().all()}
+
+        for role_name, allowed_keys in templates.items():
+            role_result = await db.execute(
+                select(Role).filter(Role.temple_id == temple_id, Role.name == role_name)
+            )
+            role = role_result.scalars().first()
+            if not role:
+                role = Role(
+                    temple_id=temple_id,
+                    name=role_name,
+                    description=f"Default template for {role_name}"
+                )
+                db.add(role)
+                await db.flush()
+            
+            keys_to_assign = allowed_keys if role_name != "Manager" else list(perms_map.keys())
+            
+            for key in keys_to_assign:
+                perm = perms_map.get(key)
+                if perm:
+                    mapping_result = await db.execute(
+                        select(RolePermission).filter(
+                            RolePermission.role_id == role.id,
+                            RolePermission.permission_id == perm.id
+                        )
+                    )
+                    if not mapping_result.scalars().first():
+                        rp = RolePermission(
+                            role_id=role.id,
+                            permission_id=perm.id,
+                            access_level="full"
+                        )
+                        db.add(rp)
+        
+        await db.commit()
