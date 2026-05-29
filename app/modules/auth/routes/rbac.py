@@ -1,13 +1,13 @@
 """
 RBAC API Endpoints
 Roles, Permissions, Role-Permission mappings, User-Role assignments.
-All endpoints require ADMIN role.
+All endpoints require TEMPLE_MANAGER, ADMIN, or SUPERADMIN role.
 """
 from typing import List
 from fastapi import APIRouter, Depends
 from sqlalchemy.ext.asyncio import AsyncSession
 
-from app.api.deps import get_db, get_current_active_admin, get_current_user
+from app.api.deps import get_db, get_current_temple_manager, get_current_user
 from app.schemas.domain import TokenData
 from app.schemas.rbac import (
     RoleCreate, RoleUpdate, RoleResponse, RoleClone,
@@ -25,7 +25,7 @@ router = APIRouter()
 @router.get("/roles", response_model=List[RoleResponse])
 async def list_roles(
     db: AsyncSession = Depends(get_db),
-    current_user: TokenData = Depends(get_current_active_admin),
+    current_user: TokenData = Depends(get_current_temple_manager),
 ):
     return await RbacService.list_roles(db, current_user.temple_id)
 
@@ -34,7 +34,7 @@ async def list_roles(
 async def create_role(
     role_in: RoleCreate,
     db: AsyncSession = Depends(get_db),
-    current_user: TokenData = Depends(get_current_active_admin),
+    current_user: TokenData = Depends(get_current_temple_manager),
 ):
     return await RbacService.create_role(db, current_user.temple_id, role_in)
 
@@ -44,7 +44,7 @@ async def update_role(
     role_id: str,
     role_in: RoleUpdate,
     db: AsyncSession = Depends(get_db),
-    current_user: TokenData = Depends(get_current_active_admin),
+    current_user: TokenData = Depends(get_current_temple_manager),
 ):
     return await RbacService.update_role(db, current_user.temple_id, role_id, role_in)
 
@@ -53,7 +53,7 @@ async def update_role(
 async def delete_role(
     role_id: str,
     db: AsyncSession = Depends(get_db),
-    current_user: TokenData = Depends(get_current_active_admin),
+    current_user: TokenData = Depends(get_current_temple_manager),
 ):
     await RbacService.delete_role(db, current_user.temple_id, role_id)
 
@@ -63,7 +63,7 @@ async def clone_role(
     role_id: str,
     payload: RoleClone,
     db: AsyncSession = Depends(get_db),
-    current_user: TokenData = Depends(get_current_active_admin),
+    current_user: TokenData = Depends(get_current_temple_manager),
 ):
     return await RbacService.clone_role(
         db, current_user.temple_id, role_id, payload.name, payload.description
@@ -75,7 +75,7 @@ async def clone_role(
 @router.get("/permissions", response_model=List[PermissionResponse])
 async def list_permissions(
     db: AsyncSession = Depends(get_db),
-    current_user: TokenData = Depends(get_current_active_admin),
+    current_user: TokenData = Depends(get_current_temple_manager),
 ):
     return await RbacService.list_permissions(db, current_user.temple_id)
 
@@ -84,7 +84,7 @@ async def list_permissions(
 async def create_permission(
     perm_in: PermissionCreate,
     db: AsyncSession = Depends(get_db),
-    current_user: TokenData = Depends(get_current_active_admin),
+    current_user: TokenData = Depends(get_current_temple_manager),
 ):
     return await RbacService.create_permission(db, current_user.temple_id, perm_in)
 
@@ -95,7 +95,7 @@ async def create_permission(
 async def get_role_permissions(
     role_id: str,
     db: AsyncSession = Depends(get_db),
-    current_user: TokenData = Depends(get_current_active_admin),
+    current_user: TokenData = Depends(get_current_temple_manager),
 ):
     role, entries = await RbacService.get_role_permissions(db, current_user.temple_id, role_id)
     return RolePermissionsResponse(role_id=role.id, role_name=role.name, permissions=entries)
@@ -106,7 +106,7 @@ async def assign_permissions_to_role(
     role_id: str,
     assignments: List[RolePermissionCreate],
     db: AsyncSession = Depends(get_db),
-    current_user: TokenData = Depends(get_current_active_admin),
+    current_user: TokenData = Depends(get_current_temple_manager),
 ):
     return await RbacService.assign_permissions_to_role(db, current_user.temple_id, role_id, assignments)
 
@@ -116,7 +116,7 @@ async def assign_permissions_to_role(
 @router.get("/user-roles", response_model=List[UserRoleResponse])
 async def list_user_roles(
     db: AsyncSession = Depends(get_db),
-    current_user: TokenData = Depends(get_current_active_admin),
+    current_user: TokenData = Depends(get_current_temple_manager),
 ):
     return await RbacService.list_user_roles(db, current_user.temple_id)
 
@@ -125,7 +125,7 @@ async def list_user_roles(
 async def assign_user_role(
     assignment: UserRoleCreate,
     db: AsyncSession = Depends(get_db),
-    current_user: TokenData = Depends(get_current_active_admin),
+    current_user: TokenData = Depends(get_current_temple_manager),
 ):
     return await RbacService.assign_user_role(db, current_user.temple_id, assignment)
 
@@ -134,7 +134,7 @@ async def assign_user_role(
 async def remove_user_role(
     user_role_id: str,
     db: AsyncSession = Depends(get_db),
-    current_user: TokenData = Depends(get_current_active_admin),
+    current_user: TokenData = Depends(get_current_temple_manager),
 ):
     await RbacService.remove_user_role(db, current_user.temple_id, user_role_id)
 
