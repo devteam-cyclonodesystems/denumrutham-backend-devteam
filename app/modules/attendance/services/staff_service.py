@@ -187,73 +187,73 @@ class StaffService:
         
         global_perms = [
             # Archana Module
-            ("feature", "archana:view_queue", "View Ritual Queue"),
-            ("feature", "archana:create_booking", "Create Archana Booking"),
-            ("feature", "archana:edit_booking", "Edit Archana Booking"),
-            ("feature", "archana:start_ritual", "Start Ritual Execution"),
-            ("feature", "archana:complete_ritual", "Complete Ritual Execution"),
-            ("feature", "archana:issue_refund", "Approve Archana Refund (Sensitive)"),
-            ("feature", "archana:manage_services", "Manage Archana Catalog Services"),
-            ("feature", "archana:daily_closing", "Perform Archana Daily closing (Sensitive)"),
-            ("feature", "archana:manage_deities", "Manage Deities Master List"),
+            ("tab", "archana:view_queue", "View Ritual Queue"),
+            ("button", "archana:create_booking", "Create Archana Booking"),
+            ("button", "archana:edit_booking", "Edit Archana Booking"),
+            ("button", "archana:start_ritual", "Start Ritual Execution"),
+            ("button", "archana:complete_ritual", "Complete Ritual Execution"),
+            ("button", "archana:issue_refund", "Approve Archana Refund (Sensitive)"),
+            ("tab", "archana:manage_services", "Manage Archana Catalog Services"),
+            ("button", "archana:daily_closing", "Perform Archana Daily closing (Sensitive)"),
+            ("tab", "archana:manage_deities", "Manage Deities Master List"),
 
             # Inventory Module
-            ("feature", "inventory:view_stock", "View Kalavara Stock List"),
-            ("feature", "inventory:request_materials", "Request Materials for Rituals"),
-            ("feature", "inventory:approve_requests", "Approve Material Requests (Sensitive)"),
-            ("feature", "inventory:issue_stock", "Issue Stock to Department (Sensitive)"),
-            ("feature", "inventory:receive_stock", "Receive New Procurement Stock"),
-            ("feature", "inventory:create_po", "Create Purchase Orders (Sensitive)"),
-            ("feature", "inventory:manage_suppliers", "Manage Suppliers Directory"),
-            ("feature", "inventory:adjust_stock", "Adjust Inventory Stock Levels (Sensitive)"),
-            ("feature", "inventory:view_request_history", "View Material Requests History"),
-            ("feature", "inventory:view_purchase_history", "View Procurement Invoices History"),
-            ("feature", "inventory:create_request", "Create Material Request"),
-            ("feature", "inventory:view_request", "View Material Requests"),
-            ("feature", "inventory:approve_request", "Approve / Reject Material Requests"),
-            ("feature", "inventory:cancel_request", "Cancel Material Request"),
-            ("feature", "inventory:return_items", "Return Unused Inventory Items"),
+            ("tab", "inventory:view_stock", "View Kalavara Stock List"),
+            ("button", "inventory:request_materials", "Request Materials for Rituals"),
+            ("button", "inventory:approve_requests", "Approve Material Requests (Sensitive)"),
+            ("button", "inventory:issue_stock", "Issue Stock to Department (Sensitive)"),
+            ("button", "inventory:receive_stock", "Receive New Procurement Stock"),
+            ("button", "inventory:create_po", "Create Purchase Orders (Sensitive)"),
+            ("tab", "inventory:manage_suppliers", "Manage Suppliers Directory"),
+            ("button", "inventory:adjust_stock", "Adjust Inventory Stock Levels (Sensitive)"),
+            ("tab", "inventory:view_request_history", "View Material Requests History"),
+            ("tab", "inventory:view_purchase_history", "View Procurement Invoices History"),
+            ("button", "inventory:create_request", "Create Material Request"),
+            ("tab", "inventory:view_request", "View Material Requests"),
+            ("button", "inventory:approve_request", "Approve / Reject Material Requests"),
+            ("button", "inventory:cancel_request", "Cancel Material Request"),
+            ("button", "inventory:return_items", "Return Unused Inventory Items"),
 
             # Temple Store
-            ("feature", "store:create_sale", "Create Store Sale / POS Checkout"),
-            ("feature", "store:issue_refund", "Issue Store Sale Refund (Sensitive)"),
-            ("feature", "store:manage_products", "Manage Store Products Catalog"),
-            ("feature", "store:manage_categories", "Manage Store Product Categories"),
-            ("feature", "store:adjust_stock", "Adjust Store Inventory Stock (Sensitive)"),
-            ("feature", "store:manage_pricing", "Configure Store Product Pricing"),
+            ("button", "store:create_sale", "Create Store Sale / POS Checkout"),
+            ("button", "store:issue_refund", "Issue Store Sale Refund (Sensitive)"),
+            ("tab", "store:manage_products", "Manage Store Products Catalog"),
+            ("tab", "store:manage_categories", "Manage Store Product Categories"),
+            ("button", "store:adjust_stock", "Adjust Store Inventory Stock (Sensitive)"),
+            ("button", "store:manage_pricing", "Configure Store Product Pricing"),
 
             # Hall Booking
-            ("feature", "hallbooking:view_bookings", "View Hall Bookings"),
-            ("feature", "hallbooking:create_booking", "Create Hall Booking"),
-            ("feature", "hallbooking:edit_booking", "Edit Hall Booking Details"),
-            ("feature", "hallbooking:cancel_booking", "Cancel Hall Booking"),
-            ("feature", "hallbooking:approve_booking", "Approve Hall Booking Request (Sensitive)"),
+            ("tab", "hallbooking:view_bookings", "View Hall Bookings"),
+            ("button", "hallbooking:create_booking", "Create Hall Booking"),
+            ("button", "hallbooking:edit_booking", "Edit Hall Booking Details"),
+            ("button", "hallbooking:cancel_booking", "Cancel Hall Booking"),
+            ("button", "hallbooking:approve_booking", "Approve Hall Booking Request (Sensitive)"),
 
             # Donations
-            ("feature", "donations:receive_donation", "Receive Devotee Donation"),
-            ("feature", "donations:issue_receipt", "Issue Donation Receipt"),
-            ("feature", "donations:modify_donation", "Modify Donation Record"),
-            ("feature", "donations:approve_corrections", "Approve Donation Corrections (Sensitive)"),
+            ("button", "donations:receive_donation", "Receive Devotee Donation"),
+            ("button", "donations:issue_receipt", "Issue Donation Receipt"),
+            ("button", "donations:modify_donation", "Modify Donation Record"),
+            ("button", "donations:approve_corrections", "Approve Donation Corrections (Sensitive)"),
 
             # Finance
-            ("feature", "finance:view_reports", "View Financial Ledger Reports"),
-            ("feature", "finance:daily_closing", "Perform Daily closing (Sensitive)"),
-            ("feature", "finance:approve_expenses", "Approve Operational Expenses (Sensitive)"),
-            ("feature", "finance:modify_records", "Modify Financial Records (Sensitive)"),
+            ("report", "finance:view_reports", "View Financial Ledger Reports"),
+            ("button", "finance:daily_closing", "Perform Daily closing (Sensitive)"),
+            ("button", "finance:approve_expenses", "Approve Operational Expenses (Sensitive)"),
+            ("button", "finance:modify_records", "Modify Financial Records (Sensitive)"),
 
             # Generic Modules
-            ("feature", "dashboard:view", "View Manager Dashboard"),
-            ("feature", "nss:view", "View NSS Karayogam Member List"),
-            ("feature", "nss:manage", "Manage NSS Karayogam Operations"),
-            ("feature", "hr_payroll:view", "View Employee Directory & Attendance"),
-            ("feature", "hr_payroll:manage", "Manage Payroll & Leaves"),
-            ("feature", "reports:view", "View System Analytics Reports"),
-            ("feature", "governance:view", "View Audits and Approvals Dashboard"),
-            ("feature", "governance:manage", "Configure Workflows and Rules"),
-            ("feature", "settings:view", "View Temple Profile Settings"),
-            ("feature", "settings:manage", "Configure Temple Rules & RBAC Permissions"),
-            ("feature", "staff:manage_roles", "Manage Staff Roles & Permissions"),
-            ("feature", "staff:manage_employees", "Manage Staff Accounts"),
+            ("tab", "dashboard:view", "View Manager Dashboard"),
+            ("tab", "nss:view", "View NSS Karayogam Member List"),
+            ("tab", "nss:manage", "Manage NSS Karayogam Operations"),
+            ("tab", "hr_payroll:view", "View Employee Directory & Attendance"),
+            ("tab", "hr_payroll:manage", "Manage Payroll & Leaves"),
+            ("report", "reports:view", "View System Analytics Reports"),
+            ("tab", "governance:view", "View Audits and Approvals Dashboard"),
+            ("tab", "governance:manage", "Configure Workflows and Rules"),
+            ("tab", "settings:view", "View Temple Profile Settings"),
+            ("tab", "settings:manage", "Configure Temple Rules & RBAC Permissions"),
+            ("tab", "staff:manage_roles", "Manage Staff Roles & Permissions"),
+            ("tab", "staff:manage_employees", "Manage Staff Accounts"),
         ]
 
         for r_type, r_key, desc in global_perms:
@@ -269,6 +269,11 @@ class StaffService:
                     description=desc
                 )
                 db.add(perm)
+            else:
+                if perm.resource_type != r_type or perm.description != desc:
+                    perm.resource_type = r_type
+                    perm.description = desc
+                    db.add(perm)
         
         await db.commit()
 
