@@ -4,6 +4,7 @@ from datetime import datetime, timezone
 from sqlalchemy.ext.asyncio import AsyncSession
 from sqlalchemy.future import select
 from sqlalchemy import func, or_
+from sqlalchemy.orm.attributes import flag_modified
 from fastapi import HTTPException
 
 from app.models.domain import User, UserTemple, AuditLog, Temple
@@ -131,6 +132,7 @@ class StaffService:
             "notes": f"Status updated from {old_status} to {status}."
         })
         user.audit_trail = current_audit
+        flag_modified(user, "audit_trail")
 
         # Audit log
         audit = AuditLog(
@@ -270,6 +272,7 @@ class StaffService:
         # If any updates were made, commit and log
         if updates_made:
             user.audit_trail = current_audit
+            flag_modified(user, "audit_trail")
             # Create a system audit log entry
             audit = AuditLog(
                 temple_id=temple_id,
@@ -335,6 +338,7 @@ class StaffService:
             "notes": "Staff member was released/terminated from the directory."
         })
         user.audit_trail = current_audit
+        flag_modified(user, "audit_trail")
 
         # Audit log
         audit = AuditLog(
