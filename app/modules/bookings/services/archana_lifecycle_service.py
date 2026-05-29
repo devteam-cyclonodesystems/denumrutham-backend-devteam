@@ -88,7 +88,7 @@ class ArchanaLifecycleService:
         execution.priest_id = priest_id
         execution.start_time = now
         execution.expected_completion_time = now + timedelta(minutes=duration)
-        execution.version_number += 1
+        execution.version_number = (execution.version_number or 1) + 1
         
         # Update aggregate queue status if needed
         await db.execute(
@@ -171,7 +171,7 @@ class ArchanaLifecycleService:
             ex.start_time = now
             ex.expected_completion_time = group.expected_completion_at
             ex.execution_group_id = group.id
-            ex.version_number += 1
+            ex.version_number = (ex.version_number or 1) + 1
             started_rituals.append(ex)
             
             # Sync Queue status
@@ -231,7 +231,7 @@ class ArchanaLifecycleService:
         execution.completed_at = now
         execution.auto_completed = is_auto
         execution.completion_mode = CompletionMode.AUTO if is_auto else CompletionMode.MANUAL
-        execution.version_number += 1
+        execution.version_number = (execution.version_number or 1) + 1
 
         # ── Group Reconciliation ──
         if execution.execution_group_id:
