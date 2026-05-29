@@ -212,6 +212,7 @@ class StaffService:
             ("feature", "inventory:view_request", "View Material Requests"),
             ("feature", "inventory:approve_request", "Approve / Reject Material Requests"),
             ("feature", "inventory:cancel_request", "Cancel Material Request"),
+            ("feature", "inventory:return_items", "Return Unused Inventory Items"),
 
             # Temple Store
             ("feature", "store:create_sale", "Create Store Sale / POS Checkout"),
@@ -276,7 +277,7 @@ class StaffService:
         from app.models.rbac import Role, Permission, RolePermission
         
         templates = {
-            "Priest": [
+            "Pujari": [
                 "dashboard:view",
                 "archana:view_queue",
                 "archana:start_ritual",
@@ -285,7 +286,8 @@ class StaffService:
                 "inventory:request_materials",
                 "inventory:view_request_history",
                 "inventory:create_request",
-                "inventory:view_request"
+                "inventory:view_request",
+                "inventory:return_items"
             ],
             "Counter Staff": [
                 "dashboard:view",
@@ -306,7 +308,8 @@ class StaffService:
                 "inventory:create_po",
                 "inventory:view_request",
                 "inventory:approve_request",
-                "inventory:cancel_request"
+                "inventory:cancel_request",
+                "inventory:return_items"
             ],
             "Store Staff": [
                 "store:create_sale",

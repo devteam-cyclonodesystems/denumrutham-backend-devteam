@@ -27,7 +27,7 @@ async def test_material_request_workflow(client: AsyncClient, auth_headers):
         json={
             "date": "2026-05-29",
             "requester": "Head Priest",
-            "role": "Priest",
+            "role": "Pujari",
             "department": "Pooja Department",
             "items_summary": "1 item requested",
             "items_data": [{"itemId": item_id, "qty": 10}],

@@ -56,7 +56,7 @@ async def test_rbac_archana_execution_workflow(client: AsyncClient, auth_headers
     async with AsyncSessionLocal() as session:
         # Create Priest User
         priest_user = await create_test_user_with_role(
-            session, "test_priest@temple.com", "Priest@123", "Priest", temple_id
+            session, "test_priest@temple.com", "Priest@123", "Pujari", temple_id
         )
         # Create Counter Staff User
         counter_user = await create_test_user_with_role(

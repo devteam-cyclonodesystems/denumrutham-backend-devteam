@@ -331,7 +331,7 @@ async def record_item_return(
     request_id: UUID,
     payload: dict,
     db: AsyncSession = Depends(get_db),
-    current_user: TokenData = Depends(get_current_user),
+    current_user: TokenData = Depends(require_permission("inventory", "return_items")),
     temple_id: str = Depends(get_current_temple_id),
 ):
     return await InventoryService.record_return(

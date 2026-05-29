@@ -259,6 +259,12 @@ class RbacService:
         if not result.scalars().first():
             raise HTTPException(status_code=404, detail="Role not found")
 
+        # Delete all existing permission assignments for this role first
+        from sqlalchemy import delete
+        await db.execute(
+            delete(RolePermission).where(RolePermission.role_id == UUID(role_id))
+        )
+
         created = []
         for a in assignments:
             rp = RolePermission(
