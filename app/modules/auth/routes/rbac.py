@@ -141,7 +141,7 @@ async def remove_user_role(
 
 # ─── Current User Permissions (used by frontend) ──────
 
-@router.get("/my-permissions/", response_model=List[PermissionEntry])
+@router.get("/my-permissions", response_model=List[PermissionEntry])
 async def get_my_permissions(
     db: AsyncSession = Depends(get_db),
     current_user: TokenData = Depends(get_current_user),
