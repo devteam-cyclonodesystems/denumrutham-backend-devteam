@@ -55,6 +55,7 @@ class User(Base):
     role = Column(String, default="STAFF")  # DEVOTEE / TEMPLE_MANAGER / STAFF / SUPER_ADMIN (backward compat)
     system_role_id = Column(UUID(as_uuid=True), ForeignKey("system_roles.id"), nullable=True, index=True)
     status = Column(String, default="ACTIVE")  # ACTIVE / PENDING / PENDING_APPROVAL / REJECTED / SUSPENDED / DISABLED
+    availability_status = Column(String, default="AVAILABLE") # AVAILABLE / ON_LEAVE
     otp_code = Column(String, nullable=True)  # mock OTP storage
     otp_expires_at = Column(DateTime(timezone=True), nullable=True)
     is_active = Column(Boolean, default=True, index=True)
@@ -71,6 +72,16 @@ class User(Base):
     rejection_reason = Column(Text, nullable=True)
     onboarding_method = Column(String, default="INVITE_TOKEN") # INVITE_TOKEN / DOMAIN_APPROVAL / ADMIN_CREATED
     force_password_change = Column(Boolean, default=False)
+
+    # Extra staff info
+    department = Column(String, nullable=True)
+    shift = Column(String, nullable=True)
+    dob = Column(String, nullable=True)
+    salary = Column(Float, nullable=True)
+    photo_url = Column(Text, nullable=True)
+    media_urls = Column(JSON, nullable=True) # JSON array of strings
+    remarks = Column(Text, nullable=True)
+    audit_trail = Column(JSON, nullable=True) # JSON list of dicts: {"event": str, "timestamp": str, "notes": str}
 
     # Relationships
     system_role = relationship("SystemRole", lazy="joined")

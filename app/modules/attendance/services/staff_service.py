@@ -27,6 +27,7 @@ class StaffService:
             raise HTTPException(status_code=400, detail="User already exists with this email/phone")
 
         # Create user
+        now_str = datetime.now(timezone.utc).isoformat()
         user = User(
             user_id=login_id,
             name=staff_in.name,
@@ -38,7 +39,19 @@ class StaffService:
             temple_id=temple_id,
             onboarding_method="ADMIN_CREATED",
             approval_status="APPROVED",
-            force_password_change=True
+            force_password_change=True,
+            department=staff_in.department,
+            shift=staff_in.shift,
+            dob=staff_in.dob,
+            salary=staff_in.salary,
+            photo_url=staff_in.photo_url,
+            media_urls=staff_in.media_urls,
+            remarks=staff_in.remarks,
+            audit_trail=[{
+                "event": "Joined",
+                "timestamp": now_str,
+                "notes": f"Staff account provisioned by administrator. Starting Salary: INR {staff_in.salary or 0.0}."
+            }]
         )
         db.add(user)
         await db.flush()
@@ -80,7 +93,11 @@ class StaffService:
     @staticmethod
     async def get_staff_list(db: AsyncSession, temple_id: UUID) -> list[User]:
         result = await db.execute(
-            select(User).filter(User.temple_id == temple_id, User.role == "STAFF")
+            select(User).filter(
+                User.temple_id == temple_id, 
+                User.role == "STAFF", 
+                User.deleted_at.is_(None)
+            )
         )
         return result.scalars().all()
 
@@ -96,6 +113,25 @@ class StaffService:
         old_status = user.status
         user.status = status
         
+        # Append to user.audit_trail
+        current_audit = list(user.audit_trail) if user.audit_trail else []
+        now_str = datetime.now(timezone.utc).isoformat()
+        event_name = "Status Changed"
+        if status == "ACTIVE":
+            event_name = "Reactivated"
+        elif status == "SUSPENDED":
+            event_name = "Suspended"
+        elif status == "RESIGNED":
+            event_name = "Resigned"
+        elif status == "TERMINATED":
+            event_name = "Terminated"
+        current_audit.append({
+            "event": event_name,
+            "timestamp": now_str,
+            "notes": f"Status updated from {old_status} to {status}."
+        })
+        user.audit_trail = current_audit
+
         # Audit log
         audit = AuditLog(
             temple_id=temple_id,
@@ -111,6 +147,143 @@ class StaffService:
         
         await db.commit()
         await db.refresh(user)
+        return user
+
+    @staticmethod
+    async def update_staff(db: AsyncSession, staff_id: UUID, staff_in: StaffUpdate, temple_id: UUID, actor_id: UUID) -> User:
+        result = await db.execute(
+            select(User).filter(User.id == staff_id, User.temple_id == temple_id)
+        )
+        user = result.scalars().first()
+        if not user:
+            raise HTTPException(status_code=404, detail="Staff not found")
+
+        # Initialize audit_trail if it's None
+        current_audit = list(user.audit_trail) if user.audit_trail else []
+        now_str = datetime.now(timezone.utc).isoformat()
+
+        # Track changes for audit log and local audit trail
+        updates_made = []
+
+        if staff_in.name is not None and staff_in.name != user.name:
+            updates_made.append(f"Name changed from '{user.name}' to '{staff_in.name}'")
+            user.name = staff_in.name
+
+        if staff_in.department is not None and staff_in.department != user.department:
+            updates_made.append(f"Department changed from '{user.department}' to '{staff_in.department}'")
+            user.department = staff_in.department
+
+        if staff_in.shift is not None and staff_in.shift != user.shift:
+            updates_made.append(f"Shift changed from '{user.shift}' to '{staff_in.shift}'")
+            user.shift = staff_in.shift
+
+        if staff_in.dob is not None and staff_in.dob != user.dob:
+            updates_made.append(f"DOB updated")
+            user.dob = staff_in.dob
+
+        if staff_in.remarks is not None and staff_in.remarks != user.remarks:
+            updates_made.append(f"Remarks updated")
+            user.remarks = staff_in.remarks
+
+        if staff_in.photo_url is not None and staff_in.photo_url != user.photo_url:
+            updates_made.append(f"Photo updated")
+            user.photo_url = staff_in.photo_url
+
+        if staff_in.media_urls is not None and staff_in.media_urls != user.media_urls:
+            updates_made.append(f"Media files updated")
+            user.media_urls = staff_in.media_urls
+
+        if staff_in.salary is not None and staff_in.salary != user.salary:
+            old_sal = user.salary or 0.0
+            updates_made.append(f"Salary adjusted from INR {old_sal} to INR {staff_in.salary}")
+            current_audit.append({
+                "event": "Salary Adjusted",
+                "timestamp": now_str,
+                "notes": f"Salary updated from INR {old_sal} to INR {staff_in.salary}."
+            })
+            user.salary = staff_in.salary
+
+        if staff_in.status is not None and staff_in.status != user.status:
+            current = user.status
+            target = staff_in.status
+            
+            valid = False
+            if current == "ACTIVE":
+                if target in ["SUSPENDED", "RESIGNED", "TERMINATED"]:
+                    valid = True
+            elif current == "SUSPENDED":
+                if target in ["ACTIVE", "RESIGNED", "TERMINATED"]:
+                    valid = True
+            elif current == "RESIGNED":
+                if target == "TERMINATED":
+                    valid = True
+            elif current == "TERMINATED":
+                valid = False
+                
+            if not valid:
+                raise HTTPException(
+                    status_code=400,
+                    detail=f"Invalid employment status transition from '{current}' to '{target}'"
+                )
+                
+            updates_made.append(f"Employment Status changed from {current} to {target}")
+            event_name = "Status Changed"
+            if target == "ACTIVE":
+                event_name = "Reactivated"
+            elif target == "SUSPENDED":
+                event_name = "Suspended"
+            elif target == "RESIGNED":
+                event_name = "Resigned"
+            elif target == "TERMINATED":
+                event_name = "Terminated"
+                
+            current_audit.append({
+                "event": event_name,
+                "timestamp": now_str,
+                "notes": f"Employment Status updated from {current} to {target}."
+            })
+            user.status = target
+
+            # If resigned or terminated, soft-delete from active directory views
+            if target in ["TERMINATED", "RESIGNED"]:
+                user.deleted_at = datetime.now(timezone.utc)
+                user.is_active = False
+            else:
+                user.deleted_at = None
+                user.is_active = True
+
+        if staff_in.availability_status is not None and staff_in.availability_status != user.availability_status:
+            old_avail = user.availability_status or "AVAILABLE"
+            target_avail = staff_in.availability_status
+            
+            if target_avail not in ["AVAILABLE", "ON_LEAVE"]:
+                raise HTTPException(status_code=400, detail="Invalid availability status")
+                
+            updates_made.append(f"Availability Status changed from {old_avail} to {target_avail}")
+            current_audit.append({
+                "event": "Availability Changed",
+                "timestamp": now_str,
+                "notes": f"Availability updated from {old_avail} to {target_avail}."
+            })
+            user.availability_status = target_avail
+
+        # If any updates were made, commit and log
+        if updates_made:
+            user.audit_trail = current_audit
+            # Create a system audit log entry
+            audit = AuditLog(
+                temple_id=temple_id,
+                user_id=actor_id,
+                action="STAFF_UPDATED",
+                action_type="UPDATE",
+                entity_id=str(user.id),
+                new_value={"updates": updates_made, "status": user.status},
+                details=f"Staff {user.name} details updated: {', '.join(updates_made)}"
+            )
+            db.add(audit)
+            await db.commit()
+            await db.refresh(user)
+
         return user
 
     @staticmethod
@@ -141,20 +314,71 @@ class StaffService:
         return user
 
     @staticmethod
-    async def get_staff_counts(db: AsyncSession, temple_id: UUID) -> dict:
-        stmt = select(User.status, func.count(User.id)).filter(
-            User.temple_id == temple_id, User.role == "STAFF"
-        ).group_by(User.status)
-        result = await db.execute(stmt)
-        counts = {row[0]: row[1] for row in result.all()}
+    async def delete_staff(db: AsyncSession, staff_id: UUID, temple_id: UUID, actor_id: UUID) -> dict:
+        result = await db.execute(
+            select(User).filter(User.id == staff_id, User.temple_id == temple_id)
+        )
+        user = result.scalars().first()
+        if not user:
+            raise HTTPException(status_code=404, detail="Staff not found")
+
+        # Soft delete
+        user.deleted_at = datetime.now(timezone.utc)
+        user.status = "TERMINATED"
+        user.is_active = False
+
+        # Append to audit trail
+        current_audit = list(user.audit_trail) if user.audit_trail else []
+        current_audit.append({
+            "event": "Terminated",
+            "timestamp": datetime.now(timezone.utc).isoformat(),
+            "notes": "Staff member was released/terminated from the directory."
+        })
+        user.audit_trail = current_audit
+
+        # Audit log
+        audit = AuditLog(
+            temple_id=temple_id,
+            user_id=actor_id,
+            action="STAFF_DELETED",
+            action_type="DELETE",
+            entity_id=str(user.id),
+            details=f"Staff {user.name} released from directory."
+        )
+        db.add(audit)
         
-        # Also need "on leave" from Employee model if linked
-        # For now, let's just return what we have from User
+        await db.commit()
+        return {"status": "success", "message": f"Staff {user.name} released successfully."}
+
+    @staticmethod
+    async def get_staff_counts(db: AsyncSession, temple_id: UUID) -> dict:
+        stmt = select(User.status, User.availability_status, func.count(User.id)).filter(
+            User.temple_id == temple_id, 
+            User.role == "STAFF",
+            User.deleted_at.is_(None)
+        ).group_by(User.status, User.availability_status)
+        result = await db.execute(stmt)
+        rows = result.all()
+        
+        total = 0
+        active = 0
+        suspended = 0
+        on_leave = 0
+        
+        for status, avail, count in rows:
+            total += count
+            if status == "ACTIVE":
+                active += count
+                if avail == "ON_LEAVE":
+                    on_leave += count
+            elif status == "SUSPENDED":
+                suspended += count
+                
         return {
-            "total": sum(counts.values()),
-            "active": counts.get("ACTIVE", 0),
-            "suspended": counts.get("SUSPENDED", 0),
-            "on_leave": 0 # placeholder
+            "total": total,
+            "active": active,
+            "suspended": suspended,
+            "on_leave": on_leave
         }
 
     @staticmethod

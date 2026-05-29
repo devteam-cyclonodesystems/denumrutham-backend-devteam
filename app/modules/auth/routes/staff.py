@@ -74,3 +74,35 @@ async def reset_password(
     return await StaffService.reset_password(
         db=db, staff_id=staff_id, new_password=new_password, temple_id=UUID(temple_id), actor_id=UUID(current_user.sub)
     )
+
+@router.patch("/{staff_id}", response_model=StaffResponse)
+async def update_staff_details(
+    staff_id: UUID,
+    staff_in: StaffUpdate,
+    db: AsyncSession = Depends(get_db),
+    current_user: TokenData = Depends(require_permission("staff", "manage_employees")),
+    temple_id: str = Depends(get_current_temple_id),
+):
+    """Update details of existing staff member."""
+    return await StaffService.update_staff(
+        db=db,
+        staff_id=staff_id,
+        staff_in=staff_in,
+        temple_id=UUID(temple_id),
+        actor_id=UUID(current_user.sub)
+    )
+
+@router.delete("/{staff_id}", response_model=dict)
+async def delete_staff(
+    staff_id: UUID,
+    db: AsyncSession = Depends(get_db),
+    current_user: TokenData = Depends(require_permission("staff", "manage_employees")),
+    temple_id: str = Depends(get_current_temple_id),
+):
+    """Release/delete staff member from directory."""
+    return await StaffService.delete_staff(
+        db=db,
+        staff_id=staff_id,
+        temple_id=UUID(temple_id),
+        actor_id=UUID(current_user.sub)
+    )

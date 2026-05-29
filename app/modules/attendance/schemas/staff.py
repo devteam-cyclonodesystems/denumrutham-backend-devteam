@@ -12,6 +12,12 @@ class StaffCreate(BaseModel):
     temporary_password: str
     notes: Optional[str] = None
     role_id: Optional[UUID] = None
+    dob: Optional[str] = None
+    salary: Optional[float] = None
+    photo_url: Optional[str] = None
+    media_urls: Optional[List[str]] = None
+    remarks: Optional[str] = None
+    availability_status: Optional[str] = "AVAILABLE"
 
 class StaffResponse(BaseModel):
     id: UUID
@@ -23,14 +29,32 @@ class StaffResponse(BaseModel):
     onboarding_method: str
     created_at: datetime
     force_password_change: bool
+    department: Optional[str] = None
+    shift: Optional[str] = None
+    dob: Optional[str] = None
+    salary: Optional[float] = None
+    photo_url: Optional[str] = None
+    media_urls: Optional[List[str]] = None
+    remarks: Optional[str] = None
+    audit_trail: Optional[List[dict]] = None
+    availability_status: Optional[str] = "AVAILABLE"
 
     class Config:
         from_attributes = True
 
 class StaffUpdate(BaseModel):
     name: Optional[str] = None
-    status: Optional[str] = None # ACTIVE, SUSPENDED, DISABLED
+    status: Optional[str] = None # ACTIVE, SUSPENDED, RESIGNED, TERMINATED
     role: Optional[str] = None
+    department: Optional[str] = None
+    shift: Optional[str] = None
+    dob: Optional[str] = None
+    salary: Optional[float] = None
+    photo_url: Optional[str] = None
+    media_urls: Optional[List[str]] = None
+    remarks: Optional[str] = None
+    audit_trail: Optional[List[dict]] = None
+    availability_status: Optional[str] = None
 
 class StaffCredentials(BaseModel):
     username: str
