@@ -1,6 +1,7 @@
 from sqlalchemy.ext.asyncio import AsyncSession
 from app.repositories.base import CRUDBase
-from app.models.domain import Devotee, Booking, Donation, Pooja
+from app.modules.bookings.models.booking_models import Devotee, Booking, Pooja
+from app.modules.billing.models.billing_models import Donation
 from app.schemas.domain import DevoteeCreate, BookingCreate, DonationCreate, PoojaCreate
 
 devotee_repo = CRUDBase[Devotee, DevoteeCreate, DevoteeCreate](Devotee)

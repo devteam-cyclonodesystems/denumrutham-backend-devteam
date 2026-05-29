@@ -6,10 +6,9 @@ from sqlalchemy.ext.asyncio import AsyncSession
 from sqlalchemy.future import select
 from fastapi import HTTPException
 
-from app.models.domain import (
-    TempleService, ServiceBooking, ServiceBookingStatus,
-    Payment, PaymentStatus, PaymentMethod, DevoteeProfile, Temple, TempleProfile,
-)
+from app.modules.temple_management.models.temple_models import TempleService, Temple, TempleProfile
+from app.modules.bookings.models.booking_models import ServiceBooking, ServiceBookingStatus, PaymentMethod, DevoteeProfile
+from app.modules.billing.models.billing_models import Payment, PaymentStatus
 
 
 class DevoteeBookingService:

@@ -21,7 +21,10 @@ from sqlalchemy.exc import IntegrityError
 from sqlalchemy.dialects.postgresql import insert
 from fastapi import HTTPException
 
-from app.models.domain import User, Temple, TempleProfile, UserTemple, TempleCodeSequence, TempleDomainHistory, TempleStatusAudit
+from app.modules.auth.models.auth_models import User, UserTemple
+from app.modules.temple_management.models.temple_models import Temple, TempleProfile, TempleStatusAudit
+from app.modules.governance.models.governance_models import TempleDomainHistory
+from app.modules.billing.models.billing_models import TempleCodeSequence
 from app.models.onboarding import TempleRequest, UserRequest
 from app.models.system_rbac import SystemRole
 from app.core.security import get_password_hash

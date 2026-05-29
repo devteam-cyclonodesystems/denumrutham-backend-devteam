@@ -4,6 +4,7 @@ from sqlalchemy.ext.asyncio import AsyncSession
 from app.services.transaction_service import TransactionService
 from app.services.archana_service import ArchanaService
 from app.services.employee_service import EmployeeService
+from app.repositories.archana_repository import ArchanaRepository
 from app.models.domain import HallBooking
 from sqlalchemy.future import select
 from sqlalchemy import func
@@ -17,11 +18,13 @@ class DashboardService:
     @staticmethod
     async def get_summary(db: AsyncSession, temple_id: str) -> dict:
         from datetime import datetime, time, date
-        from app.models.domain import (
-            User, Transaction, ArchanaBooking, TransactionType, 
-            InventoryItem, Leave, ChangeRequest, ApprovalRequest, 
-            TempleProfile, HallBooking
-        )
+        from app.modules.auth.models.auth_models import User
+        from app.modules.billing.models.billing_models import Transaction, TransactionType
+        from app.modules.governance.models.governance_models import ArchanaBooking, ChangeRequest, ApprovalRequest
+        from app.modules.inventory.models.inventory_models import InventoryItem
+        from app.modules.attendance.models.attendance_models import Leave
+        from app.modules.temple_management.models.temple_models import TempleProfile
+        from app.modules.bookings.models.booking_models import HallBooking
         
         tid = UUID(str(temple_id))
         today_start = datetime.combine(date.today(), time.min)
@@ -38,7 +41,7 @@ class DashboardService:
         today_income = today_rev_res.scalar() or 0
 
         # 2. Bookings
-        total_bookings = await ArchanaService.get_booking_count(db, temple_id)
+        total_bookings = await ArchanaRepository.get_booking_count(db, temple_id)
         
         # Today's Bookings
         today_bk_res = await db.execute(

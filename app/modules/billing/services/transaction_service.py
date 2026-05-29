@@ -4,7 +4,7 @@ from uuid import UUID
 from sqlalchemy.ext.asyncio import AsyncSession
 from sqlalchemy.future import select
 from sqlalchemy import func
-from app.models.domain import Transaction, TransactionType, TransactionCategory
+from app.modules.billing.models.billing_models import Transaction, TransactionType, TransactionCategory
 
 logger = logging.getLogger("tms.services.transaction")
 

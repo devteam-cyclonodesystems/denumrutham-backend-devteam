@@ -11,9 +11,8 @@ from typing import Optional
 from app.core.database import get_db
 from app.core.deps import get_current_user
 from app.core.response import api_response
-from app.models.domain import (
-    Payment, ServiceBooking, PaymentStatus, ServiceBookingStatus, utcnow,
-)
+from app.modules.billing.models.billing_models import Payment, PaymentStatus
+from app.modules.bookings.models.booking_models import ServiceBooking, ServiceBookingStatus, utcnow
 from app.schemas.domain import TokenData
 
 router = APIRouter()
