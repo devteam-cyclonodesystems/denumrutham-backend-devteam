@@ -18,6 +18,7 @@ Operational Notes:
 """Inventory Service — Items, Suppliers, Invoices, Item Requests with transaction engine."""
 import logging
 from uuid import UUID
+from typing import List, Optional, Dict, Any
 from sqlalchemy.ext.asyncio import AsyncSession
 from sqlalchemy.future import select
 from sqlalchemy import func
@@ -2154,7 +2155,6 @@ class InventoryService:
         db: AsyncSession, temple_id: str, status: Optional[str] = "PENDING_APPROVAL"
     ) -> List[dict]:
         from app.models.domain import PriceApprovalRequest
-        from typing import List, Optional
         from sqlalchemy.orm import selectinload
         tid = UUID(str(temple_id))
         stmt = select(PriceApprovalRequest).filter(PriceApprovalRequest.temple_id == tid).options(
