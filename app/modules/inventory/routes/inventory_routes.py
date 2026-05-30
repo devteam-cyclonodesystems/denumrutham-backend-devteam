@@ -13,7 +13,8 @@ from app.schemas.inventory import (
     InventoryLocationCreate, InventoryLocationResponse,
     IssueSessionCreate, IssueSessionResponse,
     RitualTemplateCreate, RitualTemplateResponse,
-    ReconciliationCreate, StockLedgerResponse
+    ReconciliationCreate, StockLedgerResponse,
+    PriceApprovalRequestResponse
 )
 from app.services.inventory_service import InventoryService
 
@@ -52,8 +53,9 @@ async def update_item(
 ):
     return await InventoryService.update_item(
         db=db, item_id=UUID(item_id), item_in=item_in.model_dump(exclude_unset=True), temple_id=temple_id,
-        user_id=current_user.sub if current_user else None,
-        username=current_user.username or "Admin" if current_user else "Admin"
+        user_id=UUID(str(current_user.sub)) if current_user and current_user.sub else None,
+        username=current_user.username or "Admin" if current_user else "Admin",
+        user_role=current_user.role or "SYSTEM" if current_user else "SYSTEM"
     )
 
 
@@ -79,8 +81,9 @@ async def create_supplier(
 ):
     return await InventoryService.create_supplier(
         db=db, sup_in=sup_in, temple_id=temple_id,
-        user_id=current_user.sub if current_user else None,
-        username=current_user.username or "Admin" if current_user else "Admin"
+        user_id=UUID(str(current_user.sub)) if current_user and current_user.sub else None,
+        username=current_user.username or "Admin" if current_user else "Admin",
+        user_role=current_user.role or "SYSTEM" if current_user else "SYSTEM"
     )
 
 
@@ -94,8 +97,9 @@ async def update_supplier(
 ):
     return await InventoryService.update_supplier(
         db=db, supplier_id=UUID(supplier_id), sup_in=sup_in, temple_id=temple_id,
-        user_id=current_user.sub if current_user else None,
-        username=current_user.username or "Admin" if current_user else "Admin"
+        user_id=UUID(str(current_user.sub)) if current_user and current_user.sub else None,
+        username=current_user.username or "Admin" if current_user else "Admin",
+        user_role=current_user.role or "SYSTEM" if current_user else "SYSTEM"
     )
 
 
@@ -183,6 +187,7 @@ async def pay_due(
 @router.post("/invoices/{invoice_id}/cancel", tags=["inventory"])
 async def cancel_invoice(
     invoice_id: str,
+    payload: dict,
     db: AsyncSession = Depends(get_db),
     current_user: TokenData = Depends(get_current_user),
     temple_id: str = Depends(get_current_temple_id),
@@ -191,7 +196,8 @@ async def cancel_invoice(
         db=db,
         invoice_id=UUID(invoice_id),
         temple_id=temple_id,
-        user_id=current_user.sub if current_user.sub else None
+        user_id=current_user.sub if current_user.sub else None,
+        reason=payload.get("reason", "")
     )
 
 
@@ -377,4 +383,61 @@ async def record_item_return(
         remarks=payload.get("remarks", ""),
         temple_id=temple_id,
         user_id=current_user.sub
+    )
+
+
+# --- Price Change Approvals ---
+
+@router.get("/price-approvals", response_model=List[PriceApprovalRequestResponse], tags=["inventory"])
+async def list_price_approvals(
+    status: Optional[str] = "PENDING_APPROVAL",
+    db: AsyncSession = Depends(get_db),
+    current_user: TokenData = Depends(get_current_user),
+    temple_id: str = Depends(get_current_temple_id),
+):
+    if current_user.role.upper() not in ("TEMPLE_MANAGER", "TEMPLE_ADMIN", "ADMIN", "SUPERADMIN"):
+        from fastapi import HTTPException
+        raise HTTPException(status_code=403, detail="Only managers or admins can access price approvals.")
+    return await InventoryService.get_price_approvals(db=db, temple_id=temple_id, status=status)
+
+
+@router.post("/price-approvals/{request_id}/approve", tags=["inventory"])
+async def approve_price_approval(
+    request_id: UUID,
+    db: AsyncSession = Depends(get_db),
+    current_user: TokenData = Depends(get_current_user),
+    temple_id: str = Depends(get_current_temple_id),
+):
+    if current_user.role.upper() not in ("TEMPLE_MANAGER", "TEMPLE_ADMIN", "ADMIN", "SUPERADMIN"):
+        from fastapi import HTTPException
+        raise HTTPException(status_code=403, detail="Only managers or admins can approve price changes.")
+    return await InventoryService.approve_price_approval(
+        db=db,
+        request_id=request_id,
+        temple_id=temple_id,
+        user_id=UUID(current_user.sub) if current_user.sub else None,
+        username=current_user.username or "Admin",
+        role=current_user.role
+    )
+
+
+@router.post("/price-approvals/{request_id}/reject", tags=["inventory"])
+async def reject_price_approval(
+    request_id: UUID,
+    payload: dict,
+    db: AsyncSession = Depends(get_db),
+    current_user: TokenData = Depends(get_current_user),
+    temple_id: str = Depends(get_current_temple_id),
+):
+    if current_user.role.upper() not in ("TEMPLE_MANAGER", "TEMPLE_ADMIN", "ADMIN", "SUPERADMIN"):
+        from fastapi import HTTPException
+        raise HTTPException(status_code=403, detail="Only managers or admins can reject price changes.")
+    return await InventoryService.reject_price_approval(
+        db=db,
+        request_id=request_id,
+        temple_id=temple_id,
+        user_id=UUID(current_user.sub) if current_user.sub else None,
+        username=current_user.username or "Admin",
+        role=current_user.role,
+        reason=payload.get("reason")
     )

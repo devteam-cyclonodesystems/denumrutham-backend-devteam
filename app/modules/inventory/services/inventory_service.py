@@ -27,7 +27,8 @@ from app.models.domain import (
     InventoryMovementType, InventoryStockLedger, InventoryLocation,
     InventoryIssueSession, ProcurementGRN, RitualTemplate, RitualTemplateItem,
     InventoryReconciliation, InventoryIssueStatus, ProcurementStatus,
-    StoreProduct, StoreStock, KalavaraStock
+    StoreProduct, StoreStock, KalavaraStock,
+    SupplierPriceHistory, PriceApprovalRequest
 )
 from app.schemas.inventory import (
     InventoryItemCreate, SupplierCreate, InvoiceCreate, ItemRequestCreate,
@@ -76,7 +77,9 @@ class InventoryService:
         # 2. Update stock table and version check
         if is_store:
             stock_res = await db.execute(
-                select(StoreStock).filter(StoreStock.product_id == item_id, StoreStock.temple_id == temple_id)
+                select(StoreStock)
+                .filter(StoreStock.product_id == item_id, StoreStock.temple_id == temple_id)
+                .with_for_update()
             )
             stock = stock_res.scalars().first()
             if not stock:
@@ -95,7 +98,9 @@ class InventoryService:
             stock.version_number += 1
         else:
             stock_res = await db.execute(
-                select(KalavaraStock).filter(KalavaraStock.item_id == item_id, KalavaraStock.temple_id == temple_id)
+                select(KalavaraStock)
+                .filter(KalavaraStock.item_id == item_id, KalavaraStock.temple_id == temple_id)
+                .with_for_update()
             )
             stock = stock_res.scalars().first()
             if not stock:
@@ -252,7 +257,7 @@ class InventoryService:
     @staticmethod
     async def create_supplier(
         db: AsyncSession, sup_in: SupplierCreate, temple_id: str,
-        user_id: UUID = None, username: str = "Admin"
+        user_id: UUID = None, username: str = "Admin", user_role: str = "SYSTEM"
     ) -> Supplier:
         tid = UUID(str(temple_id))
         count_result = await db.execute(
@@ -292,7 +297,7 @@ class InventoryService:
                     select(InventoryItem).filter(
                         func.lower(InventoryItem.name) == func.lower(name),
                         InventoryItem.temple_id == tid
-                    )
+                    ).with_for_update()
                 )
                 existing_item = item_res.scalars().first()
                 
@@ -305,76 +310,77 @@ class InventoryService:
                         unit=unit,
                         min_stock=min_stock_val,
                         stock=0.0,
-                        unit_price=price,
+                        unit_price=0.0,  # Initialize to 0.0 so price needs approval
                         remarks="Auto-created from Supplier Catalog",
                         created_from_supplier=True,
                         min_stock_source="SUPPLIER"
                     )
                     db.add(new_inv_item)
                     await db.flush()
-                    
-                    # Create initial price history
-                    history = SupplierPriceHistory(
-                        temple_id=tid,
-                        supplier_id=sup.id,
-                        item_name=name,
-                        old_price=None,
-                        new_price=price,
-                        changed_by=username,
-                        supplier_name=sup_in.name,
-                        price_difference=price,
-                        percentage_change=0.0,
-                        modified_by_id=str(user_id) if user_id else "SYSTEM",
-                        modified_by_name=username,
-                        reason="Initial supplier registration",
-                        source="Supplier Update"
-                    )
-                    db.add(history)
+                    existing_item = new_inv_item
                 else:
                     # Item exists!
                     # Rule 2: Only overwrite threshold if not manually modified
                     if existing_item.created_from_supplier and existing_item.min_stock_source == "SUPPLIER":
                         existing_item.min_stock = min_stock_val
+                
+                # Rule 13: Price change detection engine - ANY PRICE CHANGE -> PENDING_APPROVAL
+                if existing_item.unit_price != price:
+                    old_price = existing_item.unit_price
+                    price_diff = price - (old_price or 0.0)
+                    pct_change = ((price - old_price) / old_price * 100) if old_price and old_price > 0 else 0.0
                     
-                    # Rule 13: Price change detection engine
-                    if existing_item.unit_price != price:
-                        old_price = existing_item.unit_price
-                        price_diff = price - old_price
-                        pct_change = ((price - old_price) / old_price * 100) if old_price and old_price > 0 else 0.0
-                        
-                        alert_msg = ""
-                        if pct_change >= 25.0:
-                            alert_msg = "[CRITICAL ALERT: Price increased by {:.2f}%! Review supplier pricing before approval.]".format(pct_change)
-                            logger.error(alert_msg)
-                        elif pct_change >= 10.0:
-                            alert_msg = "[WARNING ALERT: Price increased significantly by {:.2f}%]".format(pct_change)
-                            logger.warning(alert_msg)
-                        elif pct_change <= -20.0:
-                            alert_msg = "[INFO ALERT: Price reduction of {:.2f}% detected.]".format(abs(pct_change))
-                            logger.info(alert_msg)
-
-                        history = SupplierPriceHistory(
+                    app_type = "WARNING" if pct_change <= 100.0 else "CRITICAL"
+                    
+                    from app.models.domain import PriceApprovalRequest
+                    existing_req_res = await db.execute(
+                        select(PriceApprovalRequest).filter(
+                            PriceApprovalRequest.inventory_item_id == existing_item.id,
+                            PriceApprovalRequest.new_price == price,
+                            PriceApprovalRequest.status == "PENDING_APPROVAL"
+                        )
+                    )
+                    if not existing_req_res.scalars().first():
+                        price_req = PriceApprovalRequest(
                             temple_id=tid,
                             supplier_id=sup.id,
-                            item_name=name,
+                            inventory_item_id=existing_item.id,
                             old_price=old_price,
                             new_price=price,
-                            changed_by=username,
-                            supplier_name=sup_in.name,
-                            price_difference=price_diff,
-                            percentage_change=pct_change,
-                            modified_by_id=str(user_id) if user_id else "SYSTEM",
-                            modified_by_name=username,
-                            reason=f"Price updated from Supplier sync. {alert_msg}".strip(),
-                            source="Supplier Update"
+                            change_percentage=pct_change,
+                            requested_by=username,
+                            requested_by_user_id=user_id,
+                            requested_by_role=user_role,
+                            status="PENDING_APPROVAL",
+                            approval_type=app_type,
+                            reason=f"Supplier sync price change of {pct_change:.2f}%",
+                            reason_notes=f"Price change requested from supplier sync. Old price: {old_price}, Proposed price: {price}"
                         )
-                        db.add(history)
+                        db.add(price_req)
                         
-                        # Rule 16: Update unit price but do NOT touch stock/ledgers
-                        existing_item.unit_price = price
-                        
-                    existing_item.unit = unit
-                    existing_item.supplier_id = sup.id
+                        if app_type == "CRITICAL":
+                            logger.error(
+                                f"[CRITICAL PROCUREMENT ALERT] Supplier {sup_in.name} requested price increase "
+                                f"of {pct_change:.2f}% (from {old_price} to {price}) for item {name}."
+                            )
+                            from app.modules.temple_management.services.notification_service import NotificationService
+                            await NotificationService.create_notification(
+                                db,
+                                temple_id=tid,
+                                title="CRITICAL PROCUREMENT ALERT",
+                                message=f"[CRITICAL PROCUREMENT ALERT] Supplier {sup_in.name} requested price increase of {pct_change:.2f}% (from {old_price} to {price}) for item {name}.",
+                                role="TEMPLE_MANAGER"
+                            )
+                            await NotificationService.create_notification(
+                                db,
+                                temple_id=tid,
+                                title="CRITICAL PROCUREMENT ALERT",
+                                message=f"[CRITICAL PROCUREMENT ALERT] Supplier {sup_in.name} requested price increase of {pct_change:.2f}% (from {old_price} to {price}) for item {name}.",
+                                role="TEMPLE_ADMIN"
+                            )
+                
+                existing_item.unit = unit
+                existing_item.supplier_id = sup.id
 
         await db.commit()
         await db.refresh(sup)
@@ -383,7 +389,7 @@ class InventoryService:
     @staticmethod
     async def update_supplier(
         db: AsyncSession, supplier_id: UUID, sup_in: SupplierCreate, temple_id: str,
-        user_id: UUID = None, username: str = "Admin"
+        user_id: UUID = None, username: str = "Admin", user_role: str = "SYSTEM"
     ) -> Supplier:
         from app.models.domain import Supplier, SupplierPriceHistory
         tid = UUID(str(temple_id))
@@ -424,7 +430,7 @@ class InventoryService:
                     select(InventoryItem).filter(
                         func.lower(InventoryItem.name) == func.lower(name),
                         InventoryItem.temple_id == tid
-                    )
+                    ).with_for_update()
                 )
                 existing_item = item_res.scalars().first()
                 
@@ -437,71 +443,76 @@ class InventoryService:
                         unit=unit,
                         min_stock=min_stock_val,
                         stock=0.0,
-                        unit_price=new_price,
+                        unit_price=0.0, # Rule: New items start at 0 to force approval
                         remarks="Auto-created from Supplier Catalog",
                         created_from_supplier=True,
                         min_stock_source="SUPPLIER"
                     )
                     db.add(new_inv_item)
                     await db.flush()
-                    
-                    history = SupplierPriceHistory(
-                        temple_id=tid,
-                        supplier_id=supplier_id,
-                        item_name=name,
-                        old_price=None,
-                        new_price=new_price,
-                        changed_by=username,
-                        supplier_name=sup_in.name,
-                        price_difference=new_price,
-                        percentage_change=0.0,
-                        modified_by_id=str(user_id) if user_id else "SYSTEM",
-                        modified_by_name=username,
-                        reason="Initial sync during supplier catalog update",
-                        source="Supplier Update"
-                    )
-                    db.add(history)
+                    existing_item = new_inv_item
                 else:
                     # Item exists!
                     # Rule 2: Only overwrite threshold if not manually modified
                     if existing_item.created_from_supplier and existing_item.min_stock_source == "SUPPLIER":
                         existing_item.min_stock = min_stock_val
                     
-                    # Rule 13: Price change detection engine
+                    # Rule 13: Price change detection engine - ANY PRICE CHANGE -> PENDING_APPROVAL
                     if existing_item.unit_price != new_price:
-                        price_diff = new_price - existing_item.unit_price
-                        pct_change = ((new_price - existing_item.unit_price) / existing_item.unit_price * 100) if existing_item.unit_price and existing_item.unit_price > 0 else 0.0
+                        old_price = existing_item.unit_price
+                        price = new_price
+                        price_diff = price - (old_price or 0.0)
+                        pct_change = ((price - old_price) / old_price * 100) if old_price and old_price > 0 else 0.0
                         
-                        alert_msg = ""
-                        if pct_change >= 25.0:
-                            alert_msg = "[CRITICAL ALERT: Price increased by {:.2f}%! Review supplier pricing before approval.]".format(pct_change)
-                            logger.error(alert_msg)
-                        elif pct_change >= 10.0:
-                            alert_msg = "[WARNING ALERT: Price increased significantly by {:.2f}%]".format(pct_change)
-                            logger.warning(alert_msg)
-                        elif pct_change <= -20.0:
-                            alert_msg = "[INFO ALERT: Price reduction of {:.2f}% detected.]".format(abs(pct_change))
-                            logger.info(alert_msg)
-
-                        history = SupplierPriceHistory(
-                            temple_id=tid,
-                            supplier_id=supplier_id,
-                            item_name=name,
-                            old_price=existing_item.unit_price,
-                            new_price=new_price,
-                            changed_by=username,
-                            supplier_name=sup_in.name,
-                            price_difference=price_diff,
-                            percentage_change=pct_change,
-                            modified_by_id=str(user_id) if user_id else "SYSTEM",
-                            modified_by_name=username,
-                            reason=f"Price updated from Supplier sync. {alert_msg}".strip(),
-                            source="Supplier Update"
+                        # PENDING_APPROVAL rules
+                        app_type = "WARNING" if pct_change <= 100.0 else "CRITICAL"
+                        
+                        from app.models.domain import PriceApprovalRequest
+                        existing_req_res = await db.execute(
+                            select(PriceApprovalRequest).filter(
+                                PriceApprovalRequest.inventory_item_id == existing_item.id,
+                                PriceApprovalRequest.new_price == price,
+                                PriceApprovalRequest.status == "PENDING_APPROVAL"
+                            )
                         )
-                        db.add(history)
-                        
-                        # Rule 16: Update unit price but do NOT touch stock/ledgers
-                        existing_item.unit_price = new_price
+                        if not existing_req_res.scalars().first():
+                            price_req = PriceApprovalRequest(
+                                temple_id=tid,
+                                supplier_id=supplier_id,
+                                inventory_item_id=existing_item.id,
+                                old_price=old_price,
+                                new_price=price,
+                                change_percentage=pct_change,
+                                requested_by=username,
+                                requested_by_user_id=user_id,
+                                requested_by_role=user_role,
+                                status="PENDING_APPROVAL",
+                                approval_type=app_type,
+                                reason=f"Supplier sync price increase of {pct_change:.2f}%",
+                                reason_notes=f"Price change requested from supplier sync. Old price: {old_price}, Proposed price: {price}"
+                            )
+                            db.add(price_req)
+                            
+                            if app_type == "CRITICAL":
+                                logger.error(
+                                    f"[CRITICAL PROCUREMENT ALERT] Supplier {sup_in.name} requested price increase "
+                                    f"of {pct_change:.2f}% (from {old_price} to {price}) for item {name}."
+                                )
+                                from app.modules.temple_management.services.notification_service import NotificationService
+                                await NotificationService.create_notification(
+                                    db,
+                                    temple_id=tid,
+                                    title="CRITICAL PROCUREMENT ALERT",
+                                    message=f"[CRITICAL PROCUREMENT ALERT] Supplier {sup_in.name} requested price increase of {pct_change:.2f}% (from {old_price} to {price}) for item {name}.",
+                                    role="TEMPLE_MANAGER"
+                                )
+                                await NotificationService.create_notification(
+                                    db,
+                                    temple_id=tid,
+                                    title="CRITICAL PROCUREMENT ALERT",
+                                    message=f"[CRITICAL PROCUREMENT ALERT] Supplier {sup_in.name} requested price increase of {pct_change:.2f}% (from {old_price} to {price}) for item {name}.",
+                                    role="TEMPLE_ADMIN"
+                                )
                         
                     existing_item.unit = unit
                     existing_item.supplier_id = supplier_id
@@ -564,16 +575,28 @@ class InventoryService:
     @staticmethod
     async def update_item(
         db: AsyncSession, item_id: UUID, item_in: dict, temple_id: str,
-        user_id: UUID = None, username: str = "Admin"
+        user_id: UUID = None, username: str = "Admin", user_role: str = "SYSTEM"
     ) -> InventoryItem:
         tid = UUID(str(temple_id))
         result = await db.execute(
-            select(InventoryItem).filter(InventoryItem.id == item_id, InventoryItem.temple_id == tid)
+            select(InventoryItem)
+            .filter(InventoryItem.id == item_id, InventoryItem.temple_id == tid)
+            .with_for_update()
         )
         item = result.scalars().first()
         if not item:
             from fastapi import HTTPException
             raise HTTPException(status_code=404, detail="Item not found")
+
+        # Concurrency check (optimistic locking)
+        expected_version = item_in.get("version")
+        if expected_version is not None and item.version != expected_version:
+            from fastapi import HTTPException
+            raise HTTPException(
+                status_code=409,
+                detail="This inventory item was modified by another user. Please refresh and try again."
+            )
+        item.version = (item.version or 1) + 1
 
         import math
         from fastapi import HTTPException
@@ -600,32 +623,55 @@ class InventoryService:
             price_diff = new_price - old_price
             pct_change = ((new_price - old_price) / old_price * 100) if old_price and old_price > 0 else 0.0
             
-            supplier_name = "N/A"
-            if item.supplier_id:
-                sup_res = await db.execute(select(Supplier).filter(Supplier.id == item.supplier_id))
-                sup = sup_res.scalars().first()
-                if sup:
-                    supplier_name = sup.name
+            supplier_id = item.supplier_id
+            app_type = "WARNING" if pct_change <= 100.0 else "CRITICAL"
             
-            history = SupplierPriceHistory(
-                temple_id=tid,
-                supplier_id=item.supplier_id or UUID("00000000-0000-0000-0000-000000000000"),
-                item_name=item.name,
-                old_price=old_price,
-                new_price=new_price,
-                changed_by=username,
-                supplier_name=supplier_name,
-                price_difference=price_diff,
-                percentage_change=pct_change,
-                modified_by_id=str(user_id) if user_id else "SYSTEM",
-                modified_by_name=username,
-                reason=item_in.get("remarks") or "Manual price update",
-                source="Manual Edit"
+            from app.models.domain import PriceApprovalRequest
+            existing_req_res = await db.execute(
+                select(PriceApprovalRequest).filter(
+                    PriceApprovalRequest.inventory_item_id == item.id,
+                    PriceApprovalRequest.new_price == new_price,
+                    PriceApprovalRequest.status == "PENDING_APPROVAL"
+                )
             )
-            db.add(history)
-            
-            # Rule 16: Only update Unit Price, leave quantities/ledgers intact
-            item.unit_price = new_price
+            if not existing_req_res.scalars().first():
+                price_req = PriceApprovalRequest(
+                    temple_id=tid,
+                    supplier_id=supplier_id,
+                    inventory_item_id=item.id,
+                    old_price=old_price,
+                    new_price=new_price,
+                    change_percentage=pct_change,
+                    requested_by=username,
+                    requested_by_user_id=user_id,
+                    requested_by_role=user_role,
+                    status="PENDING_APPROVAL",
+                    approval_type=app_type,
+                    reason=f"Manual price update of {pct_change:.2f}%",
+                    reason_notes=item_in.get("remarks") or "Manual price update requested."
+                )
+                db.add(price_req)
+                
+                if app_type == "CRITICAL":
+                    logger.error(
+                        f"[CRITICAL PROCUREMENT ALERT] Manual request for price increase "
+                        f"of {pct_change:.2f}% (from {old_price} to {new_price}) for item {item.name}."
+                    )
+                    from app.modules.temple_management.services.notification_service import NotificationService
+                    await NotificationService.create_notification(
+                        db,
+                        temple_id=tid,
+                        title="CRITICAL PROCUREMENT ALERT",
+                        message=f"[CRITICAL PROCUREMENT ALERT] Manual request for price increase of {pct_change:.2f}% (from {old_price} to {new_price}) for item {item.name}.",
+                        role="TEMPLE_MANAGER"
+                    )
+                    await NotificationService.create_notification(
+                        db,
+                        temple_id=tid,
+                        title="CRITICAL PROCUREMENT ALERT",
+                        message=f"[CRITICAL PROCUREMENT ALERT] Manual request for price increase of {pct_change:.2f}% (from {old_price} to {new_price}) for item {item.name}.",
+                        role="TEMPLE_ADMIN"
+                    )
 
         # 2. Threshold Governance
         new_min_stock = item_in.get("min_stock")
@@ -724,12 +770,12 @@ class InventoryService:
             "history": formatted_history
         }
 
-    # --- Invoices / GRN ---
     @staticmethod
     async def create_invoice(
         db: AsyncSession, inv_in: InvoiceCreate, temple_id: str, created_by: str = "Admin", user_id: UUID = None
-    ) -> InventoryInvoice:
-        """🔥 REFACTORED: Invoice → GRN → Ledger entries + Financial Txn."""
+    ) -> dict:
+        """🔥 REFACTORED: Structured Accounts Payable & Payment Ledger Creation."""
+        from decimal import Decimal
         tid = UUID(str(temple_id))
 
         # 1. Generate References
@@ -744,49 +790,6 @@ class InventoryService:
             mm = str(now.month).zfill(2)
             yy = str(now.year)[-2:]
             ref = f"Inv{str(count + 1).zfill(3)}/{mm}{yy}"
-
-        # 2. Create Legacy Invoice (Backward Compat)
-        invoice = InventoryInvoice(
-            temple_id=tid,
-            ref_number=ref,
-            supplier_name=inv_in.supplier_name,
-            date=inv_in.date or str(import_date()),
-            items_summary=inv_in.items_summary,
-            amount=inv_in.amount,
-            order_mode=inv_in.order_mode,
-            payment_mode=inv_in.payment_mode,
-            remarks=inv_in.remarks,
-            status=inv_in.status.upper() if inv_in.status else "COMPLETED",
-            items_data=inv_in.items,  # Save structured lines
-            created_by=created_by,
-            target_domain=inv_in.target_domain,
-        )
-        db.add(invoice)
-
-        if inv_in.status and inv_in.status.upper() == "PENDING":
-            await db.commit()
-            await db.refresh(invoice)
-            return {
-                "id": invoice.id,
-                "temple_id": invoice.temple_id,
-                "ref_number": invoice.ref_number,
-                "supplier_name": invoice.supplier_name,
-                "date": invoice.date,
-                "items_summary": invoice.items_summary,
-                "amount": invoice.amount,
-                "order_mode": invoice.order_mode,
-                "payment_mode": invoice.payment_mode,
-                "remarks": invoice.remarks,
-                "status": invoice.status,
-                "items_data": invoice.items_data,
-                "created_by": invoice.created_by,
-                "created_at": invoice.created_at,
-                "grn_code": None,
-                "grn_created_at": None,
-                "target_domain": invoice.target_domain
-            }
-
-        await db.flush()
 
         # Resolve real user UUID from username/email/sub
         real_user_uuid = None
@@ -819,6 +822,131 @@ class InventoryService:
                 user_obj = user_res.scalars().first()
                 if user_obj:
                     real_user_uuid = user_obj.id
+
+        # Resolve supplier ID
+        sup_res = await db.execute(select(Supplier).filter(Supplier.name == inv_in.supplier_name, Supplier.temple_id == tid))
+        supplier = sup_res.scalars().first()
+        supplier_id = supplier.id if supplier else None
+        if not supplier_id:
+            sup_fallback_res = await db.execute(select(Supplier).filter(Supplier.temple_id == tid))
+            sup_fallback = sup_fallback_res.scalars().first()
+            if sup_fallback:
+                supplier_id = sup_fallback.id
+
+        # Derive initial payment totals and payment status
+        total_amount = Decimal(str(inv_in.amount))
+        if total_amount < 0:
+            from fastapi import HTTPException
+            raise HTTPException(status_code=400, detail="Invoice amount cannot be negative")
+
+        payment_status = (inv_in.payment_status or "PAY_LATER").upper()
+        if payment_status not in ("FULL_PAYMENT", "PARTIAL_PAYMENT", "PAY_LATER"):
+            payment_status = "PAY_LATER"
+
+        paid_amount = Decimal("0.00")
+        if payment_status == "FULL_PAYMENT":
+            paid_amount = total_amount
+        elif payment_status == "PARTIAL_PAYMENT":
+            paid_amount = Decimal(str(inv_in.paid_amount or 0.00))
+
+        if paid_amount < 0:
+            from fastapi import HTTPException
+            raise HTTPException(status_code=400, detail="Paid amount cannot be negative")
+        if paid_amount > total_amount:
+            from fastapi import HTTPException
+            raise HTTPException(status_code=400, detail="Paid amount cannot exceed invoice total")
+
+        balance_due = total_amount - paid_amount
+
+        # System-Derived status logic
+        if balance_due == total_amount:
+            payment_status = "PAY_LATER"
+        elif balance_due > 0 and paid_amount > 0:
+            payment_status = "PARTIAL_PAYMENT"
+        elif balance_due == 0:
+            payment_status = "FULL_PAYMENT"
+
+        # 2. Create Invoice
+        invoice = InventoryInvoice(
+            temple_id=tid,
+            supplier_id=supplier_id,
+            ref_number=ref,
+            supplier_name=inv_in.supplier_name,
+            date=inv_in.date or str(import_date()),
+            items_summary=inv_in.items_summary,
+            amount=inv_in.amount,
+            order_mode=inv_in.order_mode,
+            payment_mode=inv_in.payment_mode,
+            remarks=inv_in.remarks,
+            status=inv_in.status.upper() if inv_in.status else "COMPLETED",
+            items_data=inv_in.items,  # Save structured lines
+            created_by=created_by,
+            created_by_user_id=real_user_uuid,
+            target_domain=inv_in.target_domain,
+            payment_status=payment_status,
+            total_paid_amount=paid_amount,
+            balance_due=balance_due,
+            last_payment_date=utcnow() if paid_amount > 0 else None,
+            payment_completed_at=utcnow() if payment_status == "FULL_PAYMENT" else None
+        )
+        db.add(invoice)
+        await db.flush()
+
+        # If it's not pending delivery and paid_amount > 0, create a payment transaction record
+        if invoice.status.upper() != "PENDING" and paid_amount > 0:
+            clean_method = (inv_in.payment_mode or "CASH").upper().replace(" ", "_").replace("-", "_")
+            if clean_method not in ('CASH', 'UPI', 'CARD', 'BANK_TRANSFER', 'CHEQUE'):
+                clean_method = 'CASH'
+            tx = InventoryPaymentTransaction(
+                temple_id=tid,
+                invoice_id=invoice.id,
+                amount=paid_amount,
+                payment_method=clean_method,
+                payment_reference=inv_in.payment_reference,
+                transaction_status='COMPLETED',
+                notes=inv_in.remarks or "Initial invoice payment",
+                created_by_user_id=real_user_uuid
+            )
+            db.add(tx)
+
+        if invoice.status.upper() == "PENDING":
+            # Force PENDING invoice payment state to PAY_LATER with 0 initial payments
+            invoice.payment_status = "PAY_LATER"
+            invoice.total_paid_amount = Decimal("0.00")
+            invoice.balance_due = total_amount
+            invoice.last_payment_date = None
+            invoice.payment_completed_at = None
+
+            await db.commit()
+            await db.refresh(invoice)
+            return {
+                "id": invoice.id,
+                "temple_id": invoice.temple_id,
+                "supplier_id": invoice.supplier_id,
+                "ref_number": invoice.ref_number,
+                "supplier_name": invoice.supplier_name,
+                "date": invoice.date,
+                "items_summary": invoice.items_summary,
+                "amount": invoice.amount,
+                "order_mode": invoice.order_mode,
+                "payment_mode": invoice.payment_mode,
+                "remarks": invoice.remarks,
+                "status": invoice.status,
+                "payment_status": invoice.payment_status,
+                "total_paid_amount": invoice.total_paid_amount,
+                "balance_due": invoice.balance_due,
+                "last_payment_date": invoice.last_payment_date,
+                "payment_completed_at": invoice.payment_completed_at,
+                "items_data": invoice.items_data,
+                "created_by": invoice.created_by,
+                "created_by_user_id": invoice.created_by_user_id,
+                "created_at": invoice.created_at,
+                "updated_at": invoice.updated_at,
+                "grn_code": None,
+                "grn_created_at": None,
+                "target_domain": invoice.target_domain,
+                "payment_history": []
+            }
 
         # 3. Create GRN (Enterprise Layer)
         sup_res = await db.execute(select(Supplier).filter(Supplier.name == inv_in.supplier_name, Supplier.temple_id == tid))
@@ -880,6 +1008,7 @@ class InventoryService:
         return {
             "id": invoice.id,
             "temple_id": invoice.temple_id,
+            "supplier_id": invoice.supplier_id,
             "ref_number": invoice.ref_number,
             "supplier_name": invoice.supplier_name,
             "date": invoice.date,
@@ -889,12 +1018,20 @@ class InventoryService:
             "payment_mode": invoice.payment_mode,
             "remarks": invoice.remarks,
             "status": invoice.status,
+            "payment_status": invoice.payment_status,
+            "total_paid_amount": invoice.total_paid_amount,
+            "balance_due": invoice.balance_due,
+            "last_payment_date": invoice.last_payment_date,
+            "payment_completed_at": invoice.payment_completed_at,
             "items_data": invoice.items_data,
             "created_by": invoice.created_by,
+            "created_by_user_id": invoice.created_by_user_id,
             "created_at": invoice.created_at,
+            "updated_at": invoice.updated_at,
             "grn_code": grn.grn_code if 'grn' in locals() else None,
             "grn_created_at": grn.created_at if 'grn' in locals() else None,
-            "target_domain": invoice.target_domain
+            "target_domain": invoice.target_domain,
+            "payment_history": [tx] if (paid_amount > 0 and 'tx' in locals()) else []
         }
 
     @staticmethod
@@ -910,11 +1047,25 @@ class InventoryService:
             .limit(limit)
         )
        
+        all_rows = result.all()
+        invoice_ids = [row[0].id for row in all_rows]
+
+        txs_map = {}
+        if invoice_ids:
+            tx_res = await db.execute(
+                select(InventoryPaymentTransaction)
+                .filter(InventoryPaymentTransaction.invoice_id.in_(invoice_ids))
+                .order_by(InventoryPaymentTransaction.payment_date.asc())
+            )
+            for tx in tx_res.scalars().all():
+                txs_map.setdefault(tx.invoice_id, []).append(tx)
+
         invoices_with_grn = []
-        for inv, grn in result.all():
+        for inv, grn in all_rows:
             invoices_with_grn.append({
                 "id": inv.id,
                 "temple_id": inv.temple_id,
+                "supplier_id": inv.supplier_id,
                 "ref_number": inv.ref_number,
                 "supplier_name": inv.supplier_name,
                 "date": inv.date,
@@ -924,26 +1075,44 @@ class InventoryService:
                 "payment_mode": inv.payment_mode,
                 "remarks": inv.remarks,
                 "status": inv.status,
+                "payment_status": inv.payment_status,
+                "total_paid_amount": inv.total_paid_amount,
+                "balance_due": inv.balance_due,
+                "last_payment_date": inv.last_payment_date,
+                "payment_completed_at": inv.payment_completed_at,
                 "items_data": inv.items_data,
                 "created_by": inv.created_by,
+                "created_by_user_id": inv.created_by_user_id,
                 "created_at": inv.created_at,
+                "updated_at": inv.updated_at,
                 "grn_code": grn.grn_code if grn else None,
                 "grn_created_at": grn.created_at if grn else None,
-                "target_domain": inv.target_domain
+                "target_domain": inv.target_domain,
+                "payment_history": txs_map.get(inv.id, [])
             })
         return invoices_with_grn
 
     @staticmethod
     async def complete_delivery(db: AsyncSession, invoice_id: UUID, temple_id: str, user_id: UUID = None, delivery_in = None) -> dict:
-        from app.models.domain import Supplier, ProcurementGRN, InventoryMovementType, ProcurementStatus
+        from app.models.domain import Supplier, ProcurementGRN, InventoryMovementType, ProcurementStatus, InventoryPaymentTransaction
         from app.services.transaction_service import TransactionService
+        from datetime import datetime, timezone
+        from decimal import Decimal
        
         tid = UUID(str(temple_id))
-        result = await db.execute(select(InventoryInvoice).filter(InventoryInvoice.id == invoice_id, InventoryInvoice.temple_id == tid))
+        result = await db.execute(
+            select(InventoryInvoice)
+            .filter(InventoryInvoice.id == invoice_id)
+            .with_for_update()
+        )
         invoice = result.scalars().first()
         if not invoice:
             from fastapi import HTTPException
             raise HTTPException(status_code=404, detail="Invoice not found")
+            
+        if invoice.temple_id != tid:
+            from fastapi import HTTPException
+            raise HTTPException(status_code=403, detail="Not authorized to access this invoice")
        
         if not invoice.status or invoice.status.upper() != "PENDING":
             from fastapi import HTTPException
@@ -957,6 +1126,64 @@ class InventoryService:
                 invoice.payment_mode = delivery_in.payment_mode
             if delivery_in.remarks:
                 invoice.remarks = delivery_in.remarks
+            if delivery_in.items is not None:
+                from sqlalchemy.orm.attributes import flag_modified
+                delivered_map = {str(x.get("item_id")): x for x in delivery_in.items}
+                new_items_data = []
+                new_amount = 0.0
+                for line in (invoice.items_data or []):
+                    iid_str = str(line.get("item_id"))
+                    if iid_str in delivered_map:
+                        deliv = delivered_map[iid_str]
+                        qty = float(deliv.get("qty", 0.0))
+                        price = float(deliv.get("price", line.get("price", 0.0)))
+                    else:
+                        qty = 0.0
+                        price = float(line.get("price", 0.0))
+                    
+                    new_items_data.append({
+                        "item_id": line.get("item_id"),
+                        "qty": qty,
+                        "price": price,
+                        "name": line.get("name")
+                    })
+                    new_amount += qty * price
+                invoice.items_data = new_items_data
+                invoice.amount = new_amount
+                flag_modified(invoice, "items_data")
+
+        # Derive payment totals and status dynamically
+        total_amount = Decimal(str(invoice.amount))
+        payment_status_input = (delivery_in.payment_status or "PAY_LATER").upper() if delivery_in else "PAY_LATER"
+        
+        paid_amount = Decimal("0.00")
+        if payment_status_input == "FULL_PAYMENT":
+            paid_amount = total_amount
+        elif payment_status_input == "PARTIAL_PAYMENT":
+            paid_amount = Decimal(str(delivery_in.paid_amount or 0.00)) if delivery_in else Decimal("0.00")
+
+        if paid_amount < 0:
+            from fastapi import HTTPException
+            raise HTTPException(status_code=400, detail="Paid amount cannot be negative")
+        if paid_amount > total_amount:
+            from fastapi import HTTPException
+            raise HTTPException(status_code=400, detail="Paid amount cannot exceed invoice total")
+
+        balance_due = total_amount - paid_amount
+        
+        # System-Derived status logic
+        if balance_due == total_amount:
+            payment_status = "PAY_LATER"
+        elif balance_due > 0 and paid_amount > 0:
+            payment_status = "PARTIAL_PAYMENT"
+        elif balance_due == 0:
+            payment_status = "FULL_PAYMENT"
+            
+        invoice.payment_status = payment_status
+        invoice.total_paid_amount = paid_amount
+        invoice.balance_due = balance_due
+        invoice.last_payment_date = datetime.now(timezone.utc) if paid_amount > 0 else None
+        invoice.payment_completed_at = datetime.now(timezone.utc) if payment_status == "FULL_PAYMENT" else None
        
         # Resolve real user UUID from username/email/sub
         real_user_uuid = None
@@ -989,6 +1216,24 @@ class InventoryService:
                 user_obj = user_res.scalars().first()
                 if user_obj:
                     real_user_uuid = user_obj.id
+
+        # Insert Payment Transaction if paid_amount > 0
+        tx = None
+        if paid_amount > 0:
+            clean_method = (invoice.payment_mode or "CASH").upper().replace(" ", "_").replace("-", "_")
+            if clean_method not in ('CASH', 'UPI', 'CARD', 'BANK_TRANSFER', 'CHEQUE'):
+                clean_method = 'CASH'
+            tx = InventoryPaymentTransaction(
+                temple_id=tid,
+                invoice_id=invoice.id,
+                amount=paid_amount,
+                payment_method=clean_method,
+                payment_reference=delivery_in.payment_reference if delivery_in else None,
+                transaction_status='COMPLETED',
+                notes=invoice.remarks or "Initial delivery completion payment",
+                created_by_user_id=real_user_uuid
+            )
+            db.add(tx)
 
         # Create GRN
         sup_res = await db.execute(select(Supplier).filter(Supplier.name == invoice.supplier_name, Supplier.temple_id == tid))
@@ -1033,15 +1278,15 @@ class InventoryService:
                         remarks=f"Purchase via Invoice {ref}"
                     )
                    
-        # Financial Transaction
-        if invoice.amount > 0:
+        # Financial Transaction (Cash-Basis Expense)
+        if paid_amount > 0:
             await TransactionService.create_transaction(
                 db=db,
                 temple_id=str(temple_id),
                 txn_type="expense",
                 category="purchase",
-                amount=invoice.amount,
-                description=f"Purchase Invoice {ref} - {invoice.supplier_name} (Delivered)",
+                amount=float(paid_amount),
+                description=f"Purchase Invoice {ref} - {invoice.supplier_name} (Delivered & Paid)",
                 reference_id=ref,
                 source="system",
             )
@@ -1052,6 +1297,7 @@ class InventoryService:
         return {
             "id": invoice.id,
             "temple_id": invoice.temple_id,
+            "supplier_id": invoice.supplier_id,
             "ref_number": invoice.ref_number,
             "supplier_name": invoice.supplier_name,
             "date": invoice.date,
@@ -1061,40 +1307,137 @@ class InventoryService:
             "payment_mode": invoice.payment_mode,
             "remarks": invoice.remarks,
             "status": invoice.status,
+            "payment_status": invoice.payment_status,
+            "total_paid_amount": invoice.total_paid_amount,
+            "balance_due": invoice.balance_due,
+            "last_payment_date": invoice.last_payment_date,
+            "payment_completed_at": invoice.payment_completed_at,
             "items_data": invoice.items_data,
             "created_by": invoice.created_by,
+            "created_by_user_id": invoice.created_by_user_id,
             "created_at": invoice.created_at,
+            "updated_at": invoice.updated_at,
             "grn_code": grn.grn_code,
             "grn_created_at": grn.created_at,
-            "target_domain": invoice.target_domain
+            "target_domain": invoice.target_domain,
+            "payment_history": [tx] if tx else []
         }
 
     @staticmethod
     async def pay_due(db: AsyncSession, invoice_id: UUID, temple_id: str, user_id: UUID = None, remarks: str = "", payment_mode: str = "Cash", paid_amount: float = 0.0) -> dict:
-        from app.models.domain import ProcurementGRN
+        from app.models.domain import ProcurementGRN, InventoryPaymentTransaction
         from app.services.transaction_service import TransactionService
+        from datetime import datetime, timezone
+        from decimal import Decimal
        
         tid = UUID(str(temple_id))
-        result = await db.execute(select(InventoryInvoice).filter(InventoryInvoice.id == invoice_id, InventoryInvoice.temple_id == tid))
+        result = await db.execute(
+            select(InventoryInvoice)
+            .filter(InventoryInvoice.id == invoice_id)
+            .with_for_update()
+        )
         invoice = result.scalars().first()
         if not invoice:
             from fastapi import HTTPException
             raise HTTPException(status_code=404, detail="Invoice not found")
+            
+        if invoice.temple_id != tid:
+            from fastapi import HTTPException
+            raise HTTPException(status_code=403, detail="Not authorized to access this invoice")
            
         if not invoice.status or invoice.status.upper() != "COMPLETED":
             from fastapi import HTTPException
             raise HTTPException(status_code=400, detail="Cannot pay dues on a pending delivery")
            
+        additional_paid = Decimal(str(paid_amount))
+        if additional_paid <= 0:
+            from fastapi import HTTPException
+            raise HTTPException(status_code=400, detail="Payment amount must be greater than zero")
+            
+        current_paid = Decimal(str(invoice.total_paid_amount or 0.00))
+        total_amount = Decimal(str(invoice.amount))
+        
+        new_paid = current_paid + additional_paid
+        if new_paid > total_amount:
+            from fastapi import HTTPException
+            raise HTTPException(status_code=400, detail="Total paid amount cannot exceed invoice amount")
+            
+        balance_due = total_amount - new_paid
+        
+        # System-Derived status logic
+        if balance_due == total_amount:
+            payment_status = "PAY_LATER"
+        elif balance_due > 0 and new_paid > 0:
+            payment_status = "PARTIAL_PAYMENT"
+        elif balance_due == 0:
+            payment_status = "FULL_PAYMENT"
+            
+        invoice.total_paid_amount = new_paid
+        invoice.balance_due = balance_due
+        invoice.payment_status = payment_status
+        invoice.last_payment_date = datetime.now(timezone.utc)
+        if payment_status == "FULL_PAYMENT":
+            invoice.payment_completed_at = datetime.now(timezone.utc)
+            
         invoice.remarks = remarks
         invoice.payment_mode = payment_mode
+        
+        # Resolve real user UUID from username/email/sub
+        real_user_uuid = None
+        if user_id:
+            try:
+                if isinstance(user_id, UUID):
+                    real_user_uuid = user_id
+                else:
+                    real_user_uuid = UUID(str(user_id))
+            except ValueError:
+                from app.models.domain import User
+                user_res = await db.execute(
+                    select(User).filter(
+                        (User.user_id == str(user_id)) |
+                        (User.email == str(user_id))
+                    )
+                )
+                user_obj = user_res.scalars().first()
+                if user_obj:
+                    real_user_uuid = user_obj.id
+
+        if not real_user_uuid:
+            from app.models.domain import User
+            user_res = await db.execute(select(User).filter(User.temple_id == tid))
+            user_obj = user_res.scalars().first()
+            if user_obj:
+                real_user_uuid = user_obj.id
+            else:
+                user_res = await db.execute(select(User))
+                user_obj = user_res.scalars().first()
+                if user_obj:
+                    real_user_uuid = user_obj.id
+                    
+        # Record payment transaction
+        clean_method = (payment_mode or "CASH").upper().replace(" ", "_").replace("-", "_")
+        if clean_method not in ('CASH', 'UPI', 'CARD', 'BANK_TRANSFER', 'CHEQUE'):
+            clean_method = 'CASH'
+        tx = InventoryPaymentTransaction(
+            temple_id=tid,
+            invoice_id=invoice.id,
+            amount=additional_paid,
+            payment_method=clean_method,
+            payment_reference=None,
+            transaction_status='COMPLETED',
+            notes=remarks or "Due payment",
+            created_by_user_id=real_user_uuid
+        )
+        db.add(tx)
        
-        if paid_amount > 0:
+        # Cash-Basis Expense Transaction
+        if additional_paid > 0:
             await TransactionService.create_transaction(
                 db=db,
                 temple_id=str(temple_id),
                 txn_type="expense",
                 category="purchase",
-                amount=paid_amount,
+                amount=float(additional_paid),
                 description=f"Due Payment for Invoice {invoice.ref_number} - {invoice.supplier_name}",
                 reference_id=invoice.ref_number,
                 source="system",
@@ -1102,6 +1445,14 @@ class InventoryService:
            
         await db.commit()
         await db.refresh(invoice)
+        
+        # Load payment history
+        tx_res = await db.execute(
+            select(InventoryPaymentTransaction)
+            .filter(InventoryPaymentTransaction.invoice_id == invoice.id)
+            .order_by(InventoryPaymentTransaction.payment_date.asc())
+        )
+        txs_list = tx_res.scalars().all()
        
         grn_res = await db.execute(select(ProcurementGRN).filter(ProcurementGRN.invoice_number == invoice.ref_number, ProcurementGRN.temple_id == tid))
         grn = grn_res.scalars().first()
@@ -1109,6 +1460,7 @@ class InventoryService:
         return {
             "id": invoice.id,
             "temple_id": invoice.temple_id,
+            "supplier_id": invoice.supplier_id,
             "ref_number": invoice.ref_number,
             "supplier_name": invoice.supplier_name,
             "date": invoice.date,
@@ -1118,31 +1470,49 @@ class InventoryService:
             "payment_mode": invoice.payment_mode,
             "remarks": invoice.remarks,
             "status": invoice.status,
+            "payment_status": invoice.payment_status,
+            "total_paid_amount": invoice.total_paid_amount,
+            "balance_due": invoice.balance_due,
+            "last_payment_date": invoice.last_payment_date,
+            "payment_completed_at": invoice.payment_completed_at,
             "items_data": invoice.items_data,
             "created_by": invoice.created_by,
+            "created_by_user_id": invoice.created_by_user_id,
             "created_at": invoice.created_at,
+            "updated_at": invoice.updated_at,
             "grn_code": grn.grn_code if grn else None,
             "grn_created_at": grn.created_at if grn else None,
-            "target_domain": invoice.target_domain
+            "target_domain": invoice.target_domain,
+            "payment_history": txs_list
         }
 
     @staticmethod
-    async def cancel_invoice(db: AsyncSession, invoice_id: UUID, temple_id: str, user_id: UUID = None) -> dict:
+    async def cancel_invoice(db: AsyncSession, invoice_id: UUID, temple_id: str, user_id: UUID = None, reason: str = None) -> dict:
         from app.models.domain import ProcurementGRN, InventoryMovementType, ProcurementStatus
         from app.services.transaction_service import TransactionService
         from fastapi import HTTPException
         
         tid = UUID(str(temple_id))
-        result = await db.execute(select(InventoryInvoice).filter(InventoryInvoice.id == invoice_id, InventoryInvoice.temple_id == tid))
+        result = await db.execute(
+            select(InventoryInvoice)
+            .filter(InventoryInvoice.id == invoice_id)
+            .with_for_update()
+        )
         invoice = result.scalars().first()
         if not invoice:
             raise HTTPException(status_code=404, detail="Invoice not found")
+            
+        if invoice.temple_id != tid:
+            raise HTTPException(status_code=403, detail="Not authorized to access this invoice")
             
         if invoice.status and invoice.status.upper() == "CANCELLED":
             raise HTTPException(status_code=400, detail="Invoice is already cancelled")
             
         old_status = invoice.status
         invoice.status = "CANCELLED"
+        if reason:
+            cancellation_log = f"[Cancelled: {reason}]"
+            invoice.remarks = (invoice.remarks + " | " + cancellation_log) if invoice.remarks else cancellation_log
         
         # If it was completed, reverse stock movements and create offsetting financial transaction
         if old_status and old_status.upper() == "COMPLETED":
@@ -1778,6 +2148,197 @@ class InventoryService:
         await db.commit()
         await db.refresh(req)
         return req
+
+    @staticmethod
+    async def get_price_approvals(
+        db: AsyncSession, temple_id: str, status: Optional[str] = "PENDING_APPROVAL"
+    ) -> List[dict]:
+        from app.models.domain import PriceApprovalRequest
+        from typing import List, Optional
+        from sqlalchemy.orm import selectinload
+        tid = UUID(str(temple_id))
+        stmt = select(PriceApprovalRequest).filter(PriceApprovalRequest.temple_id == tid).options(
+            selectinload(PriceApprovalRequest.item),
+            selectinload(PriceApprovalRequest.supplier)
+        )
+        if status:
+            stmt = stmt.filter(PriceApprovalRequest.status == status)
+        
+        result = await db.execute(stmt)
+        requests = result.scalars().all()
+        
+        out = []
+        for r in requests:
+            item_name = r.item.name if r.item else "Unknown Item"
+            supplier_name = r.supplier.name if r.supplier else "Unknown Supplier"
+            out.append({
+                "id": r.id,
+                "temple_id": r.temple_id,
+                "supplier_id": r.supplier_id,
+                "inventory_item_id": r.inventory_item_id,
+                "old_price": r.old_price,
+                "new_price": r.new_price,
+                "change_percentage": r.change_percentage,
+                "requested_by": r.requested_by,
+                "requested_at": r.requested_at,
+                "status": r.status,
+                "approved_by": r.approved_by,
+                "approved_at": r.approved_at,
+                "reason": r.reason,
+                "approval_type": r.approval_type,
+                "requested_by_user_id": r.requested_by_user_id,
+                "requested_by_role": r.requested_by_role,
+                "reason_notes": r.reason_notes,
+                "item_name": item_name,
+                "supplier_name": supplier_name,
+            })
+        return out
+
+    @staticmethod
+    async def approve_price_approval(
+        db: AsyncSession, request_id: UUID, temple_id: str,
+        user_id: UUID, username: str, role: str
+    ) -> dict:
+        from app.models.domain import PriceApprovalRequest, SupplierPriceHistory, AuditLog
+        from datetime import datetime, timezone
+        from sqlalchemy.orm import selectinload
+        
+        tid = UUID(str(temple_id))
+        res = await db.execute(
+            select(PriceApprovalRequest)
+            .filter(PriceApprovalRequest.id == request_id, PriceApprovalRequest.temple_id == tid)
+            .options(selectinload(PriceApprovalRequest.supplier))
+            .with_for_update()
+        )
+        req = res.scalars().first()
+        if not req:
+            from fastapi import HTTPException
+            raise HTTPException(status_code=404, detail="Price approval request not found")
+        
+        if req.requested_by_user_id and user_id and req.requested_by_user_id == user_id:
+            from fastapi import HTTPException
+            raise HTTPException(status_code=403, detail="Self approval is not permitted.")
+        
+        if req.status != "PENDING_APPROVAL":
+            from fastapi import HTTPException
+            raise HTTPException(status_code=400, detail=f"Request is already {req.status}")
+            
+        item_res = await db.execute(
+            select(InventoryItem)
+            .filter(InventoryItem.id == req.inventory_item_id, InventoryItem.temple_id == tid)
+            .with_for_update()
+        )
+        item = item_res.scalars().first()
+        if not item:
+            from fastapi import HTTPException
+            raise HTTPException(status_code=404, detail="Associated inventory item not found")
+            
+        old_price = item.unit_price
+        item.unit_price = req.new_price
+        
+        req.status = "APPROVED"
+        req.approved_by = username
+        req.approved_at = datetime.now(timezone.utc)
+        
+        supplier_name = req.supplier.name if req.supplier else "N/A"
+        price_diff = req.new_price - (old_price or 0.0)
+        history = SupplierPriceHistory(
+            temple_id=tid,
+            supplier_id=req.supplier_id,
+            item_name=item.name,
+            old_price=old_price,
+            new_price=req.new_price,
+            changed_by=username,
+            supplier_name=supplier_name,
+            price_difference=price_diff,
+            percentage_change=req.change_percentage,
+            modified_by_id=str(user_id) if user_id else "SYSTEM",
+            modified_by_name=username,
+            reason=f"Approved price change request: {req.id}",
+            source="Supplier Update"
+        )
+        db.add(history)
+        
+        audit = AuditLog(
+            temple_id=tid,
+            user_id=user_id,
+            role=role,
+            module_name="Inventory",
+            action="PRICE_APPROVAL_DECISION",
+            entity_id=str(req.id),
+            old_value={"status": "PENDING_APPROVAL"},
+            new_value={
+                "status": "APPROVED",
+                "approved_by": username,
+                "approved_at": req.approved_at.isoformat()
+            },
+            details=f"Decision: APPROVED | Request ID: {req.id} | Item: {item.name} | Supplier: {supplier_name} | Old Price: {old_price} | New Price: {req.new_price} | Percentage Change: {req.change_percentage:.2f}% | Approval Type: {req.approval_type} | Decision By: {username}",
+        )
+        db.add(audit)
+        
+        await db.commit()
+        return {"status": "success", "message": "Price approval request approved and item price updated."}
+
+    @staticmethod
+    async def reject_price_approval(
+        db: AsyncSession, request_id: UUID, temple_id: str,
+        user_id: UUID, username: str, role: str, reason: Optional[str] = None
+    ) -> dict:
+        from app.models.domain import PriceApprovalRequest, AuditLog
+        from datetime import datetime, timezone
+        from typing import Optional
+        from sqlalchemy.orm import selectinload
+        
+        tid = UUID(str(temple_id))
+        res = await db.execute(
+            select(PriceApprovalRequest)
+            .filter(PriceApprovalRequest.id == request_id, PriceApprovalRequest.temple_id == tid)
+            .options(
+                selectinload(PriceApprovalRequest.item),
+                selectinload(PriceApprovalRequest.supplier)
+            )
+            .with_for_update()
+        )
+        req = res.scalars().first()
+        if not req:
+            from fastapi import HTTPException
+            raise HTTPException(status_code=404, detail="Price approval request not found")
+        
+        if req.requested_by_user_id and user_id and req.requested_by_user_id == user_id:
+            from fastapi import HTTPException
+            raise HTTPException(status_code=403, detail="Self approval is not permitted.")
+        
+        if req.status != "PENDING_APPROVAL":
+            from fastapi import HTTPException
+            raise HTTPException(status_code=400, detail=f"Request is already {req.status}")
+            
+        req.status = "REJECTED"
+        req.approved_by = username
+        req.approved_at = datetime.now(timezone.utc)
+        req.reason = reason
+        
+        item_name = req.item.name if req.item else "N/A"
+        supplier_name = req.supplier.name if req.supplier else "N/A"
+        audit = AuditLog(
+            temple_id=tid,
+            user_id=user_id,
+            role=role,
+            module_name="Inventory",
+            action="PRICE_APPROVAL_DECISION",
+            entity_id=str(req.id),
+            old_value={"status": "PENDING_APPROVAL"},
+            new_value={
+                "status": "REJECTED",
+                "approved_by": username,
+                "approved_at": req.approved_at.isoformat(),
+                "reason": reason
+            },
+            details=f"Decision: REJECTED | Request ID: {req.id} | Item: {item_name} | Supplier: {supplier_name} | Old Price: {req.old_price} | New Price: {req.new_price} | Percentage Change: {req.change_percentage:.2f}% | Approval Type: {req.approval_type} | Decision By: {username} | Reason: {reason or 'None'}",
+        )
+        db.add(audit)
+        
+        await db.commit()
+        return {"status": "success", "message": "Price approval request rejected."}
 
 def import_date():
     from datetime import datetime

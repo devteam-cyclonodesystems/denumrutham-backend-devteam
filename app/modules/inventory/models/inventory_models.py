@@ -1,7 +1,7 @@
 import uuid
 import enum
 from datetime import datetime, timezone
-from sqlalchemy import Column, String, Boolean, DateTime, ForeignKey, Float, Text, Enum, Integer, Time, UniqueConstraint, Date, JSON, Index, text, CheckConstraint
+from sqlalchemy import Column, String, Boolean, DateTime, ForeignKey, Float, Text, Enum, Integer, Time, UniqueConstraint, Date, JSON, Index, text, CheckConstraint, Numeric
 from sqlalchemy.dialects.postgresql import UUID
 from sqlalchemy.orm import relationship
 from app.core.database.base import Base
@@ -145,6 +145,7 @@ class InventoryInvoice(Base):
 
     id = Column(UUID(as_uuid=True), primary_key=True, default=uuid.uuid4)
     temple_id = Column(UUID(as_uuid=True), ForeignKey("temples.id"), nullable=False, index=True)
+    supplier_id = Column(UUID(as_uuid=True), ForeignKey("suppliers.id"), nullable=True)
     ref_number = Column(String, nullable=True)  # e.g. Inv001/0226
     supplier_name = Column(String, default="")
     date = Column(String, nullable=False)
@@ -168,10 +169,50 @@ class InventoryInvoice(Base):
     idempotency_key = Column(String, unique=True, nullable=True)
     location_id = Column(UUID(as_uuid=True), ForeignKey("inventory_locations.id"), nullable=True)
 
+    # --- Structured Accounting & Payment Ledger additions ---
+    payment_status = Column(String, default="PAY_LATER", nullable=False)
+    total_paid_amount = Column(Numeric(18, 2), default=0.00, nullable=False)
+    balance_due = Column(Numeric(18, 2), default=0.00, nullable=False)
+    last_payment_date = Column(DateTime(timezone=True), nullable=True)
+    payment_completed_at = Column(DateTime(timezone=True), nullable=True)
+    is_deleted = Column(Boolean, default=False, nullable=False)
+    deleted_at = Column(DateTime(timezone=True), nullable=True)
+    deleted_by = Column(UUID(as_uuid=True), ForeignKey("users.id"), nullable=True)
+    created_by_user_id = Column(UUID(as_uuid=True), ForeignKey("users.id"), nullable=True)
+
     # --- Soft Delete ---
     is_archived = Column(Boolean, default=False, index=True)
     archived_at = Column(DateTime(timezone=True), nullable=True)
     archived_by = Column(UUID(as_uuid=True), ForeignKey("users.id"), nullable=True)
+
+    __table_args__ = (
+        CheckConstraint("balance_due >= 0", name="chk_invoice_balance_due_positive"),
+        CheckConstraint("payment_status IN ('FULL_PAYMENT', 'PARTIAL_PAYMENT', 'PAY_LATER')", name="chk_payment_status_enum"),
+    )
+
+
+class InventoryPaymentTransaction(Base):
+    """Authoritative ledger for payments recorded against purchase invoices."""
+    __tablename__ = "inventory_payment_transactions"
+
+    id = Column(UUID(as_uuid=True), primary_key=True, default=uuid.uuid4)
+    temple_id = Column(UUID(as_uuid=True), ForeignKey("temples.id"), nullable=False, index=True)
+    invoice_id = Column(UUID(as_uuid=True), ForeignKey("inventory_invoices.id", ondelete="RESTRICT"), nullable=False, index=True)
+    amount = Column(Numeric(18, 2), nullable=False)
+    payment_method = Column(String, nullable=False)
+    payment_reference = Column(String, nullable=True)
+    transaction_status = Column(String, default="COMPLETED", nullable=False)
+    payment_date = Column(DateTime(timezone=True), default=utcnow, nullable=False, index=True)
+    notes = Column(Text, nullable=True)
+    created_by_user_id = Column(UUID(as_uuid=True), ForeignKey("users.id"), nullable=True)
+    created_at = Column(DateTime(timezone=True), default=utcnow, nullable=False)
+    updated_at = Column(DateTime(timezone=True), default=utcnow, onupdate=utcnow, nullable=False)
+
+    __table_args__ = (
+        CheckConstraint("amount > 0", name="chk_payment_amount_positive"),
+        CheckConstraint("payment_method IN ('CASH', 'UPI', 'CARD', 'BANK_TRANSFER', 'CHEQUE')", name="chk_payment_method_enum"),
+        CheckConstraint("transaction_status IN ('COMPLETED', 'REVERSED', 'VOIDED')", name="chk_transaction_status_enum"),
+    )
 
 
 
@@ -181,7 +222,7 @@ class SupplierPriceHistory(Base):
     __tablename__ = "supplier_price_history"
     id = Column(UUID(as_uuid=True), primary_key=True, default=uuid.uuid4)
     temple_id = Column(UUID(as_uuid=True), ForeignKey("temples.id"), nullable=False, index=True)
-    supplier_id = Column(UUID(as_uuid=True), ForeignKey("suppliers.id"), nullable=False, index=True)
+    supplier_id = Column(UUID(as_uuid=True), ForeignKey("suppliers.id"), nullable=True, index=True)
     item_name = Column(String, nullable=False)
     old_price = Column(Float, nullable=True)
     new_price = Column(Float, nullable=False)
@@ -638,3 +679,32 @@ class ProcurementCostHistory(Base):
             name="chk_cost_history_polymorphic"
         ),
     )
+
+
+class PriceApprovalRequest(Base):
+    """Tracks supplier price change approvals before they go live."""
+    __tablename__ = "price_approval_requests"
+    
+    id = Column(UUID(as_uuid=True), primary_key=True, default=uuid.uuid4)
+    temple_id = Column(UUID(as_uuid=True), ForeignKey("temples.id"), nullable=False, index=True)
+    supplier_id = Column(UUID(as_uuid=True), ForeignKey("suppliers.id"), nullable=True, index=True)
+    inventory_item_id = Column(UUID(as_uuid=True), ForeignKey("kalavara_inventory_items.id"), nullable=False, index=True)
+    old_price = Column(Float, nullable=True)
+    new_price = Column(Float, nullable=False)
+    change_percentage = Column(Float, nullable=False)
+    requested_by = Column(String, default="Admin")
+    requested_at = Column(DateTime(timezone=True), default=utcnow)
+    status = Column(String, default="PENDING_APPROVAL") # PENDING_APPROVAL, APPROVED, REJECTED, CANCELLED
+    approved_by = Column(String, nullable=True)
+    approved_at = Column(DateTime(timezone=True), nullable=True)
+    reason = Column(String, nullable=True)
+    approval_type = Column(String, default="WARNING") # WARNING, CRITICAL
+    
+    # Extended Governance fields
+    requested_by_user_id = Column(UUID(as_uuid=True), nullable=True)
+    requested_by_role = Column(String, nullable=True)
+    reason_notes = Column(String, nullable=True)
+    
+    # Relationships for convenience
+    supplier = relationship("Supplier", foreign_keys=[supplier_id])
+    item = relationship("InventoryItem", foreign_keys=[inventory_item_id])

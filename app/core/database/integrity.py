@@ -121,6 +121,22 @@ class DeploymentIntegrityService:
                 logger.critical("INTEGRITY FAILURE: Missing column 'operational_state' in 'temples'")
                 return False
 
+            # Verify created_from_supplier column in kalavara_inventory_items
+            res_cf = await conn.execute(
+                text("SELECT column_name FROM information_schema.columns WHERE table_name = 'kalavara_inventory_items' AND column_name = 'created_from_supplier'")
+            )
+            if not res_cf.scalar():
+                logger.critical("INTEGRITY FAILURE: Missing column 'created_from_supplier' in 'kalavara_inventory_items'")
+                return False
+
+            # Verify min_stock_source column in kalavara_inventory_items
+            res_ms = await conn.execute(
+                text("SELECT column_name FROM information_schema.columns WHERE table_name = 'kalavara_inventory_items' AND column_name = 'min_stock_source'")
+            )
+            if not res_ms.scalar():
+                logger.critical("INTEGRITY FAILURE: Missing column 'min_stock_source' in 'kalavara_inventory_items'")
+                return False
+
         logger.info("Runtime Schema Validation PASSED.")
         return True
 
@@ -142,6 +158,7 @@ class DeploymentIntegrityService:
         
         return {
             "status": "healthy" if schema_valid else "degraded",
+            "schema_status": "HEALTHY" if schema_valid else "DRIFT_DETECTED",
             "backend_build": build_info["git_commit"][:8],
             "frontend_build": os.getenv("FRONTEND_BUILD", "unknown"),
             "migration_version": migration_version,
@@ -156,6 +173,6 @@ async def validate_on_startup():
     is_valid = await DeploymentIntegrityService.validate_runtime_schema()
     if not is_valid:
         logger.critical("CRITICAL: Application cannot start due to schema integrity failure.")
-        # In a real production system, we would sys.exit(1) here
-        # os._exit(1)
+        import sys
+        sys.exit(1)
     return is_valid

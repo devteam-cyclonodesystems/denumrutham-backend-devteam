@@ -1,6 +1,7 @@
 from pydantic import BaseModel, ConfigDict, UUID4
 from typing import Optional, List
 from datetime import datetime
+from decimal import Decimal
 
 
 # ---------- Inventory Item ----------
@@ -39,6 +40,7 @@ class InventoryItemUpdate(BaseModel):
     category: Optional[str] = None
     unit: Optional[str] = None
     remarks: Optional[str] = None
+    version: Optional[int] = None
 
 
 # ---------- Supplier ----------
@@ -83,19 +85,43 @@ class InvoiceCreate(BaseModel):
     status: str = "Completed"
     remarks: str = ""
     target_domain: str = "KALAVARA"
+    payment_status: Optional[str] = "PAY_LATER"
+    paid_amount: Optional[Decimal] = Decimal("0.00")
+    payment_reference: Optional[str] = None
 
 
 class DeliveryComplete(BaseModel):
     order_mode: str = "Phone"
     payment_mode: str = "Cash"
     remarks: str = ""
+    items: Optional[List[dict]] = None
+    payment_status: Optional[str] = "PAY_LATER"
+    paid_amount: Optional[Decimal] = Decimal("0.00")
+    payment_reference: Optional[str] = None
 
+
+
+class PaymentTransactionResponse(BaseModel):
+    model_config = ConfigDict(from_attributes=True)
+    id: UUID4
+    temple_id: UUID4
+    invoice_id: UUID4
+    amount: Decimal
+    payment_method: str
+    payment_reference: Optional[str] = None
+    transaction_status: str
+    payment_date: datetime
+    notes: Optional[str] = None
+    created_by_user_id: Optional[UUID4] = None
+    created_at: datetime
+    updated_at: datetime
 
 
 class InvoiceResponse(BaseModel):
     model_config = ConfigDict(from_attributes=True)
     id: UUID4
     temple_id: UUID4
+    supplier_id: Optional[UUID4] = None
     ref_number: Optional[str] = None
     supplier_name: str
     date: str
@@ -105,12 +131,20 @@ class InvoiceResponse(BaseModel):
     payment_mode: str
     remarks: str
     status: str
+    payment_status: str = "PAY_LATER"
+    total_paid_amount: Decimal = Decimal("0.00")
+    balance_due: Decimal = Decimal("0.00")
+    last_payment_date: Optional[datetime] = None
+    payment_completed_at: Optional[datetime] = None
     items_data: Optional[List[dict]] = None
     created_by: str
+    created_by_user_id: Optional[UUID4] = None
     created_at: datetime
+    updated_at: Optional[datetime] = None
     grn_code: Optional[str] = None
     grn_created_at: Optional[datetime] = None
     target_domain: str = "KALAVARA"
+    payment_history: List[PaymentTransactionResponse] = []
 
 
 # ---------- Item Request ----------
@@ -238,3 +272,31 @@ class ReconciliationCreate(BaseModel):
     item_id: UUID4
     actual_stock: float
     remarks: Optional[str] = None
+
+
+# ---------- Price Approval Request ----------
+class PriceApprovalRequestResponse(BaseModel):
+    model_config = ConfigDict(from_attributes=True)
+    id: UUID4
+    temple_id: UUID4
+    supplier_id: Optional[UUID4] = None
+    inventory_item_id: UUID4
+    old_price: Optional[float] = None
+    new_price: float
+    change_percentage: float
+    requested_by: str
+    requested_at: datetime
+    status: str
+    approved_by: Optional[str] = None
+    approved_at: Optional[datetime] = None
+    reason: Optional[str] = None
+    approval_type: str
+    
+    # Extended Governance fields
+    requested_by_user_id: Optional[UUID4] = None
+    requested_by_role: Optional[str] = None
+    reason_notes: Optional[str] = None
+    
+    # Extra field mapping for UI
+    item_name: Optional[str] = None
+    supplier_name: Optional[str] = None
