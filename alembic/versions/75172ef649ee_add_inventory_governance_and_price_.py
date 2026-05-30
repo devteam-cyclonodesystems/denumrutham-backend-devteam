@@ -38,21 +38,47 @@ def upgrade() -> None:
     if not column_exists('kalavara_inventory_items', 'min_stock_source'):
         op.add_column('kalavara_inventory_items', sa.Column('min_stock_source', sa.String(), server_default='MANUAL', nullable=True))
 
-    # 2. Check & Add columns in supplier_price_history
-    if not column_exists('supplier_price_history', 'supplier_name'):
-        op.add_column('supplier_price_history', sa.Column('supplier_name', sa.String(), server_default='', nullable=True))
-    if not column_exists('supplier_price_history', 'price_difference'):
-        op.add_column('supplier_price_history', sa.Column('price_difference', sa.Float(), server_default='0.0', nullable=True))
-    if not column_exists('supplier_price_history', 'percentage_change'):
-        op.add_column('supplier_price_history', sa.Column('percentage_change', sa.Float(), server_default='0.0', nullable=True))
-    if not column_exists('supplier_price_history', 'modified_by_id'):
-        op.add_column('supplier_price_history', sa.Column('modified_by_id', sa.String(), server_default='', nullable=True))
-    if not column_exists('supplier_price_history', 'modified_by_name'):
-        op.add_column('supplier_price_history', sa.Column('modified_by_name', sa.String(), server_default='', nullable=True))
-    if not column_exists('supplier_price_history', 'reason'):
-        op.add_column('supplier_price_history', sa.Column('reason', sa.String(), server_default='', nullable=True))
-    if not column_exists('supplier_price_history', 'source'):
-        op.add_column('supplier_price_history', sa.Column('source', sa.String(), server_default='Supplier Update', nullable=True))
+    # 2. Create supplier_price_history table if missing
+    if not table_exists('supplier_price_history'):
+        op.create_table(
+            'supplier_price_history',
+            sa.Column('id', sa.UUID(), nullable=False),
+            sa.Column('temple_id', sa.UUID(), nullable=False),
+            sa.Column('supplier_id', sa.UUID(), nullable=False),
+            sa.Column('item_name', sa.String(), nullable=False),
+            sa.Column('old_price', sa.Float(), nullable=True),
+            sa.Column('new_price', sa.Float(), nullable=False),
+            sa.Column('changed_by', sa.String(), server_default='Admin', nullable=True),
+            sa.Column('created_at', sa.DateTime(timezone=True), nullable=True),
+            sa.Column('supplier_name', sa.String(), server_default='', nullable=True),
+            sa.Column('price_difference', sa.Float(), server_default='0.0', nullable=True),
+            sa.Column('percentage_change', sa.Float(), server_default='0.0', nullable=True),
+            sa.Column('modified_by_id', sa.String(), server_default='', nullable=True),
+            sa.Column('modified_by_name', sa.String(), server_default='', nullable=True),
+            sa.Column('reason', sa.String(), server_default='', nullable=True),
+            sa.Column('source', sa.String(), server_default='Supplier Update', nullable=True),
+            sa.PrimaryKeyConstraint('id'),
+            sa.ForeignKeyConstraint(['temple_id'], ['temples.id']),
+            sa.ForeignKeyConstraint(['supplier_id'], ['suppliers.id'])
+        )
+        op.create_index('ix_supplier_price_history_temple_id', 'supplier_price_history', ['temple_id'], unique=False)
+        op.create_index('ix_supplier_price_history_supplier_id', 'supplier_price_history', ['supplier_id'], unique=False)
+    else:
+        # Fallback check-and-add columns
+        if not column_exists('supplier_price_history', 'supplier_name'):
+            op.add_column('supplier_price_history', sa.Column('supplier_name', sa.String(), server_default='', nullable=True))
+        if not column_exists('supplier_price_history', 'price_difference'):
+            op.add_column('supplier_price_history', sa.Column('price_difference', sa.Float(), server_default='0.0', nullable=True))
+        if not column_exists('supplier_price_history', 'percentage_change'):
+            op.add_column('supplier_price_history', sa.Column('percentage_change', sa.Float(), server_default='0.0', nullable=True))
+        if not column_exists('supplier_price_history', 'modified_by_id'):
+            op.add_column('supplier_price_history', sa.Column('modified_by_id', sa.String(), server_default='', nullable=True))
+        if not column_exists('supplier_price_history', 'modified_by_name'):
+            op.add_column('supplier_price_history', sa.Column('modified_by_name', sa.String(), server_default='', nullable=True))
+        if not column_exists('supplier_price_history', 'reason'):
+            op.add_column('supplier_price_history', sa.Column('reason', sa.String(), server_default='', nullable=True))
+        if not column_exists('supplier_price_history', 'source'):
+            op.add_column('supplier_price_history', sa.Column('source', sa.String(), server_default='Supplier Update', nullable=True))
 
     # 3. Create price_approval_requests table if missing
     if not table_exists('price_approval_requests'):
@@ -88,6 +114,11 @@ def downgrade() -> None:
         op.drop_index('ix_price_approval_requests_supplier_id', table_name='price_approval_requests')
         op.drop_index('ix_price_approval_requests_temple_id', table_name='price_approval_requests')
         op.drop_table('price_approval_requests')
+
+    if table_exists('supplier_price_history'):
+        op.drop_index('ix_supplier_price_history_supplier_id', table_name='supplier_price_history')
+        op.drop_index('ix_supplier_price_history_temple_id', table_name='supplier_price_history')
+        op.drop_table('supplier_price_history')
 
     if column_exists('kalavara_inventory_items', 'min_stock_source'):
         op.drop_column('kalavara_inventory_items', 'min_stock_source')
