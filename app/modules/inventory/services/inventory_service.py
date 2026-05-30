@@ -138,6 +138,21 @@ class InventoryService:
     # --- Items ---
     @staticmethod
     async def create_item(db: AsyncSession, item_in: InventoryItemCreate, temple_id: str) -> InventoryItem:
+        import math
+        from fastapi import HTTPException
+        
+        min_stock_val = item_in.min_stock
+        unit_price_val = item_in.unit_price
+        
+        if math.isnan(min_stock_val) or math.isnan(unit_price_val):
+            raise HTTPException(status_code=400, detail="Values cannot be NaN")
+            
+        if min_stock_val < 1 or min_stock_val > 100000:
+            raise HTTPException(status_code=400, detail="Minimum Quantity Alert must be between 1 and 100,000")
+            
+        if unit_price_val < 0:
+            raise HTTPException(status_code=400, detail="Unit price cannot be negative")
+
         tid = UUID(str(temple_id))
         item = InventoryItem(
             temple_id=tid,
@@ -182,7 +197,63 @@ class InventoryService:
 
     # --- Suppliers ---
     @staticmethod
-    async def create_supplier(db: AsyncSession, sup_in: SupplierCreate, temple_id: str) -> Supplier:
+    def parse_supplier_item(token: str) -> dict:
+        """Parses a serialized supplier item token into components.
+        Supports:
+        - Legacy: Rice (KG) @ ₹100
+        - Legacy Alternate: Rice (KG) @ ₹100 [Alert: 15]
+        - New: Rice (KG) @ ₹100 [Min: 15]
+        """
+        import re
+        # Regex accepts any legacy or new variant
+        pattern = r"^(.+?)\s*\((.+?)\)\s*@\s*₹?\s*([\d.]+)(?:\s*\[(?:Min|Alert):\s*([\d.]+)\])?$"
+        match = re.match(pattern, token.strip(), re.IGNORECASE)
+        if match:
+            try:
+                name = match.group(1).strip()
+                unit = match.group(2).strip()
+                price = float(match.group(3).strip())
+                min_stock = float(match.group(4).strip()) if match.group(4) else 10.0
+                
+                 # Rule 4: Validation limits (1 to 100,000) and scientific notation rejection
+                raw_min = match.group(4).strip() if match.group(4) else "10"
+                if re.search(r'[eE]', raw_min) or re.search(r'[eE]', match.group(3).strip()):
+                    logger.warning(f"Rejected scientific notation in supplier item: {token}")
+                    return {"valid": False}
+                    
+                import math
+                if math.isnan(min_stock) or math.isnan(price):
+                    logger.warning(f"Rejected NaN value in supplier item: {token}")
+                    return {"valid": False}
+                    
+                if min_stock < 1 or min_stock > 100000 or price < 0:
+                    logger.warning(f"Rejected boundary violation for supplier item: {token}")
+                    return {"valid": False}
+                
+                return {
+                    "name": name,
+                    "unit": unit,
+                    "price": price,
+                    "min_stock": min_stock,
+                    "valid": True
+                }
+            except Exception as e:
+                logger.warning(f"Error parsing supplier item token '{token}': {e}")
+                return {"valid": False}
+        else:
+            logger.warning(f"Malformed supplier item token pattern '{token}'")
+            return {"valid": False}
+
+    @staticmethod
+    def serialize_supplier_item(name: str, unit: str, price: float, min_stock: float) -> str:
+        """Serializes supplier item details into standard token format [Min: X]"""
+        return f"{name} ({unit}) @ ₹{price} [Min: {min_stock}]"
+
+    @staticmethod
+    async def create_supplier(
+        db: AsyncSession, sup_in: SupplierCreate, temple_id: str,
+        user_id: UUID = None, username: str = "Admin"
+    ) -> Supplier:
         tid = UUID(str(temple_id))
         count_result = await db.execute(
             select(func.count(Supplier.id)).filter(Supplier.temple_id == tid)
@@ -203,43 +274,117 @@ class InventoryService:
             remarks=sup_in.remarks,
         )
         db.add(sup)
+        await db.flush()
        
         # Sync Item to Kalavara
         if sup_in.items_supplied and "store module" not in (sup_in.remarks or "").lower():
-            import re
-            pattern = r"(.+)\s\((.+)\)\s@\s₹(.+)"
             for part in sup_in.items_supplied.split(','):
-                match = re.search(pattern, part.strip())
-                if match:
-                    name = match.group(1).strip()
-                    unit = match.group(2).strip()
-                    try:
-                        price = float(match.group(3).strip())
-                    except: continue
-                   
-                    item_res = await db.execute(select(InventoryItem).filter(func.lower(InventoryItem.name) == func.lower(name), InventoryItem.temple_id == tid))
-                    existing_item = item_res.scalars().first()
-                    if not existing_item:
-                        new_inv_item = InventoryItem(
+                res = InventoryService.parse_supplier_item(part)
+                if not res.get("valid"):
+                    continue # Warning already logged
+                
+                name = res["name"]
+                unit = res["unit"]
+                price = res["price"]
+                min_stock_val = res["min_stock"]
+                
+                item_res = await db.execute(
+                    select(InventoryItem).filter(
+                        func.lower(InventoryItem.name) == func.lower(name),
+                        InventoryItem.temple_id == tid
+                    )
+                )
+                existing_item = item_res.scalars().first()
+                
+                if not existing_item:
+                    # Sync creates it: Rule 3 tracking
+                    new_inv_item = InventoryItem(
+                        temple_id=tid,
+                        name=name,
+                        category="Supplier Item",
+                        unit=unit,
+                        min_stock=min_stock_val,
+                        stock=0.0,
+                        unit_price=price,
+                        remarks="Auto-created from Supplier Catalog",
+                        created_from_supplier=True,
+                        min_stock_source="SUPPLIER"
+                    )
+                    db.add(new_inv_item)
+                    await db.flush()
+                    
+                    # Create initial price history
+                    history = SupplierPriceHistory(
+                        temple_id=tid,
+                        supplier_id=sup.id,
+                        item_name=name,
+                        old_price=None,
+                        new_price=price,
+                        changed_by=username,
+                        supplier_name=sup_in.name,
+                        price_difference=price,
+                        percentage_change=0.0,
+                        modified_by_id=str(user_id) if user_id else "SYSTEM",
+                        modified_by_name=username,
+                        reason="Initial supplier registration",
+                        source="Supplier Update"
+                    )
+                    db.add(history)
+                else:
+                    # Item exists!
+                    # Rule 2: Only overwrite threshold if not manually modified
+                    if existing_item.created_from_supplier and existing_item.min_stock_source == "SUPPLIER":
+                        existing_item.min_stock = min_stock_val
+                    
+                    # Rule 13: Price change detection engine
+                    if existing_item.unit_price != price:
+                        old_price = existing_item.unit_price
+                        price_diff = price - old_price
+                        pct_change = ((price - old_price) / old_price * 100) if old_price and old_price > 0 else 0.0
+                        
+                        alert_msg = ""
+                        if pct_change >= 25.0:
+                            alert_msg = "[CRITICAL ALERT: Price increased by {:.2f}%! Review supplier pricing before approval.]".format(pct_change)
+                            logger.error(alert_msg)
+                        elif pct_change >= 10.0:
+                            alert_msg = "[WARNING ALERT: Price increased significantly by {:.2f}%]".format(pct_change)
+                            logger.warning(alert_msg)
+                        elif pct_change <= -20.0:
+                            alert_msg = "[INFO ALERT: Price reduction of {:.2f}% detected.]".format(abs(pct_change))
+                            logger.info(alert_msg)
+
+                        history = SupplierPriceHistory(
                             temple_id=tid,
-                            name=name,
-                            category="Supplier Item",
-                            unit=unit,
-                            min_stock=10,
-                            stock=0,
-                            unit_price=price,
-                            remarks=f"Auto-created from Supplier Catalog"
+                            supplier_id=sup.id,
+                            item_name=name,
+                            old_price=old_price,
+                            new_price=price,
+                            changed_by=username,
+                            supplier_name=sup_in.name,
+                            price_difference=price_diff,
+                            percentage_change=pct_change,
+                            modified_by_id=str(user_id) if user_id else "SYSTEM",
+                            modified_by_name=username,
+                            reason=f"Price updated from Supplier sync. {alert_msg}".strip(),
+                            source="Supplier Update"
                         )
-                        db.add(new_inv_item)
-                    else:
+                        db.add(history)
+                        
+                        # Rule 16: Update unit price but do NOT touch stock/ledgers
                         existing_item.unit_price = price
+                        
+                    existing_item.unit = unit
+                    existing_item.supplier_id = sup.id
 
         await db.commit()
         await db.refresh(sup)
         return sup
 
     @staticmethod
-    async def update_supplier(db: AsyncSession, supplier_id: UUID, sup_in: SupplierCreate, temple_id: str) -> Supplier:
+    async def update_supplier(
+        db: AsyncSession, supplier_id: UUID, sup_in: SupplierCreate, temple_id: str,
+        user_id: UUID = None, username: str = "Admin"
+    ) -> Supplier:
         from app.models.domain import Supplier, SupplierPriceHistory
         tid = UUID(str(temple_id))
         logger.info(f"Updating supplier {supplier_id} for temple {tid}")
@@ -252,67 +397,135 @@ class InventoryService:
             raise HTTPException(status_code=404, detail="Supplier not found")
        
         # Track price changes
-        import re
-        # Pattern matches: Name (Unit) @ ₹Price
-        pattern = r"(.+)\s\((.+)\)\s@\s₹(.+)"
-       
         old_items = {}
         if sup.items_supplied:
             for part in sup.items_supplied.split(','):
-                match = re.search(pattern, part.strip())
-                if match:
-                    name = match.group(1).strip()
-                    try:
-                        price = float(match.group(3).strip())
-                        old_items[name] = price
-                    except: continue
+                res = InventoryService.parse_supplier_item(part)
+                if res.get("valid"):
+                    old_items[res["name"]] = res["price"]
 
         new_items = {}
         if sup_in.items_supplied:
             for part in sup_in.items_supplied.split(','):
-                match = re.search(pattern, part.strip())
-                if match:
-                    name = match.group(1).strip()
-                    unit = match.group(2).strip()
-                    try:
-                        price = float(match.group(3).strip())
-                        new_items[name] = {"price": price, "unit": unit}
-                    except: continue
+                res = InventoryService.parse_supplier_item(part)
+                if res.get("valid"):
+                    new_items[res["name"]] = res
 
         # Record changes and Sync to Kalavara
         for name, data in new_items.items():
             new_price = data["price"]
             unit = data["unit"]
+            min_stock_val = data["min_stock"]
             old_price = old_items.get(name)
-            if old_price != new_price:
-                history = SupplierPriceHistory(
-                    temple_id=tid,
-                    supplier_id=supplier_id,
-                    item_name=name,
-                    old_price=old_price,
-                    new_price=new_price,
-                    changed_by="Admin"
-                )
-                db.add(history)
-           
+            
             # Sync Item to Kalavara
             if "store module" not in (sup_in.remarks or "").lower():
-                item_res = await db.execute(select(InventoryItem).filter(func.lower(InventoryItem.name) == func.lower(name), InventoryItem.temple_id == tid))
+                item_res = await db.execute(
+                    select(InventoryItem).filter(
+                        func.lower(InventoryItem.name) == func.lower(name),
+                        InventoryItem.temple_id == tid
+                    )
+                )
                 existing_item = item_res.scalars().first()
+                
                 if not existing_item:
+                    # New item created: Rule 3 tracking
                     new_inv_item = InventoryItem(
                         temple_id=tid,
                         name=name,
                         category="Supplier Item",
                         unit=unit,
-                        min_stock=10,
-                        stock=0,
+                        min_stock=min_stock_val,
+                        stock=0.0,
                         unit_price=new_price,
-                        remarks="Auto-created from Supplier Catalog"
+                        remarks="Auto-created from Supplier Catalog",
+                        created_from_supplier=True,
+                        min_stock_source="SUPPLIER"
                     )
                     db.add(new_inv_item)
+                    await db.flush()
+                    
+                    history = SupplierPriceHistory(
+                        temple_id=tid,
+                        supplier_id=supplier_id,
+                        item_name=name,
+                        old_price=None,
+                        new_price=new_price,
+                        changed_by=username,
+                        supplier_name=sup_in.name,
+                        price_difference=new_price,
+                        percentage_change=0.0,
+                        modified_by_id=str(user_id) if user_id else "SYSTEM",
+                        modified_by_name=username,
+                        reason="Initial sync during supplier catalog update",
+                        source="Supplier Update"
+                    )
+                    db.add(history)
                 else:
-                    existing_item.unit_price = new_price
+                    # Item exists!
+                    # Rule 2: Only overwrite threshold if not manually modified
+                    if existing_item.created_from_supplier and existing_item.min_stock_source == "SUPPLIER":
+                        existing_item.min_stock = min_stock_val
+                    
+                    # Rule 13: Price change detection engine
+                    if existing_item.unit_price != new_price:
+                        price_diff = new_price - existing_item.unit_price
+                        pct_change = ((new_price - existing_item.unit_price) / existing_item.unit_price * 100) if existing_item.unit_price and existing_item.unit_price > 0 else 0.0
+                        
+                        alert_msg = ""
+                        if pct_change >= 25.0:
+                            alert_msg = "[CRITICAL ALERT: Price increased by {:.2f}%! Review supplier pricing before approval.]".format(pct_change)
+                            logger.error(alert_msg)
+                        elif pct_change >= 10.0:
+                            alert_msg = "[WARNING ALERT: Price increased significantly by {:.2f}%]".format(pct_change)
+                            logger.warning(alert_msg)
+                        elif pct_change <= -20.0:
+                            alert_msg = "[INFO ALERT: Price reduction of {:.2f}% detected.]".format(abs(pct_change))
+                            logger.info(alert_msg)
+
+                        history = SupplierPriceHistory(
+                            temple_id=tid,
+                            supplier_id=supplier_id,
+                            item_name=name,
+                            old_price=existing_item.unit_price,
+                            new_price=new_price,
+                            changed_by=username,
+                            supplier_name=sup_in.name,
+                            price_difference=price_diff,
+                            percentage_change=pct_change,
+                            modified_by_id=str(user_id) if user_id else "SYSTEM",
+                            modified_by_name=username,
+                            reason=f"Price updated from Supplier sync. {alert_msg}".strip(),
+                            source="Supplier Update"
+                        )
+                        db.add(history)
+                        
+                        # Rule 16: Update unit price but do NOT touch stock/ledgers
+                        existing_item.unit_price = new_price
+                        
+                    existing_item.unit = unit
+                    existing_item.supplier_id = supplier_id
+            else:
+                # If store module supplier, we still record history if price changed
+                if old_price is not None and old_price != new_price:
+                    price_diff = new_price - old_price
+                    pct_change = ((new_price - old_price) / old_price * 100) if old_price > 0 else 0.0
+                    history = SupplierPriceHistory(
+                        temple_id=tid,
+                        supplier_id=supplier_id,
+                        item_name=name,
+                        old_price=old_price,
+                        new_price=new_price,
+                        changed_by=username,
+                        supplier_name=sup_in.name,
+                        price_difference=price_diff,
+                        percentage_change=pct_change,
+                        modified_by_id=str(user_id) if user_id else "SYSTEM",
+                        modified_by_name=username,
+                        reason="Supplier price updated in catalog",
+                        source="Supplier Update"
+                    )
+                    db.add(history)
        
         sup.name = sup_in.name
         sup.contact = sup_in.contact
@@ -347,6 +560,169 @@ class InventoryService:
             .order_by(Supplier.created_at)
         )
         return result.scalars().all()
+
+    @staticmethod
+    async def update_item(
+        db: AsyncSession, item_id: UUID, item_in: dict, temple_id: str,
+        user_id: UUID = None, username: str = "Admin"
+    ) -> InventoryItem:
+        tid = UUID(str(temple_id))
+        result = await db.execute(
+            select(InventoryItem).filter(InventoryItem.id == item_id, InventoryItem.temple_id == tid)
+        )
+        item = result.scalars().first()
+        if not item:
+            from fastapi import HTTPException
+            raise HTTPException(status_code=404, detail="Item not found")
+
+        import math
+        from fastapi import HTTPException
+        
+        # Enforce validation Rules (Rule 4)
+        new_price = item_in.get("unit_price")
+        if new_price is not None:
+            if math.isnan(new_price):
+                raise HTTPException(status_code=400, detail="Price cannot be NaN")
+            if new_price < 0:
+                raise HTTPException(status_code=400, detail="Price cannot be negative")
+                
+        new_min_stock = item_in.get("min_stock")
+        if new_min_stock is not None:
+            if math.isnan(new_min_stock):
+                raise HTTPException(status_code=400, detail="Minimum Quantity Alert cannot be NaN")
+            if new_min_stock < 1 or new_min_stock > 100000:
+                raise HTTPException(status_code=400, detail="Minimum Quantity Alert must be between 1 and 100,000")
+
+        # 1. Price Volatility Governance
+        new_price = item_in.get("unit_price")
+        if new_price is not None and new_price != item.unit_price:
+            old_price = item.unit_price
+            price_diff = new_price - old_price
+            pct_change = ((new_price - old_price) / old_price * 100) if old_price and old_price > 0 else 0.0
+            
+            supplier_name = "N/A"
+            if item.supplier_id:
+                sup_res = await db.execute(select(Supplier).filter(Supplier.id == item.supplier_id))
+                sup = sup_res.scalars().first()
+                if sup:
+                    supplier_name = sup.name
+            
+            history = SupplierPriceHistory(
+                temple_id=tid,
+                supplier_id=item.supplier_id or UUID("00000000-0000-0000-0000-000000000000"),
+                item_name=item.name,
+                old_price=old_price,
+                new_price=new_price,
+                changed_by=username,
+                supplier_name=supplier_name,
+                price_difference=price_diff,
+                percentage_change=pct_change,
+                modified_by_id=str(user_id) if user_id else "SYSTEM",
+                modified_by_name=username,
+                reason=item_in.get("remarks") or "Manual price update",
+                source="Manual Edit"
+            )
+            db.add(history)
+            
+            # Rule 16: Only update Unit Price, leave quantities/ledgers intact
+            item.unit_price = new_price
+
+        # 2. Threshold Governance
+        new_min_stock = item_in.get("min_stock")
+        if new_min_stock is not None:
+            # Rule 3: Mark as MANUAL threshold
+            item.min_stock = new_min_stock
+            item.min_stock_source = "MANUAL"
+
+        if "category" in item_in:
+            item.category = item_in["category"]
+        if "unit" in item_in:
+            item.unit = item_in["unit"]
+        if "remarks" in item_in:
+            item.remarks = item_in["remarks"]
+
+        await db.commit()
+        await db.refresh(item)
+        return item
+
+    @staticmethod
+    async def get_item_price_history(db: AsyncSession, item_id: UUID, temple_id: str) -> dict:
+        tid = UUID(str(temple_id))
+        item_res = await db.execute(
+            select(InventoryItem).filter(InventoryItem.id == item_id, InventoryItem.temple_id == tid)
+        )
+        item = item_res.scalars().first()
+        if not item:
+            from fastapi import HTTPException
+            raise HTTPException(status_code=404, detail="Item not found")
+
+        history_res = await db.execute(
+            select(SupplierPriceHistory)
+            .filter(
+                func.lower(SupplierPriceHistory.item_name) == func.lower(item.name),
+                SupplierPriceHistory.temple_id == tid
+            )
+            .order_by(SupplierPriceHistory.created_at.desc())
+        )
+        history_list = history_res.scalars().all()
+
+        # Volatility Analytics (Rule 14)
+        total_changes = len(history_list)
+        last_change_date = None
+        highest_price = item.unit_price
+        lowest_price = item.unit_price
+        avg_price = item.unit_price
+
+        prices = [item.unit_price]
+        for h in history_list:
+            if h.new_price is not None:
+                prices.append(h.new_price)
+            if h.old_price is not None:
+                prices.append(h.old_price)
+
+        if total_changes > 0:
+            last_change_date = history_list[0].created_at.isoformat()
+            highest_price = max(prices)
+            lowest_price = min(prices)
+            avg_price = sum(prices) / len(prices)
+
+        trend = "STABLE"
+        if len(history_list) >= 1:
+            latest = history_list[0].new_price
+            prev = history_list[0].old_price if history_list[0].old_price is not None else latest
+            if latest > prev:
+                trend = "INCREASING"
+            elif latest < prev:
+                trend = "DECREASING"
+
+        formatted_history = []
+        for h in history_list:
+            formatted_history.append({
+                "date": h.created_at.strftime("%d-%b-%Y"),
+                "timestamp": h.created_at.isoformat(),
+                "old_price": h.old_price,
+                "new_price": h.new_price,
+                "difference": h.price_difference,
+                "percentage_change": h.percentage_change,
+                "updated_by": h.modified_by_name or h.changed_by,
+                "supplier": h.supplier_name or "Manual Edit",
+                "source": h.source,
+                "reason": h.reason or ""
+            })
+
+        return {
+            "item_name": item.name,
+            "current_price": item.unit_price,
+            "analytics": {
+                "last_price_change_date": last_change_date,
+                "total_price_changes": total_changes,
+                "average_purchase_price": avg_price,
+                "highest_historical_price": highest_price,
+                "lowest_historical_price": lowest_price,
+                "current_price_trend": trend
+            },
+            "history": formatted_history
+        }
 
     # --- Invoices / GRN ---
     @staticmethod
@@ -1091,7 +1467,7 @@ class InventoryService:
         tid = UUID(str(temple_id))
         res = await db.execute(
             select(InventoryItem)
-            .filter(InventoryItem.temple_id == tid, InventoryItem.stock <= InventoryItem.min_stock)
+            .filter(InventoryItem.temple_id == tid, InventoryItem.stock < InventoryItem.min_stock)
         )
         return res.scalars().all()
 
@@ -1100,7 +1476,7 @@ class InventoryService:
         tid = UUID(str(temple_id))
         res = await db.execute(
             select(func.count(InventoryItem.id))
-            .filter(InventoryItem.temple_id == tid, InventoryItem.stock <= InventoryItem.min_stock)
+            .filter(InventoryItem.temple_id == tid, InventoryItem.stock < InventoryItem.min_stock)
         )
         return res.scalar() or 0
 

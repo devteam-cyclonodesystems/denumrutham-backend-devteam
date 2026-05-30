@@ -78,7 +78,7 @@ class DashboardService:
         # 4. Inventory
         low_stock_res = await db.execute(
             select(func.count(InventoryItem.id))
-            .filter(InventoryItem.temple_id == tid, InventoryItem.stock <= InventoryItem.min_stock)
+            .filter(InventoryItem.temple_id == tid, InventoryItem.stock < InventoryItem.min_stock)
         )
         low_inventory_count = low_stock_res.scalar() or 0
 

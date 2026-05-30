@@ -6,7 +6,7 @@ from uuid import UUID
 from app.api.deps import get_db, get_current_user, get_current_temple_id, require_permission
 from app.schemas.domain import TokenData
 from app.schemas.inventory import (
-    InventoryItemCreate, InventoryItemResponse,
+    InventoryItemCreate, InventoryItemResponse, InventoryItemUpdate,
     SupplierCreate, SupplierResponse,
     InvoiceCreate, InvoiceResponse, DeliveryComplete,
     ItemRequestCreate, ItemRequestResponse,
@@ -42,6 +42,33 @@ async def list_items(
     return await InventoryService.get_items(db=db, temple_id=temple_id, skip=skip, limit=limit)
 
 
+@router.patch("/items/{item_id}", response_model=InventoryItemResponse, tags=["inventory"])
+async def update_item(
+    item_id: str,
+    item_in: InventoryItemUpdate,
+    db: AsyncSession = Depends(get_db),
+    current_user: TokenData = Depends(get_current_user),
+    temple_id: str = Depends(get_current_temple_id),
+):
+    return await InventoryService.update_item(
+        db=db, item_id=UUID(item_id), item_in=item_in.model_dump(exclude_unset=True), temple_id=temple_id,
+        user_id=current_user.sub if current_user else None,
+        username=current_user.username or "Admin" if current_user else "Admin"
+    )
+
+
+@router.get("/items/{item_id}/price-history", tags=["inventory"])
+async def get_item_price_history(
+    item_id: str,
+    db: AsyncSession = Depends(get_db),
+    current_user: TokenData = Depends(get_current_user),
+    temple_id: str = Depends(get_current_temple_id),
+):
+    return await InventoryService.get_item_price_history(
+        db=db, item_id=UUID(item_id), temple_id=temple_id
+    )
+
+
 # --- Suppliers ---
 @router.post("/suppliers", response_model=SupplierResponse, tags=["inventory"])
 async def create_supplier(
@@ -50,7 +77,11 @@ async def create_supplier(
     current_user: TokenData = Depends(get_current_user),
     temple_id: str = Depends(get_current_temple_id),
 ):
-    return await InventoryService.create_supplier(db=db, sup_in=sup_in, temple_id=temple_id)
+    return await InventoryService.create_supplier(
+        db=db, sup_in=sup_in, temple_id=temple_id,
+        user_id=current_user.sub if current_user else None,
+        username=current_user.username or "Admin" if current_user else "Admin"
+    )
 
 
 @router.post("/vendor-update/{supplier_id}", response_model=SupplierResponse, tags=["inventory"])
@@ -58,9 +89,14 @@ async def update_supplier(
     supplier_id: str,
     sup_in: SupplierCreate,
     db: AsyncSession = Depends(get_db),
+    current_user: TokenData = Depends(get_current_user),
     temple_id: str = Depends(get_current_temple_id),
 ):
-    return await InventoryService.update_supplier(db=db, supplier_id=UUID(supplier_id), sup_in=sup_in, temple_id=temple_id)
+    return await InventoryService.update_supplier(
+        db=db, supplier_id=UUID(supplier_id), sup_in=sup_in, temple_id=temple_id,
+        user_id=current_user.sub if current_user else None,
+        username=current_user.username or "Admin" if current_user else "Admin"
+    )
 
 
 @router.get("/suppliers/{supplier_id}/history", tags=["inventory"])

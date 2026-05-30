@@ -29,6 +29,16 @@ class InventoryItemResponse(BaseModel):
     purchase_mode: Optional[str] = "Local"
     remarks: Optional[str] = ""
     created_at: Optional[datetime] = None
+    created_from_supplier: Optional[bool] = False
+    min_stock_source: Optional[str] = "MANUAL"
+
+
+class InventoryItemUpdate(BaseModel):
+    min_stock: Optional[float] = None
+    unit_price: Optional[float] = None
+    category: Optional[str] = None
+    unit: Optional[str] = None
+    remarks: Optional[str] = None
 
 
 # ---------- Supplier ----------

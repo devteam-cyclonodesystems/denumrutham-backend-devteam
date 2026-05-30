@@ -42,6 +42,10 @@ class InventoryItem(Base):
     archived_at = Column(DateTime(timezone=True), nullable=True)
     archived_by = Column(UUID(as_uuid=True), ForeignKey("users.id"), nullable=True)
 
+    # --- Source Tracking ---
+    created_from_supplier = Column(Boolean, default=False)
+    min_stock_source = Column(String, default="MANUAL")
+
 
 
 
@@ -183,6 +187,15 @@ class SupplierPriceHistory(Base):
     new_price = Column(Float, nullable=False)
     changed_by = Column(String, default="Admin")
     created_at = Column(DateTime(timezone=True), default=utcnow)
+    
+    # --- Governance & Audit Trail ---
+    supplier_name = Column(String, default="")
+    price_difference = Column(Float, default=0.0)
+    percentage_change = Column(Float, default=0.0)
+    modified_by_id = Column(String, default="")
+    modified_by_name = Column(String, default="")
+    reason = Column(String, default="")
+    source = Column(String, default="Supplier Update")
 
 
 

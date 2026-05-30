@@ -748,7 +748,7 @@ async def system_health_dashboard(
         select(func.count(InventoryItem.id)).filter(
             InventoryItem.temple_id == tid,
             InventoryItem.is_archived == False,
-            InventoryItem.stock <= InventoryItem.min_stock
+            InventoryItem.stock < InventoryItem.min_stock
         )
     )
     kalavara_low_count = kalavara_low_res.scalar() or 0
