@@ -236,6 +236,10 @@ async def process_hall_refund(
             auto_commit=False
         )
         
+        # Convert float columns to Decimal for NUMERIC columns in database (avoids asyncpg conversion error)
+        amount_paid_before_dec = Decimal(str(booking.amount_paid or 0.0))
+        balance_before_dec = Decimal(str(booking.amount or 0.0)) - amount_paid_before_dec
+
         # Create RefundHistory record
         refund_hist = RefundHistory(
             temple_id=tid,
@@ -247,8 +251,8 @@ async def process_hall_refund(
             refund_reason=refund_in.reason,
             refund_type=refund_type,
             status="PENDING",
-            amount_paid_before=booking.amount_paid,
-            balance_before=booking.amount - (booking.discount_amount or 0) - booking.amount_paid,
+            amount_paid_before=amount_paid_before_dec,
+            balance_before=balance_before_dec,
             payment_status_before=booking.payment_status,
             requested_by=UUID(str(current_user.sub)),
             approval_request_id=approval_req.id,

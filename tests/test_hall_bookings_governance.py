@@ -37,7 +37,7 @@ async def test_hall_bookings_refund_governance_lifecycle(client: AsyncClient, au
             date="2026-06-10",
             end_date="2026-06-12",
             purpose="Wedding Reception",
-            amount=10000.0,
+            amount=9000.0,
             discount_amount=1000.0,
             amount_paid=9000.0,
             payment_status="SUCCESS",

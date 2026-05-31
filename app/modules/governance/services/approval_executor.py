@@ -76,11 +76,12 @@ class ApprovalExecutor:
             refund_res = await db.execute(refund_stmt)
             refund_hist = refund_res.scalar_one_or_none()
             if refund_hist:
+                from decimal import Decimal
                 refund_hist.status = "COMPLETED"
                 refund_hist.approved_by = UUID(executed_by) if executed_by else None
                 refund_hist.processed_at = datetime.now(timezone.utc)
-                refund_hist.amount_paid_after = booking.amount_paid
-                refund_hist.balance_after = booking.amount - (booking.discount_amount or 0) - booking.amount_paid
+                refund_hist.amount_paid_after = Decimal(str(booking.amount_paid or 0.0))
+                refund_hist.balance_after = Decimal(str(booking.amount or 0.0)) - Decimal(str(booking.amount_paid or 0.0))
                 refund_hist.payment_status_after = booking.payment_status
                 
             # 4. Update the Booking
