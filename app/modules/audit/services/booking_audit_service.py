@@ -1,11 +1,24 @@
 import logging
 from uuid import UUID
-from datetime import datetime
+from datetime import datetime, date
 from sqlalchemy.ext.asyncio import AsyncSession
 from app.models.hall_booking import BookingAuditLog, BookingStatusHistory
 from app.models.domain import utcnow
 
 logger = logging.getLogger("tms.services.booking_audit")
+
+def _make_serializable(data):
+    if data is None:
+        return None
+    if isinstance(data, dict):
+        return {k: _make_serializable(v) for k, v in data.items()}
+    if isinstance(data, list):
+        return [_make_serializable(v) for v in data]
+    if isinstance(data, UUID):
+        return str(data)
+    if isinstance(data, (datetime, date)):
+        return data.isoformat()
+    return data
 
 class BookingAuditService:
     @staticmethod
@@ -25,9 +38,9 @@ class BookingAuditService:
             booking_id=UUID(str(booking_id)),
             action=action,
             performed_by=UUID(str(performed_by)) if performed_by else None,
-            previous_values=previous_values,
-            new_values=new_values,
-            ip_metadata=ip_metadata
+            previous_values=_make_serializable(previous_values),
+            new_values=_make_serializable(new_values),
+            ip_metadata=_make_serializable(ip_metadata)
         )
         db.add(audit_log)
         await db.flush()
