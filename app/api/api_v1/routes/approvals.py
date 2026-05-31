@@ -40,7 +40,7 @@ async def get_pending_approvals(
             "temple_id": str(a.temple_id),
             "module": a.module,
             "entity_id": a.entity_id,
-            "action": a.action,
+            "action": a.module,
             "status": a.status,
             "requested_by": str(a.requested_by),
             "created_at": a.created_at.isoformat(),

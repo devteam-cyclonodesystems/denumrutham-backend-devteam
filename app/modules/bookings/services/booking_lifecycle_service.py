@@ -35,6 +35,10 @@ class BookingLifecycleService:
         
         if not booking:
             raise HTTPException(status_code=404, detail="Booking not found")
+
+        # Lock booking transitions if a refund request is pending approval
+        if booking.refund_status == "PENDING_APPROVAL":
+            raise HTTPException(status_code=400, detail="Status transitions are locked because a refund approval request is pending")
             
         old_status = booking.status.lower()
         new_status_lower = new_status.lower()

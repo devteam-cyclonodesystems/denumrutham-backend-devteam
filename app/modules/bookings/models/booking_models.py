@@ -1,7 +1,7 @@
 import uuid
 import enum
 from datetime import datetime, timezone
-from sqlalchemy import Column, String, Boolean, DateTime, ForeignKey, Float, Text, Enum, Integer, Time, UniqueConstraint, Date, JSON, Index, text, CheckConstraint
+from sqlalchemy import Column, String, Boolean, DateTime, ForeignKey, Float, Text, Enum, Integer, Time, UniqueConstraint, Date, JSON, Index, text, CheckConstraint, Numeric, event
 from sqlalchemy.dialects.postgresql import UUID
 from sqlalchemy.orm import relationship
 from app.core.database.database import Base
@@ -9,6 +9,7 @@ from app.modules.governance.models.operational_states import TempleOperationalSt
 
 def utcnow():
     return datetime.now(timezone.utc)
+
 
 
 class BookingStatus(str, enum.Enum):
@@ -223,6 +224,90 @@ class HallBooking(Base):
     device_origin = Column(String, nullable=True)
     sync_state = Column(String, default="SYNCED") # PENDING, SYNCED, CONFLICT
     payment_status = Column(String, default="PENDING", index=True)
+    refund_status = Column(String, default="NONE", nullable=False)
+    has_pending_refund = Column(Boolean, default=False, nullable=False, index=True)
+    last_refund_history_id = Column(UUID(as_uuid=True), nullable=True)
+
+
+class RefundHistory(Base):
+    __tablename__ = "refund_history"
+
+    id = Column(UUID(as_uuid=True), primary_key=True, default=uuid.uuid4)
+    temple_id = Column(UUID(as_uuid=True), ForeignKey("temples.id"), nullable=False, index=True)
+    booking_id = Column(UUID(as_uuid=True), ForeignKey("hall_bookings.id"), nullable=False, index=True)
+    booking_reference = Column(String, nullable=False)
+    customer_name = Column(String, nullable=False)
+    
+    # Financial values (Decimal-safe numeric types)
+    refund_amount = Column(Numeric(precision=12, scale=2), nullable=False)
+    refund_method = Column(String, nullable=False)  # Cash, UPI, Card
+    refund_reason = Column(Text, nullable=True)
+    refund_type = Column(String, nullable=False)    # FULL, PARTIAL
+    status = Column(String, default="PENDING", index=True)  # PENDING, REJECTED, COMPLETED, FAILED
+    
+    # Auditor-Grade Snapshot Fields
+    amount_paid_before = Column(Numeric(precision=12, scale=2), nullable=True)
+    amount_paid_after = Column(Numeric(precision=12, scale=2), nullable=True)
+    balance_before = Column(Numeric(precision=12, scale=2), nullable=True)
+    balance_after = Column(Numeric(precision=12, scale=2), nullable=True)
+    payment_status_before = Column(String, nullable=True)
+    payment_status_after = Column(String, nullable=True)
+    
+    # Governance Trail
+    requested_by = Column(UUID(as_uuid=True), ForeignKey("users.id"), nullable=False)
+    approved_by = Column(UUID(as_uuid=True), ForeignKey("users.id"), nullable=True)
+    rejected_by = Column(UUID(as_uuid=True), ForeignKey("users.id"), nullable=True)
+    approval_request_id = Column(UUID(as_uuid=True), ForeignKey("approval_requests.id"), nullable=True)
+    
+    # Decision Trail
+    review_remarks = Column(Text, nullable=True)
+    decision_reason = Column(Text, nullable=True)
+    
+    # Failure Fields
+    failure_reason = Column(Text, nullable=True)
+    failure_code = Column(String, nullable=True)
+    failed_at = Column(DateTime(timezone=True), nullable=True)
+    
+    requested_at = Column(DateTime(timezone=True), default=utcnow)
+    processed_at = Column(DateTime(timezone=True), nullable=True)
+    created_at = Column(DateTime(timezone=True), default=utcnow)
+    updated_at = Column(DateTime(timezone=True), default=utcnow, onupdate=utcnow)
+
+    __table_args__ = (
+        Index("idx_refund_history_booking_id", "booking_id"),
+        Index("idx_refund_history_approval_req", "approval_request_id"),
+        Index("idx_refund_history_requested_at", "requested_at"),
+        Index("idx_refund_history_processed_at", "processed_at"),
+        Index("idx_refund_history_tenant_status", "temple_id", "status"),
+        Index("idx_refund_history_tenant_req_at", "temple_id", "requested_at"),
+        Index("idx_refund_history_tenant_proc_at", "temple_id", "processed_at"),
+        Index("idx_refund_history_tenant_type", "temple_id", "refund_type"),
+    )
+
+
+# Immutability Event Listeners on RefundHistory
+@event.listens_for(RefundHistory, "before_delete")
+def prevent_refund_history_delete(mapper, connection, target):
+    raise ValueError("Financial records in RefundHistory are immutable and cannot be deleted.")
+
+
+@event.listens_for(RefundHistory, "before_update")
+def prevent_refund_history_update(mapper, connection, target):
+    from sqlalchemy import inspect
+    state = inspect(target)
+    
+    allowed_updates = {
+        "status", "approved_by", "rejected_by", "processed_at",
+        "review_remarks", "decision_reason", "failure_reason",
+        "failure_code", "failed_at", "updated_at",
+        "amount_paid_after", "balance_after", "payment_status_after"
+    }
+    
+    for attr in state.attrs:
+        if attr.history.has_changes():
+            if attr.key not in allowed_updates:
+                raise ValueError(f"Attribute '{attr.key}' in RefundHistory is immutable and cannot be modified.")
+
 
 
 

@@ -228,6 +228,11 @@ class HallService:
         if not booking:
             return None
 
+        # Lock booking from updates if a refund request is pending approval
+        if booking.refund_status == "PENDING_APPROVAL":
+            from fastapi import HTTPException
+            raise HTTPException(status_code=400, detail="Financial modifications are locked because a refund approval request is pending")
+
         update_data = update_in.model_dump(exclude_unset=True)
         
         # Payment tracking additions
@@ -358,10 +363,12 @@ class HallService:
         refund_status: str = "Full",
         reason: str = "",
         user_id: str = None,
+        auto_commit: bool = True,
     ) -> dict:
         """Process a refund for a hall booking."""
         tid = UUID(str(temple_id))
         bid = UUID(str(booking_id))
+        from decimal import Decimal
 
         # Get the booking
         result = await db.execute(
@@ -371,8 +378,10 @@ class HallService:
         if not booking:
             return None
 
-        # Validate refund amount
-        if amount > (booking.amount_paid or 0):
+        # Validate refund amount (Phase 18: Decimal financial safety)
+        amount_dec = Decimal(str(amount))
+        amount_paid_dec = Decimal(str(booking.amount_paid or 0.0))
+        if amount_dec > amount_paid_dec:
             from fastapi import HTTPException
             raise HTTPException(status_code=400, detail="Refund amount exceeds paid amount")
 
@@ -383,10 +392,15 @@ class HallService:
         ledger = ledger_result.scalar_one_or_none()
 
         if ledger:
-            ledger.refunded_amount = (ledger.refunded_amount or 0) + amount
-            ledger.paid_amount = max(0, (ledger.paid_amount or 0) - amount)
-            ledger.due_amount = max(0, ledger.total_amount - ledger.paid_amount)
-            if ledger.refunded_amount >= ledger.total_amount:
+            ledger_total_dec = Decimal(str(ledger.total_amount or 0.0))
+            ledger_refunded_dec = Decimal(str(ledger.refunded_amount or 0.0)) + amount_dec
+            ledger_paid_dec = max(Decimal(0), Decimal(str(ledger.paid_amount or 0.0)) - amount_dec)
+            
+            ledger.refunded_amount = float(ledger_refunded_dec)
+            ledger.paid_amount = float(ledger_paid_dec)
+            ledger.due_amount = float(max(Decimal(0), ledger_total_dec - ledger_paid_dec))
+            
+            if ledger_refunded_dec >= ledger_total_dec:
                 ledger.status = "REFUNDED"
             else:
                 ledger.status = "PARTIAL"
@@ -402,12 +416,14 @@ class HallService:
             )
             db.add(refund_txn)
 
-        # Update booking status if full refund
+        # Update booking status (both Full and Partial refunds decrement amount_paid)
         if refund_status == "Full":
             booking.status = "cancelled"
             booking.payment_status = "REFUNDED"
         else:
-            booking.amount_paid = max(0, (booking.amount_paid or 0) - amount)
+            booking.payment_status = "PARTIALLY_REFUNDED"
+            
+        booking.amount_paid = float(max(Decimal(0), amount_paid_dec - amount_dec))
 
         # Create expense transaction for accounting
         from datetime import datetime
@@ -434,7 +450,10 @@ class HallService:
             new_values={"amount": amount, "method": refund_method, "type": refund_status, "reason": reason}
         )
 
-        await db.commit()
+        if auto_commit:
+            await db.commit()
+        else:
+            await db.flush()
 
         return {
             "id": str(booking.id),
