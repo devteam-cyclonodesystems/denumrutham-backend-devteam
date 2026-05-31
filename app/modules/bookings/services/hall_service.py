@@ -239,61 +239,88 @@ class HallService:
         old_amount_paid = booking.amount_paid or 0.0
         new_amount_paid = update_data.get("amount_paid")
 
-        # Capture old values for general audit log
+        # Capture old values for general audit log before applying updates
         old_values = {}
         for key in update_data.keys():
             old_values[key] = getattr(booking, key)
 
+        # Recalculate final amount using PricingEngine if pricing-relevant fields are updated
+        new_base_amount = update_data.get("amount")
+        new_discount_amount = update_data.get("discount_amount")
+        new_date = update_data.get("date")
+        new_hall_id = update_data.get("hall_id")
+
+        if any(v is not None for v in [new_base_amount, new_discount_amount, new_date, new_hall_id]):
+            calc_base = new_base_amount if new_base_amount is not None else (booking.amount + booking.discount_amount)
+            calc_discount = new_discount_amount if new_discount_amount is not None else booking.discount_amount
+            calc_date = new_date if new_date is not None else booking.date
+            calc_hall_id = str(new_hall_id) if new_hall_id is not None else str(booking.hall_id)
+
+            price_calc = await PricingEngineService.calculate_price(
+                db=db,
+                temple_id=temple_id,
+                hall_id=calc_hall_id,
+                base_amount=calc_base,
+                discount_amount=calc_discount,
+                booking_date=calc_date
+            )
+            # Override with calculated values (amount stores final net amount)
+            update_data["amount"] = price_calc["final_amount"]
+            update_data["discount_amount"] = price_calc["discount_amount"]
+
+        # Apply update attributes
         for key, value in update_data.items():
             setattr(booking, key, value)
 
+        # Synchronize and update the ledger
+        ledger_result = await db.execute(
+            select(PaymentLedger).filter(PaymentLedger.booking_id == bid)
+        )
+        ledger = ledger_result.scalar_one_or_none()
+        if ledger:
+            ledger.total_amount = booking.amount
+            if new_amount_paid is not None:
+                ledger.paid_amount = new_amount_paid
+            ledger.due_amount = max(0.0, ledger.total_amount - ledger.paid_amount)
+            ledger.status = "COMPLETED" if ledger.due_amount <= 0 else ("PARTIAL" if ledger.paid_amount > 0 else "PENDING")
+
+        # Process additional payment transaction and log if amount paid increased
         if new_amount_paid is not None:
             diff = new_amount_paid - old_amount_paid
-            if diff > 0:
-                # Update ledger
-                ledger_result = await db.execute(
-                    select(PaymentLedger).filter(PaymentLedger.booking_id == bid)
+            if diff > 0 and ledger:
+                pay_mode = update_data.get("payment_mode") or booking.payment_mode or "Cash"
+                payment_txn = PaymentTransaction(
+                    temple_id=tid,
+                    ledger_id=ledger.id,
+                    transaction_type="PAYMENT",
+                    amount=diff,
+                    payment_mode=pay_mode,
+                    status="SUCCESS"
                 )
-                ledger = ledger_result.scalar_one_or_none()
-                if ledger:
-                    ledger.paid_amount = new_amount_paid
-                    ledger.due_amount = max(0.0, ledger.total_amount - new_amount_paid)
-                    ledger.status = "COMPLETED" if ledger.due_amount <= 0 else "PARTIAL"
-                    
-                    # Create PaymentTransaction record
-                    pay_mode = update_data.get("payment_mode") or booking.payment_mode or "Cash"
-                    payment_txn = PaymentTransaction(
-                        temple_id=tid,
-                        ledger_id=ledger.id,
-                        transaction_type="PAYMENT",
-                        amount=diff,
-                        payment_mode=pay_mode,
-                        status="SUCCESS"
-                    )
-                    db.add(payment_txn)
-                    
-                    # Create financial transaction in ledger
-                    await TransactionService.create_transaction(
-                        db=db,
-                        temple_id=str(temple_id),
-                        txn_type="income",
-                        category="hall_booking",
-                        amount=diff,
-                        description=f"Hall Booking due payment - {booking.customer_name}",
-                        reference_id=booking.ref_number,
-                        source="system"
-                    )
-                    
-                    # Log to audit trail
-                    await BookingAuditService.log_action(
-                        db=db,
-                        temple_id=temple_id,
-                        booking_id=booking_id,
-                        action="PAYMENT_ADDED",
-                        performed_by=user_id,
-                        new_values={"amount": diff, "payment_mode": pay_mode}
-                    )
-                booking.payment_status = "SUCCESS" if (booking.amount - new_amount_paid) <= 0 else "PARTIAL"
+                db.add(payment_txn)
+                
+                await TransactionService.create_transaction(
+                    db=db,
+                    temple_id=str(temple_id),
+                    txn_type="income",
+                    category="hall_booking",
+                    amount=diff,
+                    description=f"Hall Booking due payment - {booking.customer_name}",
+                    reference_id=booking.ref_number,
+                    source="system"
+                )
+                
+                await BookingAuditService.log_action(
+                    db=db,
+                    temple_id=temple_id,
+                    booking_id=booking_id,
+                    action="PAYMENT_ADDED",
+                    performed_by=user_id,
+                    new_values={"amount": diff, "payment_mode": pay_mode}
+                )
+
+        current_paid = booking.amount_paid or 0.0
+        booking.payment_status = "SUCCESS" if (booking.amount - current_paid) <= 0 else ("PARTIAL" if current_paid > 0 else "PENDING")
 
         # Log general update action if not just a payment addition
         if update_data:
