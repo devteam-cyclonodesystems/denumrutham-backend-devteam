@@ -482,6 +482,10 @@ class StaffService:
             ("tab", "settings:manage", "Configure Temple Rules & RBAC Permissions"),
             ("tab", "staff:manage_roles", "Manage Staff Roles & Permissions"),
             ("tab", "staff:manage_employees", "Manage Staff Accounts"),
+            ("tab", "offerings:view", "View Offerings Module"),
+            ("tab", "communication:view", "View Communication Module"),
+            ("tab", "activity-logs:view", "View Activity Logs"),
+            ("tab", "workflows:view", "View Workflows Dashboard"),
         ]
 
         for r_type, r_key, desc in global_perms:
