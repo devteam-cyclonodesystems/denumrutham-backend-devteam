@@ -99,6 +99,7 @@ async def test_activity_logs_pipeline(setup_database):
         )
         log = log_res.scalar_one_or_none()
         assert log is not None
+        print("DEBUG LOG DICT IS:", {c.name: getattr(log, c.name) for c in log.__table__.columns})
         assert log.audit_chain_index == 1
         assert log.previous_hash == "0" * 64
         assert log.current_hash != ""
@@ -170,6 +171,87 @@ async def test_activity_logs_pipeline(setup_database):
             await db.commit()
         assert "Mutation Denied: Activity log entries are strictly immutable." in str(exc_info_del.value)
         await db.rollback()
+
+
+@pytest.mark.asyncio
+async def test_archana_and_offering_event_propagation(setup_database):
+    from tests.conftest import TestSessionLocal, TEMPLE_ID
+    from app.models.archana import ArchanaBookingAudit, EnterpriseArchanaBooking
+    from app.models.offering import OfferingAuditLog, Offering
+    from app.modules.audit.models.audit_models import ActivityOutbox
+    from sqlalchemy.future import select
+    import uuid
+    from datetime import datetime, timezone
+
+    async with TestSessionLocal() as db:
+        # Create a dummy booking first to satisfy ForeignKey/relation if any
+        booking = EnterpriseArchanaBooking(
+            id=uuid.uuid4(),
+            temple_id=TEMPLE_ID,
+            ref_id="AR-TEST-9999",
+            primary_devotee_name="Test Devotee Name",
+            phone_number="9999999999",
+            email="devotee@example.com",
+            booking_date=datetime.now(timezone.utc),
+            grand_total=150.0,
+            status="CONFIRMED"
+        )
+        db.add(booking)
+        await db.flush()
+
+        audit = ArchanaBookingAudit(
+            booking_id=booking.id,
+            action="CREATED",
+            actor_id=None,
+            new_state={"ref_id": "AR-TEST-9999", "total": 150.0}
+        )
+        db.add(audit)
+        
+        # Test Offering event listener
+        offering = Offering(
+            id=uuid.uuid4(),
+            temple_id=TEMPLE_ID,
+            offering_number="OFF-TEST-9999",
+            donor_name="Test Donor Name",
+            total_amount=500.0,
+            created_by=None
+        )
+        db.add(offering)
+        await db.flush()
+
+        off_audit = OfferingAuditLog(
+            offering_id=offering.id,
+            temple_id=TEMPLE_ID,
+            action_type="CREATED",
+            new_value={"offering_number": "OFF-TEST-9999", "amount": 500.0},
+            changed_by="Test Performer User"
+        )
+        db.add(off_audit)
+        
+        await db.commit()
+
+    async with TestSessionLocal() as db:
+        # Verify outbox has the Archana entry
+        res = await db.execute(
+            select(ActivityOutbox).filter(ActivityOutbox.entity_id == "AR-TEST-9999")
+        )
+        entry = res.scalar_one_or_none()
+        assert entry is not None
+        assert entry.module_name == "BOOKINGS"
+        assert entry.entity_name == "ArchanaBooking"
+        assert "Test Devotee Name" in entry.description
+        assert "150.0" in entry.description
+
+        # Verify outbox has the Offering entry
+        res_off = await db.execute(
+            select(ActivityOutbox).filter(ActivityOutbox.entity_id == "OFF-TEST-9999")
+        )
+        entry_off = res_off.scalar_one_or_none()
+        assert entry_off is not None
+        assert entry_off.module_name == "DONATIONS"
+        assert entry_off.entity_name == "Offering"
+        assert "Test Donor Name" in entry_off.description
+        assert "500.0" in entry_off.description
 
 
 @pytest.mark.asyncio

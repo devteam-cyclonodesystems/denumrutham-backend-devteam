@@ -19,6 +19,14 @@ async def get_activity_logs_dashboard(
     db: AsyncSession = Depends(get_db)
 ):
     """Retrieve Activity Logs dashboard aggregated stats."""
+    # Process outbox first to guarantee real-time updates in the dashboard
+    try:
+        from app.modules.audit.services.activity_log_processor import ActivityLogProcessor
+        await ActivityLogProcessor.process_outbox(db)
+    except Exception as e:
+        import logging
+        logging.getLogger(__name__).error(f"Failed to process outbox on dashboard request: {str(e)}")
+        
     metrics = await ActivityLogQueryService.get_dashboard_metrics(db, UUID(temple_id))
     return api_response(data=metrics, message="Activity logs dashboard metrics retrieved")
 
@@ -37,6 +45,14 @@ async def get_activity_logs_timeline(
     db: AsyncSession = Depends(get_db)
 ):
     """Query chronological, partitioned activity logs with pagination and filters."""
+    # Process outbox first to guarantee real-time updates in the timeline
+    try:
+        from app.modules.audit.services.activity_log_processor import ActivityLogProcessor
+        await ActivityLogProcessor.process_outbox(db)
+    except Exception as e:
+        import logging
+        logging.getLogger(__name__).error(f"Failed to process outbox on timeline request: {str(e)}")
+
     offset = (page - 1) * page_size
     items, total = await ActivityLogQueryService.get_timeline(
         db=db,

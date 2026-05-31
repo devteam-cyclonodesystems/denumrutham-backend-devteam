@@ -91,3 +91,204 @@ def block_updates(mapper, connection, target):
 @event.listens_for(ImmutableActivityLog, "before_delete")
 def block_deletes(mapper, connection, target):
     raise PermissionError("Mutation Denied: Activity log entries are strictly immutable.")
+
+
+def to_uuid_db(val, dialect_name):
+    if not val:
+        return None
+    import uuid
+    if isinstance(val, str):
+        try:
+            val = uuid.UUID(val)
+        except ValueError:
+            return val
+    if dialect_name == "sqlite":
+        return val.hex
+    return val
+
+# ═══════════════════════════════════════════════════════════════════════
+# after_insert Hooks to Propagate Module-Specific Audits to Outbox
+# ═══════════════════════════════════════════════════════════════════════
+
+from app.modules.bookings.models.archana import ArchanaBookingAudit
+from app.modules.temple_management.models.offering import OfferingAuditLog
+
+@event.listens_for(ArchanaBookingAudit, "after_insert")
+def prop_archana_audit(mapper, connection, target):
+    try:
+        import uuid
+        import json
+        from datetime import datetime, timezone
+        from sqlalchemy import text
+        from app.modules.audit.services.activity_log_service import ActivityLogService
+        
+        dialect_name = connection.dialect.name
+        
+        # 1. Fetch details of the booking
+        bid_bind = to_uuid_db(target.booking_id, dialect_name)
+        b_res = connection.execute(
+            text("SELECT temple_id, ref_id, grand_total, primary_devotee_name FROM enterprise_archana_bookings WHERE id = :bid"),
+            {"bid": bid_bind}
+        ).first()
+        
+        if b_res:
+            temple_id_raw, ref_id, grand_total, devotee_name = b_res
+            temple_id = uuid.UUID(str(temple_id_raw)) if temple_id_raw else None
+        else:
+            temple_id, ref_id, grand_total, devotee_name = None, None, 0.0, ""
+            
+        # 2. Fetch actor details
+        perf_name = "System"
+        perf_role = "SYSTEM"
+        if target.actor_id:
+            actor_bind = to_uuid_db(target.actor_id, dialect_name)
+            u_res = connection.execute(
+                text("SELECT name, role FROM users WHERE id = :uid"),
+                {"uid": actor_bind}
+            ).first()
+            if u_res:
+                perf_name, perf_role = u_res
+                
+        # 3. Clean secrets and format PII mapping
+        before_clean = ActivityLogService.redact_secrets(target.old_state) if target.old_state else None
+        after_clean = ActivityLogService.redact_secrets(target.new_state) if target.new_state else None
+        masked_pii, hashed_pii = ActivityLogService.extract_and_process_pii(before_clean, after_clean)
+        
+        severity, risk_score = ActivityLogService.determine_risk_and_severity("BOOKINGS", target.action)
+        
+        # 4. Insert into transactional outbox
+        outbox_id = uuid.uuid4()
+        connection.execute(
+            text("""
+                INSERT INTO activity_outbox (
+                    id, temple_id, module_name, entity_name, entity_id, 
+                    action_type, action_category, description, before_value, after_value, 
+                    performed_by_user_id, performed_by_name, performed_by_role, 
+                    masked_pii, hashed_pii, ip_address, correlation_id, severity, risk_score, created_at
+                ) VALUES (
+                    :id, :temple_id, :module_name, :entity_name, :entity_id, 
+                    :action_type, :action_category, :description, :before_value, :after_value, 
+                    :performed_by_user_id, :performed_by_name, :performed_by_role, 
+                    :masked_pii, :hashed_pii, :ip_address, :correlation_id, :severity, :risk_score, :created_at
+                )
+            """),
+            {
+                "id": to_uuid_db(outbox_id, dialect_name),
+                "temple_id": to_uuid_db(temple_id if temple_id else uuid.UUID("00000000-0000-0000-0000-000000000000"), dialect_name),
+                "module_name": "BOOKINGS",
+                "entity_name": "ArchanaBooking",
+                "entity_id": ref_id or (str(target.booking_id) if target.booking_id else None),
+                "action_type": target.action,
+                "action_category": "ARCHANA_RITUAL",
+                "description": f"Archana ritual booking action '{target.action}' for devotee '{devotee_name}' (Total: ₹{grand_total})",
+                "before_value": json.dumps(before_clean) if before_clean else None,
+                "after_value": json.dumps(after_clean) if after_clean else None,
+                "performed_by_user_id": to_uuid_db(target.actor_id if target.actor_id else uuid.UUID("00000000-0000-0000-0000-000000000000"), dialect_name),
+                "performed_by_name": perf_name,
+                "performed_by_role": perf_role,
+                "masked_pii": json.dumps(masked_pii) if masked_pii else None,
+                "hashed_pii": json.dumps(hashed_pii) if hashed_pii else None,
+                "ip_address": "127.0.0.1",
+                "correlation_id": to_uuid_db(uuid.uuid4(), dialect_name),
+                "severity": severity,
+                "risk_score": risk_score,
+                "created_at": datetime.now(timezone.utc)
+            }
+        )
+    except Exception as e:
+        import logging
+        logging.getLogger("tms.audit").error(f"Failed in prop_archana_audit hook: {str(e)}", exc_info=True)
+
+
+@event.listens_for(OfferingAuditLog, "after_insert")
+def prop_offering_audit(mapper, connection, target):
+    try:
+        import uuid
+        import json
+        from datetime import datetime, timezone
+        from sqlalchemy import text
+        from app.modules.audit.services.activity_log_service import ActivityLogService
+        
+        dialect_name = connection.dialect.name
+        
+        # 1. Fetch offering reference details
+        oid_bind = to_uuid_db(target.offering_id, dialect_name)
+        off_res = connection.execute(
+            text("SELECT offering_number, donor_name, total_amount FROM offerings WHERE id = :oid"),
+            {"oid": oid_bind}
+        ).first() if target.offering_id else None
+        
+        if off_res:
+            off_num, donor_name, total_amount = off_res
+        else:
+            off_num, donor_name, total_amount = None, "", 0.0
+            
+        # 2. Match performer details
+        perf_name = target.changed_by or "System"
+        perf_role = "STAFF"
+        performed_by_user_id = uuid.UUID("00000000-0000-0000-0000-000000000000")
+        
+        if target.changed_by:
+            try:
+                user_uuid = uuid.UUID(str(target.changed_by))
+                uid_bind = to_uuid_db(user_uuid, dialect_name)
+                u_res = connection.execute(
+                    text("SELECT name, role FROM users WHERE id = :uid"),
+                    {"uid": uid_bind}
+                ).first()
+                if u_res:
+                    perf_name, perf_role = u_res
+                    performed_by_user_id = user_uuid
+            except ValueError:
+                pass
+                
+        # 3. Clean secrets and process hybrid PII
+        before_clean = ActivityLogService.redact_secrets(target.old_value) if target.old_value else None
+        after_clean = ActivityLogService.redact_secrets(target.new_value) if target.new_value else None
+        masked_pii, hashed_pii = ActivityLogService.extract_and_process_pii(before_clean, after_clean)
+        
+        severity, risk_score = ActivityLogService.determine_risk_and_severity("DONATIONS", target.action_type)
+        
+        # 4. Write to activity outbox queue
+        outbox_id = uuid.uuid4()
+        connection.execute(
+            text("""
+                INSERT INTO activity_outbox (
+                    id, temple_id, module_name, entity_name, entity_id, 
+                    action_type, action_category, description, before_value, after_value, 
+                    performed_by_user_id, performed_by_name, performed_by_role, 
+                    masked_pii, hashed_pii, ip_address, correlation_id, severity, risk_score, created_at
+                ) VALUES (
+                    :id, :temple_id, :module_name, :entity_name, :entity_id, 
+                    :action_type, :action_category, :description, :before_value, :after_value, 
+                    :performed_by_user_id, :performed_by_name, :performed_by_role, 
+                    :masked_pii, :hashed_pii, :ip_address, :correlation_id, :severity, :risk_score, :created_at
+                )
+            """),
+            {
+                "id": to_uuid_db(outbox_id, dialect_name),
+                "temple_id": to_uuid_db(target.temple_id, dialect_name),
+                "module_name": "DONATIONS",
+                "entity_name": "Offering",
+                "entity_id": off_num or (str(target.offering_id) if target.offering_id else None),
+                "action_type": target.action_type,
+                "action_category": "OFFERING_OPERATION",
+                "description": f"Offering action '{target.action_type}' recorded for donor '{donor_name}' (Total: ₹{total_amount})",
+                "before_value": json.dumps(before_clean) if before_clean else None,
+                "after_value": json.dumps(after_clean) if after_clean else None,
+                "performed_by_user_id": to_uuid_db(performed_by_user_id, dialect_name),
+                "performed_by_name": perf_name,
+                "performed_by_role": perf_role,
+                "masked_pii": json.dumps(masked_pii) if masked_pii else None,
+                "hashed_pii": json.dumps(hashed_pii) if hashed_pii else None,
+                "ip_address": target.ip_address or "127.0.0.1",
+                "correlation_id": to_uuid_db(uuid.uuid4(), dialect_name),
+                "severity": severity,
+                "risk_score": risk_score,
+                "created_at": datetime.now(timezone.utc)
+            }
+        )
+    except Exception as e:
+        import logging
+        logging.getLogger("tms.audit").error(f"Failed in prop_offering_audit hook: {str(e)}", exc_info=True)
+

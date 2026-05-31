@@ -5,6 +5,15 @@ from sqlalchemy import text
 from fastapi import Request
 import urllib.parse
 from app.core.config import settings
+from sqlalchemy.ext.compiler import compiles
+from sqlalchemy.types import UUID as SA_UUID
+from sqlalchemy.dialects.postgresql import UUID as PG_UUID
+
+@compiles(PG_UUID, "sqlite")
+@compiles(SA_UUID, "sqlite")
+def compile_uuid_sqlite(element, compiler, **kw):
+    return "TEXT"
+
 
 # Parse and sanitize DATABASE_URL for asyncpg (which does not support sslmode directly)
 db_url = settings.DATABASE_URL
