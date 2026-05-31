@@ -29,7 +29,7 @@ from app.models.domain import (
     InventoryIssueSession, ProcurementGRN, RitualTemplate, RitualTemplateItem,
     InventoryReconciliation, InventoryIssueStatus, ProcurementStatus,
     StoreProduct, StoreStock, KalavaraStock,
-    SupplierPriceHistory, PriceApprovalRequest
+    SupplierPriceHistory, PriceApprovalRequest, InventoryPaymentTransaction
 )
 from app.schemas.inventory import (
     InventoryItemCreate, SupplierCreate, InvoiceCreate, ItemRequestCreate,
