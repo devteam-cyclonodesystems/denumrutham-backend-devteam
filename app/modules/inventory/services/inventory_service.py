@@ -383,6 +383,53 @@ class InventoryService:
                 existing_item.unit = unit
                 existing_item.supplier_id = sup.id
 
+        # Sync Item to Store Products if it is a store module supplier
+        if sup_in.items_supplied and "store module" in (sup_in.remarks or "").lower():
+            from app.models.domain import StoreProduct, StoreStock
+            for part in sup_in.items_supplied.split(','):
+                res = InventoryService.parse_supplier_item(part)
+                if not res.get("valid"):
+                    continue
+                
+                name = res["name"]
+                unit = res["unit"]
+                price = res["price"]
+                
+                prod_res = await db.execute(
+                    select(StoreProduct).filter(
+                        func.lower(StoreProduct.name) == func.lower(name),
+                        StoreProduct.temple_id == tid
+                    ).with_for_update()
+                )
+                existing_product = prod_res.scalars().first()
+                
+                if not existing_product:
+                    new_prod = StoreProduct(
+                        temple_id=tid,
+                        name=name,
+                        category="Other",
+                        unit=unit,
+                        unit_price=price,
+                        supplier_id=sup.id,
+                        is_active=True,
+                        is_archived=False
+                    )
+                    db.add(new_prod)
+                    await db.flush()
+                    
+                    new_stock = StoreStock(
+                        temple_id=tid,
+                        product_id=new_prod.id,
+                        quantity=0.0,
+                        version_number=1
+                    )
+                    db.add(new_stock)
+                    await db.flush()
+                else:
+                    existing_product.unit_price = price
+                    existing_product.unit = unit
+                    existing_product.supplier_id = sup.id
+
         await db.commit()
         await db.refresh(sup)
         return sup
@@ -425,7 +472,7 @@ class InventoryService:
             min_stock_val = data["min_stock"]
             old_price = old_items.get(name)
             
-            # Sync Item to Kalavara
+            # Sync Item to Kalavara or Store Products
             if "store module" not in (sup_in.remarks or "").lower():
                 item_res = await db.execute(
                     select(InventoryItem).filter(
@@ -518,6 +565,42 @@ class InventoryService:
                     existing_item.unit = unit
                     existing_item.supplier_id = supplier_id
             else:
+                # If store module supplier, we sync to StoreProduct!
+                from app.models.domain import StoreProduct, StoreStock
+                prod_res = await db.execute(
+                    select(StoreProduct).filter(
+                        func.lower(StoreProduct.name) == func.lower(name),
+                        StoreProduct.temple_id == tid
+                    ).with_for_update()
+                )
+                existing_product = prod_res.scalars().first()
+                if not existing_product:
+                    new_prod = StoreProduct(
+                        temple_id=tid,
+                        name=name,
+                        category="Other",
+                        unit=unit,
+                        unit_price=new_price,
+                        supplier_id=supplier_id,
+                        is_active=True,
+                        is_archived=False
+                    )
+                    db.add(new_prod)
+                    await db.flush()
+                    
+                    new_stock = StoreStock(
+                        temple_id=tid,
+                        product_id=new_prod.id,
+                        quantity=0.0,
+                        version_number=1
+                    )
+                    db.add(new_stock)
+                    await db.flush()
+                else:
+                    existing_product.unit_price = new_price
+                    existing_product.unit = unit
+                    existing_product.supplier_id = supplier_id
+
                 # If store module supplier, we still record history if price changed
                 if old_price is not None and old_price != new_price:
                     price_diff = new_price - old_price
