@@ -5,4 +5,5 @@ from app.modules.billing.models.billing_models import *
 from app.modules.inventory.models.inventory_models import *
 from app.modules.governance.models.governance_models import *
 from app.modules.attendance.models.attendance_models import *
+from app.modules.audit.models.audit_models import *
 

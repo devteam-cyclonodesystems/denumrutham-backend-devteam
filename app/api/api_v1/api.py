@@ -5,7 +5,7 @@ from app.api.api_v1.endpoints import (
     halls, employees, archana_bookings, transactions,
     inventory_routes, dashboard_routes, health, sync, system, store_routes
 )
-from app.api.api_v1.routes import audit, approvals
+from app.api.api_v1.routes import audit, approvals, activity_logs
 from app.api.routes import (
     notifications, change_requests, cart, follow, 
     booking_history, manager_dashboard, upload, 
@@ -33,6 +33,7 @@ api_router.include_router(payments.router, prefix="/payments", tags=["Payment Pr
 # ── Governance & RBAC ────────────────────────────────────────────────
 api_router.include_router(rbac.router, prefix="/rbac", tags=["Access Control (RBAC)"])
 api_router.include_router(audit.router, prefix="/audit-logs", tags=["Audit Trails"])
+api_router.include_router(activity_logs.router, prefix="/manager/activity-logs", tags=["Activity Logs"])
 api_router.include_router(approvals.router, prefix="/approvals", tags=["Legacy Approvals"])
 api_router.include_router(change_requests.router, prefix="/change-requests", tags=["Change Requests"])
 

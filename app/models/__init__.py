@@ -1,4 +1,4 @@
-from app.models.domain import User, Temple, UserTemple, TempleProfile, DevoteeProfile, AuditLog, PasswordResetToken, RefundHistory
+from app.models.domain import User, Temple, UserTemple, TempleProfile, DevoteeProfile, AuditLog, PasswordResetToken, RefundHistory, ImmutableActivityLog, ActivityOutbox
 from app.models.onboarding import TempleRequest, UserRequest
 from app.models.system_rbac import SystemRole, SystemPermission, SystemRolePermission
 from app.models.archana import (
@@ -84,4 +84,6 @@ __all__ = [
     "OfferingInventoryLink",
     "OfferingReconciliation",
     "RefundHistory",
+    "ImmutableActivityLog",
+    "ActivityOutbox",
 ]
