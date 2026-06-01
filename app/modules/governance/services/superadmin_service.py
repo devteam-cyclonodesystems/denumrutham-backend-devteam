@@ -12,7 +12,7 @@ from app.schemas.domain import TempleCreateFull, TempleUpdateFull
 from app.core.security import create_access_token
 from app.services.temple_rbac import can_modify_temple, can_change_status, can_delete_temple
 from app.services.operational_state_service import OperationalStateService
-from app.models.operational_states import TempleOperationalState
+from app.modules.governance.models.operational_states import TempleOperationalState
 from app.services.broadcast_service import BroadcastService
 from app.services.temple_events import emit_event, TEMPLE_CREATED, TEMPLE_STATUS_CHANGED, build_event_payload
 

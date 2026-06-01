@@ -6,7 +6,7 @@ from sqlalchemy.future import select
 from fastapi import HTTPException
 
 from app.models.domain import Temple, OperationalStateAudit, SecurityAuditEvent, utcnow
-from app.models.operational_states import TempleOperationalState
+from app.modules.governance.models.operational_states import TempleOperationalState
 from app.services.tenant_policy import TenantPolicy
 from app.services.broadcast_service import BroadcastService
 

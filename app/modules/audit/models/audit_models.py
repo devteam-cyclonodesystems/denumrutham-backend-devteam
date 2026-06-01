@@ -2,7 +2,7 @@ import uuid
 from datetime import datetime, timezone
 from sqlalchemy import Column, String, Text, Integer, DateTime, BigInteger, JSON
 from sqlalchemy.dialects.postgresql import UUID
-from app.core.database.base import Base
+from app.core.database.database import Base
 
 def utcnow():
     return datetime.now(timezone.utc)

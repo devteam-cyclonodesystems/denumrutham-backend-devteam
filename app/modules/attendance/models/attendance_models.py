@@ -4,8 +4,7 @@ from datetime import datetime, timezone
 from sqlalchemy import Column, String, Boolean, DateTime, ForeignKey, Float, Text, Enum, Integer, Time, UniqueConstraint, Date, JSON, Index, text, CheckConstraint
 from sqlalchemy.dialects.postgresql import UUID
 from sqlalchemy.orm import relationship
-from app.core.database.base import Base
-from app.models.operational_states import TempleOperationalState
+from app.core.database.database import Base
 
 def utcnow():
     return datetime.now(timezone.utc)

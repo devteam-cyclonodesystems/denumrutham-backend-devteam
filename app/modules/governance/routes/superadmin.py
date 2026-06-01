@@ -197,7 +197,7 @@ async def transition_temple_state(
     current_user: TokenData = Depends(get_current_superadmin),
 ):
     """Formal transition between operational states."""
-    from app.models.operational_states import TempleOperationalState
+    from app.modules.governance.models.operational_states import TempleOperationalState
     from app.services.operational_state_service import OperationalStateService
     
     try:

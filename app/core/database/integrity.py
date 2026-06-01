@@ -8,7 +8,7 @@ from sqlalchemy import text, inspect
 from sqlalchemy.ext.asyncio import AsyncSession
 from app.core.config import settings
 from app.core.database import engine, AsyncSessionLocal
-from app.models.operational_states import TempleOperationalState
+from app.modules.governance.models.operational_states import TempleOperationalState
 
 logger = logging.getLogger("tms.integrity")
 

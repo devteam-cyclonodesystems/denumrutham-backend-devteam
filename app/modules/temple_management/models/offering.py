@@ -10,8 +10,9 @@ from sqlalchemy import (
     Boolean, Text, Index, JSON,
 )
 from sqlalchemy.dialects.postgresql import UUID
-from app.db.session import Base
-from app.models.domain import utcnow
+from app.core.database.database import Base
+def utcnow():
+    return datetime.now(timezone.utc)
 
 
 # ────────────────────────────────────────────────────────────────────
