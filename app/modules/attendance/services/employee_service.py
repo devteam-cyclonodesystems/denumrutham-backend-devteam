@@ -15,7 +15,12 @@ class EmployeeService:
 
     # --- Employees ---
     @staticmethod
-    async def create_employee(db: AsyncSession, emp_in: EmployeeCreate, temple_id: str) -> Employee:
+    async def create_employee(
+        db: AsyncSession, 
+        emp_in: EmployeeCreate, 
+        temple_id: str,
+        user_id: Optional[UUID] = None
+    ) -> Employee:
         tid = UUID(str(temple_id))
 
         # Auto-generate emp_code
@@ -41,6 +46,22 @@ class EmployeeService:
             salary_history=[],
         )
         db.add(emp)
+
+        # Add Audit log
+        from app.modules.audit.services.audit_service import AuditService
+        await AuditService.log_action(
+            db=db,
+            temple_id=tid,
+            user_id=user_id,
+            role=None,
+            module_name="HR_PAYROLL",
+            action="EMPLOYEE_CREATED",
+            action_type="CREATE",
+            entity_id=str(emp.id),
+            new_value={"name": emp.name, "emp_code": emp.emp_code},
+            details=f"Employee '{emp.name}' created with code {emp.emp_code}."
+        )
+
         await db.commit()
         await db.refresh(emp)
         return emp
@@ -59,7 +80,7 @@ class EmployeeService:
 
     @staticmethod
     async def update_employee(
-        db: AsyncSession, emp_id: str, update_in: EmployeeUpdate, temple_id: str
+        db: AsyncSession, emp_id: str, update_in: EmployeeUpdate, temple_id: str, user_id: Optional[UUID] = None
     ) -> Employee:
         tid = UUID(str(temple_id))
         eid = UUID(str(emp_id))
@@ -74,12 +95,27 @@ class EmployeeService:
         for key, value in update_data.items():
             setattr(emp, key, value)
 
+        # Add Audit log
+        from app.modules.audit.services.audit_service import AuditService
+        await AuditService.log_action(
+            db=db,
+            temple_id=tid,
+            user_id=user_id,
+            role=None,
+            module_name="HR_PAYROLL",
+            action="EMPLOYEE_UPDATED",
+            action_type="UPDATE",
+            entity_id=str(emp.id),
+            new_value={"name": emp.name, "emp_code": emp.emp_code, "status": emp.status},
+            details=f"Employee '{emp.name}' updated."
+        )
+
         await db.commit()
         await db.refresh(emp)
         return emp
 
     @staticmethod
-    async def delete_employee(db: AsyncSession, emp_id: str, temple_id: str) -> bool:
+    async def delete_employee(db: AsyncSession, emp_id: str, temple_id: str, user_id: Optional[UUID] = None) -> bool:
         tid = UUID(str(temple_id))
         eid = UUID(str(emp_id))
         result = await db.execute(
@@ -87,7 +123,25 @@ class EmployeeService:
         )
         emp = result.scalars().first()
         if emp:
+            # Save detail before delete
+            emp_name = emp.name
+            emp_code = emp.emp_code
             await db.delete(emp)
+
+            # Add Audit log
+            from app.modules.audit.services.audit_service import AuditService
+            await AuditService.log_action(
+                db=db,
+                temple_id=tid,
+                user_id=user_id,
+                role=None,
+                module_name="HR_PAYROLL",
+                action="EMPLOYEE_DELETED",
+                action_type="DELETE",
+                entity_id=str(eid),
+                details=f"Employee '{emp_name}' with code {emp_code} deleted."
+            )
+
             await db.commit()
             return True
         return False
@@ -102,7 +156,7 @@ class EmployeeService:
 
     # --- Leaves ---
     @staticmethod
-    async def create_leave(db: AsyncSession, leave_in: LeaveCreate, temple_id: str) -> Leave:
+    async def create_leave(db: AsyncSession, leave_in: LeaveCreate, temple_id: str, user_id: Optional[UUID] = None) -> Leave:
         tid = UUID(str(temple_id))
 
         count_result = await db.execute(
@@ -124,6 +178,22 @@ class EmployeeService:
             remarks="",
         )
         db.add(leave)
+
+        # Add Audit log
+        from app.modules.audit.services.audit_service import AuditService
+        await AuditService.log_action(
+            db=db,
+            temple_id=tid,
+            user_id=user_id,
+            role=None,
+            module_name="HR_PAYROLL",
+            action="LEAVE_REQUESTED",
+            action_type="CREATE",
+            entity_id=str(leave.id),
+            new_value={"leave_code": leave.leave_code, "employee_id": str(leave.employee_id), "type": leave.type},
+            details=f"Leave request {leave.leave_code} submitted for employee {leave.emp_name}."
+        )
+
         await db.commit()
         await db.refresh(leave)
         return leave
@@ -142,7 +212,7 @@ class EmployeeService:
 
     @staticmethod
     async def update_leave(
-        db: AsyncSession, leave_id: str, update_in: LeaveUpdate, temple_id: str
+        db: AsyncSession, leave_id: str, update_in: LeaveUpdate, temple_id: str, user_id: Optional[UUID] = None
     ) -> Leave:
         tid = UUID(str(temple_id))
         lid = UUID(str(leave_id))
@@ -157,13 +227,28 @@ class EmployeeService:
         for key, value in update_data.items():
             setattr(leave, key, value)
 
+        # Add Audit log
+        from app.modules.audit.services.audit_service import AuditService
+        await AuditService.log_action(
+            db=db,
+            temple_id=tid,
+            user_id=user_id,
+            role=None,
+            module_name="HR_PAYROLL",
+            action="LEAVE_STATUS_UPDATED",
+            action_type="UPDATE",
+            entity_id=str(leave.id),
+            new_value={"leave_code": leave.leave_code, "status": leave.status},
+            details=f"Leave request {leave.leave_code} status updated to {leave.status}."
+        )
+
         await db.commit()
         await db.refresh(leave)
         return leave
 
     # --- Payroll ---
     @staticmethod
-    async def run_payroll(db: AsyncSession, temple_id: str):
+    async def run_payroll(db: AsyncSession, temple_id: str, user_id: Optional[UUID] = None):
         """🔥 TRANSACTION ENGINE: Run payroll → create expense transaction for total salaries."""
         tid = UUID(str(temple_id))
         result = await db.execute(
@@ -185,6 +270,22 @@ class EmployeeService:
             reference_id="PAYROLL",
             source="system",
         )
+
+        # Add Audit log
+        from app.modules.audit.services.audit_service import AuditService
+        await AuditService.log_action(
+            db=db,
+            temple_id=tid,
+            user_id=user_id,
+            role=None,
+            module_name="HR_PAYROLL",
+            action="PAYROLL_RUN",
+            action_type="CREATE",
+            entity_id=str(txn.id) if txn else None,
+            new_value={"total_amount": total, "employee_count": len(employees)},
+            details=f"Payroll executed for {len(employees)} employees, total ₹{total}."
+        )
+
         await db.commit()
 
         return {

@@ -137,7 +137,7 @@ class EnterpriseArchanaBooking(Base):
     __tablename__ = "enterprise_archana_bookings"
     id = Column(UUID(as_uuid=True), primary_key=True, default=uuid.uuid4)
     temple_id = Column(UUID(as_uuid=True), ForeignKey("temples.id"), nullable=False, index=True)
-    ref_id = Column(String, unique=True, index=True)
+    ref_id = Column(String, index=True)
     primary_devotee_id = Column(UUID(as_uuid=True), ForeignKey("devotees.id"), nullable=True)
     primary_devotee_name = Column(String, nullable=False)
     phone_number = Column(String, nullable=True)
@@ -160,6 +160,10 @@ class EnterpriseArchanaBooking(Base):
     created_at = Column(DateTime(timezone=True), default=utcnow)
     updated_at = Column(DateTime(timezone=True), default=utcnow, onupdate=utcnow)
     idempotency_key = Column(String, nullable=True, index=True)
+
+    __table_args__ = (
+        UniqueConstraint("temple_id", "ref_id", name="uq_archana_booking_ref_id"),
+    )
 
     members = relationship("ArchanaBookingMember", back_populates="booking", cascade="all, delete-orphan")
     payments = relationship("ArchanaBookingPayment", back_populates="booking", cascade="all, delete-orphan")
@@ -289,7 +293,7 @@ class ArchanaRefund(Base):
     __tablename__ = "archana_refunds"
     id = Column(UUID(as_uuid=True), primary_key=True, default=uuid.uuid4)
     temple_id = Column(UUID(as_uuid=True), ForeignKey("temples.id"), nullable=False, index=True)
-    ref_id = Column(String, unique=True, index=True)
+    ref_id = Column(String, index=True)
     booking_id = Column(UUID(as_uuid=True), ForeignKey("enterprise_archana_bookings.id"), nullable=False, index=True)
     refund_method = Column(String, nullable=False) # Cash, UPI
     refund_status = Column(String, nullable=False) # Full, Partial
@@ -300,6 +304,10 @@ class ArchanaRefund(Base):
     approved_by = Column(UUID(as_uuid=True), ForeignKey("users.id"), nullable=True)
     created_at = Column(DateTime(timezone=True), default=utcnow)
     updated_at = Column(DateTime(timezone=True), default=utcnow, onupdate=utcnow)
+
+    __table_args__ = (
+        UniqueConstraint("temple_id", "ref_id", name="uq_archana_refund_ref_id"),
+    )
 
     booking = relationship("EnterpriseArchanaBooking")
 

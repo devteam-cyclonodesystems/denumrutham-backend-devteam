@@ -362,7 +362,7 @@ class ProcurementGRN(Base):
     __tablename__ = "procurement_grns"
     id = Column(UUID(as_uuid=True), primary_key=True, default=uuid.uuid4)
     temple_id = Column(UUID(as_uuid=True), ForeignKey("temples.id"), nullable=False, index=True)
-    grn_code = Column(String, unique=True, index=True)
+    grn_code = Column(String, index=True)
     supplier_id = Column(UUID(as_uuid=True), ForeignKey("suppliers.id"), nullable=False)
     invoice_number = Column(String, nullable=True)
     invoice_date = Column(Date, nullable=True)
@@ -380,6 +380,10 @@ class ProcurementGRN(Base):
     is_archived = Column(Boolean, default=False, index=True)
     archived_at = Column(DateTime(timezone=True), nullable=True)
     archived_by = Column(UUID(as_uuid=True), ForeignKey("users.id"), nullable=True)
+
+    __table_args__ = (
+        UniqueConstraint("temple_id", "grn_code", name="uq_procurement_grn_code"),
+    )
 
 
 
@@ -519,7 +523,7 @@ class StoreSalesOrder(Base):
 
     id = Column(UUID(as_uuid=True), primary_key=True, default=uuid.uuid4)
     temple_id = Column(UUID(as_uuid=True), ForeignKey("temples.id"), nullable=False, index=True)
-    order_number = Column(String, nullable=False, unique=True, index=True)
+    order_number = Column(String, nullable=False, index=True)
     customer_name = Column(String, nullable=True)
     customer_phone = Column(String, nullable=True)
     total_amount = Column(Float, default=0.0, nullable=False)
@@ -529,6 +533,10 @@ class StoreSalesOrder(Base):
     idempotency_key = Column(String, unique=True, nullable=True)
     created_at = Column(DateTime(timezone=True), default=utcnow)
     updated_at = Column(DateTime(timezone=True), default=utcnow, onupdate=utcnow)
+
+    __table_args__ = (
+        UniqueConstraint("temple_id", "order_number", name="uq_store_sales_order_number"),
+    )
 
 
 
@@ -558,7 +566,7 @@ class AuctionListing(Base):
     id = Column(UUID(as_uuid=True), primary_key=True, default=uuid.uuid4)
     temple_id = Column(UUID(as_uuid=True), ForeignKey("temples.id"), nullable=False, index=True)
     product_id = Column(UUID(as_uuid=True), ForeignKey("store_products.id"), nullable=False)
-    auction_code = Column(String, unique=True, index=True)
+    auction_code = Column(String, index=True)
     idempotency_key = Column(String, unique=True, nullable=True)
     quantity = Column(Float, nullable=False)
     start_price = Column(Float, default=0.0)
@@ -581,6 +589,10 @@ class AuctionListing(Base):
 
     created_at = Column(DateTime(timezone=True), default=utcnow)
     updated_at = Column(DateTime(timezone=True), default=utcnow, onupdate=utcnow)
+
+    __table_args__ = (
+        UniqueConstraint("temple_id", "auction_code", name="uq_store_auction_code"),
+    )
 
     # Relationships
     product = relationship("StoreProduct")

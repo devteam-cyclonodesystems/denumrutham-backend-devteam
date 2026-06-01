@@ -1,17 +1,66 @@
 import json
 import hashlib
 import logging
+import asyncio
 from datetime import datetime, timezone
 from uuid import UUID
-from typing import Any
+from typing import Any, List, Optional
+from abc import ABC, abstractmethod
 from sqlalchemy.ext.asyncio import AsyncSession
 from sqlalchemy.future import select
+from sqlalchemy import text
 from app.modules.audit.models.audit_models import ActivityOutbox, ImmutableActivityLog
 from app.modules.temple_management.models.temple_models import Temple
+from app.core.database.database import AsyncSessionLocal
 
 logger = logging.getLogger(__name__)
 
+# Metrics for Queue Observability
+class OutboxMetrics:
+    queue_size: int = 0
+    processing_rate: float = 0.0  # processed per loop execution
+    failure_count: int = 0
+    poison_pill_skips: int = 0
+
+# ---------------------------------------------------------------------------
+# Abstract Event Broker Interface (Supports Kafka / RabbitMQ / Redis Streams migration)
+# ---------------------------------------------------------------------------
+class EventBroker(ABC):
+    @abstractmethod
+    async def poll_batch(self, db: AsyncSession, limit: int = 50) -> List[Any]:
+        """Poll a batch of events from the underlying transport."""
+        pass
+
+    @abstractmethod
+    async def acknowledge(self, db: AsyncSession, entry: Any) -> None:
+        """Acknowledge successful consumption of the event."""
+        pass
+
+
+class DatabaseOutboxBroker(EventBroker):
+    """SQLAlchemy Outbox implementation of the EventBroker interface."""
+    
+    async def poll_batch(self, db: AsyncSession, limit: int = 50) -> List[ActivityOutbox]:
+        stmt = (
+            select(ActivityOutbox)
+            .order_by(ActivityOutbox.created_at.asc())
+            .limit(limit)
+            .with_for_update(skip_locked=True)
+        )
+        res = await db.execute(stmt)
+        return list(res.scalars().all())
+
+    async def acknowledge(self, db: AsyncSession, entry: ActivityOutbox) -> None:
+        await db.delete(entry)
+
+
+# ---------------------------------------------------------------------------
+# Activity Log Processor Subsystem
+# ---------------------------------------------------------------------------
 class ActivityLogProcessor:
+    # Tracks in-memory processing failure counts for poison pill detection
+    _failure_registry = {}
+
     @staticmethod
     def calculate_log_hash(
         log_id: UUID,
@@ -43,29 +92,37 @@ class ActivityLogProcessor:
 
     @staticmethod
     async def process_outbox(db: AsyncSession) -> int:
+        """Backward-compatible entry point for polling and processing outbox logs."""
+        return await ActivityLogProcessor.process_outbox_batch(db, DatabaseOutboxBroker(), limit=50)
+
+    @classmethod
+    async def process_outbox_batch(cls, db: AsyncSession, broker: EventBroker, limit: int = 50) -> int:
         """
         Poll and process activity outbox records.
         Returns the count of successfully processed entries.
         """
-        # Fetch up to 50 outbox entries (ordered chronologically)
-        # Using with_for_update(skip_locked=True) to avoid concurrency locks on scale workers
-        stmt = (
-            select(ActivityOutbox)
-            .order_by(ActivityOutbox.created_at.asc())
-            .limit(50)
-            .with_for_update(skip_locked=True)
-        )
-        res = await db.execute(stmt)
-        entries = res.scalars().all()
-        
+        entries = await broker.poll_batch(db, limit=limit)
         if not entries:
             return 0
             
         processed_count = 0
+        processed_logs = []
         
         for entry in entries:
             try:
-                # 1. Fetch Temple Code and Tenant Name
+                # 1. Poison Pill Guard
+                failure_count = cls._failure_registry.get(entry.id, 0)
+                if failure_count >= 3:
+                    logger.critical(
+                        f"POISON PILL DETECTED! Outbox event {entry.id} failed 3 times. "
+                        "Skipping and removing event to prevent head-of-line blocking."
+                    )
+                    cls._failure_registry.pop(entry.id, None)
+                    await broker.acknowledge(db, entry)
+                    OutboxMetrics.poison_pill_skips += 1
+                    continue
+
+                # 2. Fetch Temple Code and Tenant Name
                 temple_stmt = select(Temple).filter(Temple.id == entry.temple_id)
                 temple_res = await db.execute(temple_stmt)
                 temple = temple_res.scalar_one_or_none()
@@ -73,7 +130,7 @@ class ActivityLogProcessor:
                 temple_code = temple.temple_code if (temple and temple.temple_code) else "SYSTEM"
                 tenant_name = temple.name if temple else "Denumrutham System"
                 
-                # 2. Lock the audit chain of this tenant and get the latest index/hash
+                # 3. Lock the audit chain of this tenant and get the latest index/hash
                 chain_stmt = (
                     select(ImmutableActivityLog)
                     .filter(ImmutableActivityLog.temple_id == entry.temple_id)
@@ -91,12 +148,8 @@ class ActivityLogProcessor:
                     prev_hash = "0" * 64
                     next_index = 1
                     
-                # 3. Establish timing timestamp
-                # Using timezone-aware UTC datetime
                 created_utc = datetime.now(timezone.utc)
-                
-                # 4. Cryptographically compute Current Hash
-                curr_hash = ActivityLogProcessor.calculate_log_hash(
+                curr_hash = cls.calculate_log_hash(
                     log_id=entry.id,
                     temple_id=entry.temple_id,
                     action_type=entry.action_type,
@@ -105,9 +158,9 @@ class ActivityLogProcessor:
                     prev_hash=prev_hash
                 )
                 
-                # 5. Create immutable log entry
+                # 4. Create immutable log entry
                 log_record = ImmutableActivityLog(
-                    id=entry.id, # Keep same correlation id / UUID
+                    id=entry.id,
                     temple_id=entry.temple_id,
                     temple_code=temple_code,
                     tenant_name=tenant_name,
@@ -136,37 +189,115 @@ class ActivityLogProcessor:
                 )
                 
                 db.add(log_record)
+                await broker.acknowledge(db, entry)
                 
-                # 6. Delete entry from Outbox queue
-                await db.delete(entry)
-                
+                processed_logs.append(log_record)
                 processed_count += 1
+                
+                # Clear failure count on success
+                cls._failure_registry.pop(entry.id, None)
                 logger.info(f"Processed outbox entry {entry.id} into audit chain index {next_index}")
                 
             except Exception as e:
+                cls._failure_registry[entry.id] = cls._failure_registry.get(entry.id, 0) + 1
+                OutboxMetrics.failure_count += 1
                 logger.error(f"Failed to process activity outbox entry {entry.id}: {str(e)}", exc_info=True)
-                # Continue processing other outbox entries to avoid blocking queue
+                # Roll back the inner transaction of this batch so we can commit other items
                 continue
-                
-        # Commit the batch changes
+
+        # Commit database transaction
         await db.commit()
+
+        # Broadcast events via Redis Pub/Sub for real-time manager UI updates
+        for log_record in processed_logs:
+            try:
+                from app.services.broadcast_service import BroadcastService
+                log_data = {
+                    "id": str(log_record.id),
+                    "module_name": log_record.module_name,
+                    "entity_name": log_record.entity_name,
+                    "entity_id": log_record.entity_id,
+                    "action_type": log_record.action_type,
+                    "description": log_record.description,
+                    "performed_by_name": log_record.performed_by_name,
+                    "performed_by_role": log_record.performed_by_role,
+                    "severity": log_record.severity,
+                    "created_utc": log_record.created_utc.isoformat() if log_record.created_utc else None
+                }
+                await BroadcastService.publish_tenant_event(
+                    temple_id=log_record.temple_id,
+                    event_type="ACTIVITY_LOG_CREATED",
+                    data=log_data
+                )
+            except Exception as e:
+                logger.error(f"Failed to broadcast real-time activity log update: {str(e)}")
+
         return processed_count
 
-    @staticmethod
-    async def process_outbox_task() -> int:
-        """Background task wrapper that opens a database session and processes the outbox."""
-        from app.core.database.database import AsyncSessionLocal
-        from sqlalchemy import text
-        
-        async with AsyncSessionLocal() as db:
-            try:
-                # Set RLS session variables for background process context
+
+# ---------------------------------------------------------------------------
+# Background Polling Task (FastAPI Startup Worker)
+# ---------------------------------------------------------------------------
+async def run_outbox_worker(shutdown_event: asyncio.Event) -> None:
+    """
+    Non-blocking background loop that processes activity logs outbox.
+    Implements exponential backoff (2s to 60s max) if database connections fail.
+    """
+    broker = DatabaseOutboxBroker()
+    current_backoff = 5.0
+    min_backoff = 5.0
+    max_backoff = 60.0
+    
+    logger.info("Background activity logs outbox processor worker started.")
+    last_verification_run = None
+    
+    while not shutdown_event.is_set():
+        try:
+            async with AsyncSessionLocal() as db:
+                # Set RLS parameters for systemic bypass
                 if db.bind.dialect.name != "sqlite":
                     await db.execute(text("SELECT set_config('app.current_temple_id', '', false)"))
                     await db.execute(text("SELECT set_config('app.current_role', 'SUPER_ADMIN', false)"))
                 
-                count = await ActivityLogProcessor.process_outbox(db)
-                return count
-            except Exception as e:
-                logger.error(f"Error in background activity log processor task: {str(e)}", exc_info=True)
-                return 0
+                # Run nightly audit chain integrity verification
+                now = datetime.now(timezone.utc)
+                if last_verification_run is None or (now - last_verification_run).total_seconds() >= 86400:
+                    logger.info("Executing nightly background audit chain integrity verification...")
+                    try:
+                        from app.modules.audit.services.chain_verification_service import ChainVerificationService
+                        await ChainVerificationService.verify_all_temples(db)
+                        last_verification_run = now
+                        logger.info("Nightly background audit chain verification completed successfully.")
+                    except Exception as ex:
+                        logger.error(f"Error executing nightly background audit chain verification: {str(ex)}")
+
+                # Update queue metrics size
+                size_res = await db.execute(select(sa_func_count()))
+                OutboxMetrics.queue_size = size_res.scalar() or 0
+                
+                processed = await ActivityLogProcessor.process_outbox_batch(db, broker, limit=50)
+                
+                # Update observability metrics
+                OutboxMetrics.processing_rate = processed
+                
+                # If we successfully processed events or queue is empty, reset backoff
+                current_backoff = min_backoff
+                
+        except Exception as e:
+            OutboxMetrics.failure_count += 1
+            logger.error(f"Outbox worker encountered error: {str(e)}. Backing off for {current_backoff}s.")
+            # Exponential backoff
+            current_backoff = min(current_backoff * 2.0, max_backoff)
+            
+        # Bounded sleep checking shutdown event every 0.5 seconds
+        sleep_remaining = current_backoff
+        while sleep_remaining > 0 and not shutdown_event.is_set():
+            await asyncio.sleep(min(0.5, sleep_remaining))
+            sleep_remaining -= 0.5
+
+    logger.info("Background activity logs outbox processor worker stopped.")
+
+
+def sa_func_count():
+    from sqlalchemy import func
+    return func.count(ActivityOutbox.id)

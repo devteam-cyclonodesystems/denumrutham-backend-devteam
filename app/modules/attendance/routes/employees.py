@@ -2,6 +2,7 @@
 from fastapi import APIRouter, Depends, HTTPException
 from sqlalchemy.ext.asyncio import AsyncSession
 from typing import List
+from uuid import UUID
 from app.api.deps import get_db, get_current_user, get_current_temple_id
 from app.schemas.domain import TokenData
 from app.schemas.employee import (
@@ -21,7 +22,10 @@ async def create_employee(
     current_user: TokenData = Depends(get_current_user),
     temple_id: str = Depends(get_current_temple_id),
 ):
-    return await EmployeeService.create_employee(db=db, emp_in=emp_in, temple_id=temple_id)
+    return await EmployeeService.create_employee(
+        db=db, emp_in=emp_in, temple_id=temple_id,
+        user_id=UUID(str(current_user.sub)) if current_user and current_user.sub else None
+    )
 
 
 @router.get("", response_model=List[EmployeeResponse])
@@ -43,7 +47,10 @@ async def update_employee(
     current_user: TokenData = Depends(get_current_user),
     temple_id: str = Depends(get_current_temple_id),
 ):
-    result = await EmployeeService.update_employee(db=db, emp_id=emp_id, update_in=update_in, temple_id=temple_id)
+    result = await EmployeeService.update_employee(
+        db=db, emp_id=emp_id, update_in=update_in, temple_id=temple_id,
+        user_id=UUID(str(current_user.sub)) if current_user and current_user.sub else None
+    )
     if not result:
         raise HTTPException(status_code=404, detail="Employee not found")
     return result
@@ -56,7 +63,10 @@ async def delete_employee(
     current_user: TokenData = Depends(get_current_user),
     temple_id: str = Depends(get_current_temple_id),
 ):
-    success = await EmployeeService.delete_employee(db=db, emp_id=emp_id, temple_id=temple_id)
+    success = await EmployeeService.delete_employee(
+        db=db, emp_id=emp_id, temple_id=temple_id,
+        user_id=UUID(str(current_user.sub)) if current_user and current_user.sub else None
+    )
     if not success:
         raise HTTPException(status_code=404, detail="Employee not found")
     return {"detail": "Employee deleted"}
@@ -70,7 +80,10 @@ async def create_leave(
     current_user: TokenData = Depends(get_current_user),
     temple_id: str = Depends(get_current_temple_id),
 ):
-    return await EmployeeService.create_leave(db=db, leave_in=leave_in, temple_id=temple_id)
+    return await EmployeeService.create_leave(
+        db=db, leave_in=leave_in, temple_id=temple_id,
+        user_id=UUID(str(current_user.sub)) if current_user and current_user.sub else None
+    )
 
 
 @router.get("/leaves", response_model=List[LeaveResponse])
@@ -93,7 +106,10 @@ async def approve_leave(
     temple_id: str = Depends(get_current_temple_id),
 ):
     update_in.status = "approved"
-    result = await EmployeeService.update_leave(db=db, leave_id=leave_id, update_in=update_in, temple_id=temple_id)
+    result = await EmployeeService.update_leave(
+        db=db, leave_id=leave_id, update_in=update_in, temple_id=temple_id,
+        user_id=UUID(str(current_user.sub)) if current_user and current_user.sub else None
+    )
     if not result:
         raise HTTPException(status_code=404, detail="Leave not found")
     return result
@@ -108,7 +124,10 @@ async def reject_leave(
     temple_id: str = Depends(get_current_temple_id),
 ):
     update_in.status = "rejected"
-    result = await EmployeeService.update_leave(db=db, leave_id=leave_id, update_in=update_in, temple_id=temple_id)
+    result = await EmployeeService.update_leave(
+        db=db, leave_id=leave_id, update_in=update_in, temple_id=temple_id,
+        user_id=UUID(str(current_user.sub)) if current_user and current_user.sub else None
+    )
     if not result:
         raise HTTPException(status_code=404, detail="Leave not found")
     return result
@@ -121,4 +140,7 @@ async def run_payroll(
     current_user: TokenData = Depends(get_current_user),
     temple_id: str = Depends(get_current_temple_id),
 ):
-    return await EmployeeService.run_payroll(db=db, temple_id=temple_id)
+    return await EmployeeService.run_payroll(
+        db=db, temple_id=temple_id,
+        user_id=UUID(str(current_user.sub)) if current_user and current_user.sub else None
+    )

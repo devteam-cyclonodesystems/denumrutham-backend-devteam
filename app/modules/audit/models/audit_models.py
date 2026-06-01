@@ -1,6 +1,6 @@
 import uuid
 from datetime import datetime, timezone
-from sqlalchemy import Column, String, Text, Integer, DateTime, BigInteger, JSON
+from sqlalchemy import Column, String, Text, Integer, DateTime, BigInteger, JSON, ForeignKey
 from sqlalchemy.dialects.postgresql import UUID
 from app.core.database.database import Base
 
@@ -296,4 +296,52 @@ def prop_offering_audit(mapper, connection, target):
     except Exception as e:
         import logging
         logging.getLogger("tms.audit").error(f"Failed in prop_offering_audit hook: {str(e)}", exc_info=True)
+
+
+class AuditGovernanceConfig(Base):
+    """
+    Governance configuration for the audit log system.
+    Supports Retention Policies, Export Policies, Severity Mapping, Alert Thresholds,
+    and Audit Access Controls.
+    
+    Includes versioning so that modifications to this configuration are themselves
+    immutable audit events recorded in the chain (Audit-of-Audit).
+    """
+    __tablename__ = "audit_governance_configs"
+
+    id = Column(UUID(as_uuid=True), primary_key=True, default=uuid.uuid4)
+    temple_id = Column(UUID(as_uuid=True), ForeignKey("temples.id"), nullable=False, unique=True, index=True)
+    
+    # Retention Policy in days (e.g. 90, 365, etc.)
+    retention_days = Column(Integer, nullable=False, default=365)
+    
+    # Export policies configuration (stored as JSON)
+    export_policy = Column(JSON, nullable=True, default=dict)
+    
+    # Severity mapping configuration (stored as JSON)
+    severity_mapping = Column(JSON, nullable=True, default=dict)
+    
+    # Alert thresholds (stored as JSON)
+    alert_thresholds = Column(JSON, nullable=True, default=dict)
+    
+    # Audit Access Controls (role-based permissions to read logs, stored as JSON)
+    access_controls = Column(JSON, nullable=True, default=dict)
+    
+    created_at = Column(DateTime(timezone=True), default=utcnow)
+    updated_at = Column(DateTime(timezone=True), default=utcnow, onupdate=utcnow)
+
+
+class AuditIntegrityVerificationReport(Base):
+    """Tracks the results of cryptographic chain audits for each temple."""
+    __tablename__ = "audit_integrity_verification_reports"
+
+    id = Column(UUID(as_uuid=True), primary_key=True, default=uuid.uuid4)
+    temple_id = Column(UUID(as_uuid=True), ForeignKey("temples.id", ondelete="CASCADE"), nullable=False, index=True)
+    verified_at = Column(DateTime(timezone=True), default=utcnow)
+    status = Column(String, nullable=False)  # "PASS" | "FAIL"
+    total_logs = Column(Integer, nullable=False, default=0)
+    failed_logs_count = Column(Integer, nullable=False, default=0)
+    failed_log_ids = Column(JSON, nullable=True)  # List of failed log UUIDs as JSON array
+    details = Column(Text, nullable=True)
+
 

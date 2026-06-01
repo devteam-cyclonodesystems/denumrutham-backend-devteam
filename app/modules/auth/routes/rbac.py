@@ -127,7 +127,13 @@ async def assign_user_role(
     db: AsyncSession = Depends(get_db),
     current_user: TokenData = Depends(get_current_temple_manager),
 ):
-    return await RbacService.assign_user_role(db, current_user.temple_id, assignment)
+    return await RbacService.assign_user_role(
+        db,
+        current_user.temple_id,
+        assignment,
+        performer_id=current_user.sub,
+        performer_role=current_user.role
+    )
 
 
 @router.delete("/user-roles/{user_role_id}", status_code=204)
@@ -136,7 +142,13 @@ async def remove_user_role(
     db: AsyncSession = Depends(get_db),
     current_user: TokenData = Depends(get_current_temple_manager),
 ):
-    await RbacService.remove_user_role(db, current_user.temple_id, user_role_id)
+    await RbacService.remove_user_role(
+        db,
+        current_user.temple_id,
+        user_role_id,
+        performer_id=current_user.sub,
+        performer_role=current_user.role
+    )
 
 
 # ─── Current User Permissions (used by frontend) ──────

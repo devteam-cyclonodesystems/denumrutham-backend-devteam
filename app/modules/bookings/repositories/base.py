@@ -86,13 +86,19 @@ class CRUDBase(Generic[ModelType, CreateSchemaType, UpdateSchemaType]):
         action: str,
         details: str,
     ):
-        from app.models.domain import AuditLog
+        from app.modules.audit.services.audit_service import AuditService
 
-        log = AuditLog(
+        module_name = "BOOKING" if "BOOKING" in action else "DONATION"
+        action_type = "CREATE" if "CREATED" in action or "RECEIVED" in action else "UPDATE"
+
+        await AuditService.log_action(
+            db=db,
             temple_id=_to_uuid(temple_id),
             user_id=_to_uuid(user_id),
+            role=None,
+            module_name=module_name,
             action=action,
-            details=details,
+            action_type=action_type,
+            details=details
         )
-        db.add(log)
         await db.commit()

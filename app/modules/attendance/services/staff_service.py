@@ -7,9 +7,10 @@ from sqlalchemy import func, or_
 from sqlalchemy.orm.attributes import flag_modified
 from fastapi import HTTPException
 
-from app.models.domain import User, UserTemple, AuditLog, Temple
+from app.models.domain import User, UserTemple, Temple
 from app.core.security import get_password_hash
 from app.schemas.staff import StaffCreate, StaffUpdate
+from app.modules.audit.services.audit_service import AuditService
 
 logger = logging.getLogger("tms.services.staff_service")
 
@@ -21,8 +22,14 @@ class StaffService:
         email, phone = _detect_email_or_phone(staff_in.email_or_phone)
         login_id = email or phone
 
+        filters = [User.user_id == login_id]
+        if email:
+            filters.append(User.email == email)
+        if phone:
+            filters.append(User.phone == phone)
+
         existing = await db.execute(
-            select(User).filter(or_(User.user_id == login_id, User.email == email, User.phone == phone))
+            select(User).filter(or_(*filters))
         )
         if existing.scalars().first():
             raise HTTPException(status_code=400, detail="User already exists with this email/phone")
@@ -76,16 +83,18 @@ class StaffService:
             db.add(ur)
 
         # Audit log
-        audit = AuditLog(
+        await AuditService.log_action(
+            db=db,
             temple_id=temple_id,
             user_id=creator_id,
+            role=None,
+            module_name="HR_PAYROLL",
             action="STAFF_CREATED",
             action_type="CREATE",
             entity_id=str(user.id),
             new_value={"name": user.name, "role": user.role, "onboarding_method": "ADMIN_CREATED"},
             details=f"Staff {user.name} created by manager."
         )
-        db.add(audit)
 
         await db.commit()
         await db.refresh(user)
@@ -135,9 +144,12 @@ class StaffService:
         flag_modified(user, "audit_trail")
 
         # Audit log
-        audit = AuditLog(
+        await AuditService.log_action(
+            db=db,
             temple_id=temple_id,
             user_id=actor_id,
+            role=None,
+            module_name="HR_PAYROLL",
             action="STAFF_STATUS_UPDATED",
             action_type="UPDATE",
             entity_id=str(user.id),
@@ -145,7 +157,6 @@ class StaffService:
             new_value={"status": status},
             details=f"Staff {user.name} status updated from {old_status} to {status}."
         )
-        db.add(audit)
         
         await db.commit()
         await db.refresh(user)
@@ -274,16 +285,18 @@ class StaffService:
             user.audit_trail = current_audit
             flag_modified(user, "audit_trail")
             # Create a system audit log entry
-            audit = AuditLog(
+            await AuditService.log_action(
+                db=db,
                 temple_id=temple_id,
                 user_id=actor_id,
+                role=None,
+                module_name="HR_PAYROLL",
                 action="STAFF_UPDATED",
                 action_type="UPDATE",
                 entity_id=str(user.id),
                 new_value={"updates": updates_made, "status": user.status},
                 details=f"Staff {user.name} details updated: {', '.join(updates_made)}"
             )
-            db.add(audit)
             await db.commit()
             await db.refresh(user)
 
@@ -302,15 +315,17 @@ class StaffService:
         user.force_password_change = True
         
         # Audit log
-        audit = AuditLog(
+        await AuditService.log_action(
+            db=db,
             temple_id=temple_id,
             user_id=actor_id,
+            role=None,
+            module_name="HR_PAYROLL",
             action="STAFF_PASSWORD_RESET",
             action_type="UPDATE",
             entity_id=str(user.id),
             details=f"Staff {user.name} password reset by manager."
         )
-        db.add(audit)
         
         await db.commit()
         await db.refresh(user)
@@ -341,15 +356,17 @@ class StaffService:
         flag_modified(user, "audit_trail")
 
         # Audit log
-        audit = AuditLog(
+        await AuditService.log_action(
+            db=db,
             temple_id=temple_id,
             user_id=actor_id,
+            role=None,
+            module_name="HR_PAYROLL",
             action="STAFF_DELETED",
             action_type="DELETE",
             entity_id=str(user.id),
             details=f"Staff {user.name} released from directory."
         )
-        db.add(audit)
         
         await db.commit()
         return {"status": "success", "message": f"Staff {user.name} released successfully."}
@@ -396,15 +413,17 @@ class StaffService:
         user.force_password_change = False
         
         # Audit log
-        audit = AuditLog(
+        await AuditService.log_action(
+            db=db,
             temple_id=user.temple_id,
             user_id=user.id,
+            role=None,
+            module_name="AUTH",
             action="PASSWORD_CHANGED_FIRST_LOGIN",
             action_type="UPDATE",
             entity_id=str(user.id),
             details="User completed mandatory password reset on first login."
         )
-        db.add(audit)
         
         await db.commit()
         return {"status": "success", "message": "Password updated"}

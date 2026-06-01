@@ -158,6 +158,20 @@ class SuperAdminService:
         # Seed default roles & permissions (Mandatory Change 1)
         from app.services.staff_service import StaffService
         await StaffService.seed_default_temple_roles(db, temple.id)
+
+        from app.modules.audit.services.audit_service import AuditService
+        await AuditService.log_action(
+            db=db,
+            temple_id=temple.id,
+            user_id=created_by,
+            role="SUPERADMIN",
+            module_name="Governance",
+            action="TEMPLE_CREATED",
+            action_type="CREATE",
+            entity_id=str(temple.id),
+            new_value={"name": temple.name, "domain": temple.domain, "status": initial_status},
+            details=f"Temple '{temple.name}' created by Super Admin"
+        )
         
         await db.commit()
         await db.refresh(temple)
@@ -315,6 +329,20 @@ class SuperAdminService:
             if body.email is not None: profile.email = body.email
             if body.description is not None: profile.description = body.description
 
+        from app.modules.audit.services.audit_service import AuditService
+        await AuditService.log_action(
+            db=db,
+            temple_id=temple.id,
+            user_id=updated_by_uuid,
+            role=user_role or "SUPERADMIN",
+            module_name="Governance",
+            action="TEMPLE_UPDATED",
+            action_type="UPDATE",
+            entity_id=str(temple.id),
+            new_value={"name": temple.name, "domain": temple.domain, "status": temple.status},
+            details=f"Temple '{temple.name}' updated by Admin/SuperAdmin"
+        )
+
         await db.flush()
 
         profile_result = await db.execute(select(TempleProfile).filter(TempleProfile.temple_id == tid))
@@ -372,6 +400,19 @@ class SuperAdminService:
             reason=reason
         )
 
+        from app.modules.audit.services.audit_service import AuditService
+        await AuditService.log_action(
+            db=db,
+            temple_id=tid,
+            user_id=suspended_by_uuid,
+            role="SUPERADMIN",
+            module_name="Governance",
+            action="TEMPLE_SUSPENDED",
+            action_type="UPDATE",
+            entity_id=str(tid),
+            details=f"Temple suspended: {reason}"
+        )
+
         return {"detail": "Temple has been placed under emergency suspension.", "id": str(tid)}
 
     @staticmethod
@@ -399,6 +440,19 @@ class SuperAdminService:
             new_state=TempleOperationalState.ACTIVE,
             changed_by=activated_by_uuid,
             reason=reason
+        )
+
+        from app.modules.audit.services.audit_service import AuditService
+        await AuditService.log_action(
+            db=db,
+            temple_id=tid,
+            user_id=activated_by_uuid,
+            role="SUPERADMIN",
+            module_name="Governance",
+            action="TEMPLE_REACTIVATED",
+            action_type="UPDATE",
+            entity_id=str(tid),
+            details=f"Temple reactivated: {reason}"
         )
         
         # 2. Pipeline requirement: invalidate stale sessions upon reactivation
@@ -446,6 +500,20 @@ class SuperAdminService:
                 details={"new_version": temple.security_version, "timestamp": temple.last_security_event_at.isoformat()}
             )
             db.add(event)
+
+            from app.modules.audit.services.audit_service import AuditService
+            await AuditService.log_action(
+                db=db,
+                temple_id=temple.id,
+                user_id=triggered_by_uuid,
+                role="SUPERADMIN",
+                module_name="Governance",
+                action="FORCE_LOGOUT_ALL_USERS",
+                action_type="UPDATE",
+                entity_id=str(temple.id),
+                details=f"Forced logout for all users of temple {temple.name}"
+            )
+
         await db.commit()
 
         # Trigger real-time disconnect

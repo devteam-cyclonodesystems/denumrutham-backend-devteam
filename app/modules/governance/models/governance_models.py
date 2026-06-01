@@ -176,3 +176,5 @@ class OperationalStateAudit(Base):
     temple = relationship("Temple")
 
 
+
+

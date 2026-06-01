@@ -143,7 +143,14 @@ class InventoryService:
 
     # --- Items ---
     @staticmethod
-    async def create_item(db: AsyncSession, item_in: InventoryItemCreate, temple_id: str) -> InventoryItem:
+    async def create_item(
+        db: AsyncSession, 
+        item_in: InventoryItemCreate, 
+        temple_id: str,
+        user_id: Optional[UUID] = None,
+        username: str = "Admin",
+        user_role: str = "SYSTEM"
+    ) -> InventoryItem:
         import math
         from fastapi import HTTPException
         
@@ -184,6 +191,21 @@ class InventoryService:
                 movement_type=InventoryMovementType.ADJUSTMENT,
                 remarks="Initial stock entry"
             )
+
+        # Add Audit log
+        from app.modules.audit.services.audit_service import AuditService
+        await AuditService.log_action(
+            db=db,
+            temple_id=tid,
+            user_id=user_id,
+            role=user_role,
+            module_name="INVENTORY",
+            action="ITEM_CREATED",
+            action_type="CREATE",
+            entity_id=str(item.id),
+            new_value={"name": item.name, "category": item.category, "stock": item.stock},
+            details=f"Inventory item '{item.name}' created with initial stock {item.stock}."
+        )
 
         await db.commit()
         await db.refresh(item)
@@ -430,6 +452,21 @@ class InventoryService:
                     existing_product.unit = unit
                     existing_product.supplier_id = sup.id
 
+        # Add Audit log
+        from app.modules.audit.services.audit_service import AuditService
+        await AuditService.log_action(
+            db=db,
+            temple_id=tid,
+            user_id=user_id,
+            role=user_role,
+            module_name="INVENTORY",
+            action="SUPPLIER_CREATED",
+            action_type="CREATE",
+            entity_id=str(sup.id),
+            new_value={"name": sup.name, "sup_code": sup.sup_code},
+            details=f"Supplier '{sup.name}' created with code {sup.sup_code}."
+        )
+
         await db.commit()
         await db.refresh(sup)
         return sup
@@ -630,6 +667,21 @@ class InventoryService:
         sup.items_supplied = sup_in.items_supplied
         sup.remarks = sup_in.remarks
        
+        # Add Audit log
+        from app.modules.audit.services.audit_service import AuditService
+        await AuditService.log_action(
+            db=db,
+            temple_id=tid,
+            user_id=user_id,
+            role=user_role,
+            module_name="INVENTORY",
+            action="SUPPLIER_UPDATED",
+            action_type="UPDATE",
+            entity_id=str(sup.id),
+            new_value={"name": sup.name, "sup_code": sup.sup_code},
+            details=f"Supplier '{sup.name}' updated."
+        )
+
         await db.commit()
         await db.refresh(sup)
         logger.info(f"Supplier {supplier_id} updated successfully")
@@ -770,6 +822,21 @@ class InventoryService:
             item.unit = item_in["unit"]
         if "remarks" in item_in:
             item.remarks = item_in["remarks"]
+
+        # Add Audit log
+        from app.modules.audit.services.audit_service import AuditService
+        await AuditService.log_action(
+            db=db,
+            temple_id=tid,
+            user_id=user_id,
+            role=user_role,
+            module_name="INVENTORY",
+            action="ITEM_UPDATED",
+            action_type="UPDATE",
+            entity_id=str(item.id),
+            new_value={"name": item.name, "category": item.category, "stock": item.stock, "min_stock": item.min_stock, "unit_price": item.unit_price},
+            details=f"Inventory item '{item.name}' updated."
+        )
 
         await db.commit()
         await db.refresh(item)
@@ -1001,6 +1068,21 @@ class InventoryService:
             invoice.last_payment_date = None
             invoice.payment_completed_at = None
 
+            # Add Audit log
+            from app.modules.audit.services.audit_service import AuditService
+            await AuditService.log_action(
+                db=db,
+                temple_id=tid,
+                user_id=real_user_uuid,
+                role=None,
+                module_name="INVENTORY",
+                action="INVOICE_CREATED",
+                action_type="CREATE",
+                entity_id=str(invoice.id),
+                new_value={"ref_number": invoice.ref_number, "amount": float(invoice.amount), "status": invoice.status},
+                details=f"Procurement invoice {invoice.ref_number} created with amount ₹{invoice.amount}."
+            )
+
             await db.commit()
             await db.refresh(invoice)
             return {
@@ -1085,6 +1167,33 @@ class InventoryService:
                 reference_id=ref,
                 source="system",
             )
+
+        # Add Audit log
+        from app.modules.audit.services.audit_service import AuditService
+        await AuditService.log_action(
+            db=db,
+            temple_id=tid,
+            user_id=real_user_uuid,
+            role=None,
+            module_name="INVENTORY",
+            action="INVOICE_CREATED",
+            action_type="CREATE",
+            entity_id=str(invoice.id),
+            new_value={"ref_number": invoice.ref_number, "amount": float(invoice.amount), "status": invoice.status},
+            details=f"Procurement invoice {invoice.ref_number} created with amount ₹{invoice.amount}."
+        )
+        await AuditService.log_action(
+            db=db,
+            temple_id=tid,
+            user_id=real_user_uuid,
+            role=None,
+            module_name="INVENTORY",
+            action="GRN_CREATED",
+            action_type="CREATE",
+            entity_id=str(grn.id),
+            new_value={"grn_code": grn.grn_code, "invoice_number": grn.invoice_number},
+            details=f"Goods Receipt Note {grn.grn_code} generated for invoice {grn.invoice_number}."
+        )
 
         await db.commit()
         await db.refresh(invoice)
@@ -1375,6 +1484,33 @@ class InventoryService:
                 source="system",
             )
            
+        # Add Audit log
+        from app.modules.audit.services.audit_service import AuditService
+        await AuditService.log_action(
+            db=db,
+            temple_id=tid,
+            user_id=real_user_uuid,
+            role=None,
+            module_name="INVENTORY",
+            action="DELIVERY_COMPLETED",
+            action_type="UPDATE",
+            entity_id=str(invoice.id),
+            new_value={"status": "COMPLETED", "amount": float(invoice.amount)},
+            details=f"Procurement invoice {invoice.ref_number} delivery completed."
+        )
+        await AuditService.log_action(
+            db=db,
+            temple_id=tid,
+            user_id=real_user_uuid,
+            role=None,
+            module_name="INVENTORY",
+            action="GRN_CREATED",
+            action_type="CREATE",
+            entity_id=str(grn.id),
+            new_value={"grn_code": grn.grn_code, "invoice_number": grn.invoice_number},
+            details=f"Goods Receipt Note {grn.grn_code} generated on delivery completion."
+        )
+
         await db.commit()
         await db.refresh(invoice)
         await db.refresh(grn)
@@ -1859,6 +1995,21 @@ class InventoryService:
             remarks=recon_in.remarks
         )
         db.add(recon)
+        # Add Audit log
+        from app.modules.audit.services.audit_service import AuditService
+        await AuditService.log_action(
+            db=db,
+            temple_id=tid,
+            user_id=user_id,
+            role=None,
+            module_name="INVENTORY",
+            action="STOCK_RECONCILED",
+            action_type="UPDATE",
+            entity_id=str(recon.id),
+            new_value={"expected": float(expected), "actual": float(actual), "diff": float(diff)},
+            details=f"Stock reconciled. Expected: {expected}, Actual: {actual}, Diff: {diff}."
+        )
+
         await db.commit()
         await db.refresh(recon)
         return recon
@@ -2040,16 +2191,18 @@ class InventoryService:
         req.remarks = (req.remarks + " | " + log_str) if req.remarks else log_str
 
         # Add Audit log
-        from app.models.domain import AuditLog
-        audit = AuditLog(
+        from app.modules.audit.services.audit_service import AuditService
+        await AuditService.log_action(
+            db=db,
             temple_id=tid,
             user_id=user_id,
+            role=None,
+            module_name="INVENTORY",
             action="MATERIAL_REQUEST_APPROVED",
             action_type="UPDATE",
             entity_id=str(req.id),
             details=f"Material request {req.req_code} approved."
         )
-        db.add(audit)
 
         await db.commit()
         await db.refresh(req)
@@ -2081,16 +2234,18 @@ class InventoryService:
         req.remarks = (req.remarks + " | " + log_str) if req.remarks else log_str
 
         # Add Audit log
-        from app.models.domain import AuditLog
-        audit = AuditLog(
+        from app.modules.audit.services.audit_service import AuditService
+        await AuditService.log_action(
+            db=db,
             temple_id=tid,
             user_id=user_id,
+            role=None,
+            module_name="INVENTORY",
             action="MATERIAL_REQUEST_REJECTED",
             action_type="UPDATE",
             entity_id=str(req.id),
             details=f"Material request {req.req_code} rejected. Remarks: {remarks}"
         )
-        db.add(audit)
 
         await db.commit()
         await db.refresh(req)
@@ -2121,16 +2276,18 @@ class InventoryService:
         req.remarks = (req.remarks + " | " + log_str) if req.remarks else log_str
 
         # Add Audit log
-        from app.models.domain import AuditLog
-        audit = AuditLog(
+        from app.modules.audit.services.audit_service import AuditService
+        await AuditService.log_action(
+            db=db,
             temple_id=tid,
             user_id=user_id,
+            role=None,
+            module_name="INVENTORY",
             action="MATERIAL_REQUEST_CANCELLED",
             action_type="UPDATE",
             entity_id=str(req.id),
             details=f"Material request {req.req_code} cancelled. Remarks: {remarks}"
         )
-        db.add(audit)
 
         await db.commit()
         await db.refresh(req)
@@ -2217,16 +2374,18 @@ class InventoryService:
         req.remarks = (req.remarks + " | " + log_str) if req.remarks else log_str
 
         # Add Audit log
-        from app.models.domain import AuditLog
-        audit = AuditLog(
+        from app.modules.audit.services.audit_service import AuditService
+        await AuditService.log_action(
+            db=db,
             temple_id=tid,
             user_id=user_id,
+            role=None,
+            module_name="INVENTORY",
             action="MATERIAL_REQUEST_ISSUED",
             action_type="UPDATE",
             entity_id=str(req.id),
             details=f"Material request {req.req_code} stock issued. Status: {req.status}"
         )
-        db.add(audit)
 
         await db.commit()
         await db.refresh(req)
@@ -2281,7 +2440,8 @@ class InventoryService:
         db: AsyncSession, request_id: UUID, temple_id: str,
         user_id: UUID, username: str, role: str
     ) -> dict:
-        from app.models.domain import PriceApprovalRequest, SupplierPriceHistory, AuditLog
+        from app.models.domain import PriceApprovalRequest, SupplierPriceHistory
+        from app.modules.audit.services.audit_service import AuditService
         from datetime import datetime, timezone
         from sqlalchemy.orm import selectinload
         
@@ -2341,12 +2501,14 @@ class InventoryService:
         )
         db.add(history)
         
-        audit = AuditLog(
+        await AuditService.log_action(
+            db=db,
             temple_id=tid,
             user_id=user_id,
             role=role,
-            module_name="Inventory",
+            module_name="INVENTORY",
             action="PRICE_APPROVAL_DECISION",
+            action_type="UPDATE",
             entity_id=str(req.id),
             old_value={"status": "PENDING_APPROVAL"},
             new_value={
@@ -2356,7 +2518,6 @@ class InventoryService:
             },
             details=f"Decision: APPROVED | Request ID: {req.id} | Item: {item.name} | Supplier: {supplier_name} | Old Price: {old_price} | New Price: {req.new_price} | Percentage Change: {req.change_percentage:.2f}% | Approval Type: {req.approval_type} | Decision By: {username}",
         )
-        db.add(audit)
         
         await db.commit()
         return {"status": "success", "message": "Price approval request approved and item price updated."}
@@ -2366,7 +2527,8 @@ class InventoryService:
         db: AsyncSession, request_id: UUID, temple_id: str,
         user_id: UUID, username: str, role: str, reason: Optional[str] = None
     ) -> dict:
-        from app.models.domain import PriceApprovalRequest, AuditLog
+        from app.models.domain import PriceApprovalRequest
+        from app.modules.audit.services.audit_service import AuditService
         from datetime import datetime, timezone
         from typing import Optional
         from sqlalchemy.orm import selectinload
@@ -2401,12 +2563,14 @@ class InventoryService:
         
         item_name = req.item.name if req.item else "N/A"
         supplier_name = req.supplier.name if req.supplier else "N/A"
-        audit = AuditLog(
+        await AuditService.log_action(
+            db=db,
             temple_id=tid,
             user_id=user_id,
             role=role,
-            module_name="Inventory",
+            module_name="INVENTORY",
             action="PRICE_APPROVAL_DECISION",
+            action_type="UPDATE",
             entity_id=str(req.id),
             old_value={"status": "PENDING_APPROVAL"},
             new_value={
@@ -2417,7 +2581,6 @@ class InventoryService:
             },
             details=f"Decision: REJECTED | Request ID: {req.id} | Item: {item_name} | Supplier: {supplier_name} | Old Price: {req.old_price} | New Price: {req.new_price} | Percentage Change: {req.change_percentage:.2f}% | Approval Type: {req.approval_type} | Decision By: {username} | Reason: {reason or 'None'}",
         )
-        db.add(audit)
         
         await db.commit()
         return {"status": "success", "message": "Price approval request rejected."}

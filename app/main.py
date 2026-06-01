@@ -58,6 +58,17 @@ async def lifespan(app: FastAPI):
     is_valid = await validate_on_startup()
     if not is_valid:
         logger.critical("APPLICATION STARTUP BLOCKED: Schema Integrity Failure.")
+
+    # Phase 2: Startup Audit Chain Verification
+    try:
+        from app.modules.audit.services.chain_verification_service import ChainVerificationService
+        async with AsyncSessionLocal() as db:
+            summary = await ChainVerificationService.verify_all_temples(db)
+            logger.info("Startup Audit Chain Verification Summary: %s", summary)
+            if summary["status"] == "FAIL":
+                logger.critical("CRITICAL: AUDIT CHAIN CORRUPTION DETECTED during startup. Compromised temples quarantined/suspended.")
+    except Exception as e:
+        logger.error("Failed to run startup audit chain verification: %s", str(e))
         
     # Seed global permissions catalog (Mandatory Change 1)
     try:
@@ -97,9 +108,23 @@ async def lifespan(app: FastAPI):
             
     asyncio.create_task(reservation_cleanup_loop())
     
+    # Start background activity log outbox processor task
+    from app.modules.audit.services.activity_log_processor import run_outbox_worker
+    outbox_shutdown_event = asyncio.Event()
+    outbox_worker_task = asyncio.create_task(run_outbox_worker(outbox_shutdown_event))
+    
     logger.info("Database schema handled by Alembic migrations.")
     yield
-    logger.info("Shutting down TMS API")
+    
+    # Graceful shutdown sequence
+    logger.info("Shutting down TMS API: Stopping background tasks...")
+    outbox_shutdown_event.set()
+    try:
+        await asyncio.wait_for(outbox_worker_task, timeout=10.0)
+        logger.info("Background activity log processor stopped gracefully.")
+    except Exception as e:
+        logger.error("Error during activity log processor shutdown: %s", str(e))
+    logger.info("Shutting down TMS API completed.")
 
 
 # ---------------------------------------------------------------------------

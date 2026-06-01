@@ -96,3 +96,215 @@ async def get_audit_logs(
         page_size=pagination.page_size,
         message="Audit logs retrieved"
     )
+
+
+from app.modules.audit.models.audit_models import AuditGovernanceConfig, AuditIntegrityVerificationReport
+from app.modules.audit.services.chain_verification_service import ChainVerificationService
+from app.modules.audit.services.activity_log_query_service import ActivityLogQueryService
+from app.modules.audit.services.audit_service import AuditService
+from fastapi import Response
+
+class AuditGovernanceConfigUpdate(BaseModel):
+    retention_days: int
+    export_policy: Optional[dict] = None
+    severity_mapping: Optional[dict] = None
+    alert_thresholds: Optional[dict] = None
+    access_controls: Optional[dict] = None
+
+class ExportPayload(BaseModel):
+    investigator_name: str
+    module_name: Optional[str] = None
+    search: Optional[str] = None
+
+@router.get("/governance/config")
+async def get_governance_config(
+    current_user: TokenData = Depends(require_permission("audit", "read")),
+    temple_id: str = Depends(get_current_temple_id),
+    db: AsyncSession = Depends(get_db),
+):
+    tid = UUID(temple_id)
+    stmt = select(AuditGovernanceConfig).filter(AuditGovernanceConfig.temple_id == tid)
+    res = await db.execute(stmt)
+    config = res.scalar_one_or_none()
+    
+    if not config:
+        # Create a default configuration
+        config = AuditGovernanceConfig(
+            temple_id=tid,
+            retention_days=365,
+            export_policy={},
+            severity_mapping={},
+            alert_thresholds={},
+            access_controls={}
+        )
+        db.add(config)
+        await db.commit()
+        await db.refresh(config)
+        
+    return config
+
+@router.put("/governance/config")
+async def update_governance_config(
+    payload: AuditGovernanceConfigUpdate,
+    current_user: TokenData = Depends(require_permission("audit", "write")),
+    temple_id: str = Depends(get_current_temple_id),
+    db: AsyncSession = Depends(get_db),
+):
+    tid = UUID(temple_id)
+    stmt = select(AuditGovernanceConfig).filter(AuditGovernanceConfig.temple_id == tid)
+    res = await db.execute(stmt)
+    config = res.scalar_one_or_none()
+    
+    is_new = False
+    old_value = {}
+    if not config:
+        is_new = True
+        config = AuditGovernanceConfig(temple_id=tid)
+        db.add(config)
+    else:
+        old_value = {
+            "retention_days": config.retention_days,
+            "export_policy": config.export_policy,
+            "severity_mapping": config.severity_mapping,
+            "alert_thresholds": config.alert_thresholds,
+            "access_controls": config.access_controls
+        }
+        
+    config.retention_days = payload.retention_days
+    if payload.export_policy is not None:
+        config.export_policy = payload.export_policy
+    if payload.severity_mapping is not None:
+        config.severity_mapping = payload.severity_mapping
+    if payload.alert_thresholds is not None:
+        config.alert_thresholds = payload.alert_thresholds
+    if payload.access_controls is not None:
+        config.access_controls = payload.access_controls
+        
+    await db.flush()
+    
+    new_value = {
+        "retention_days": config.retention_days,
+        "export_policy": config.export_policy,
+        "severity_mapping": config.severity_mapping,
+        "alert_thresholds": config.alert_thresholds,
+        "access_controls": config.access_controls
+    }
+    
+    # Audit-of-Audit logging
+    await AuditService.log_action(
+        db=db,
+        temple_id=tid,
+        user_id=UUID(current_user.sub) if current_user.sub else None,
+        role=current_user.role,
+        module_name="Audit",
+        action="GOVERNANCE_CONFIG_UPDATED" if not is_new else "GOVERNANCE_CONFIG_CREATED",
+        action_type="UPDATE" if not is_new else "CREATE",
+        entity_id=str(config.id),
+        old_value=old_value if not is_new else None,
+        new_value=new_value,
+        details=f"Audit governance policy updated: retention set to {config.retention_days} days."
+    )
+    
+    await db.commit()
+    await db.refresh(config)
+    return config
+
+@router.post("/governance/verify")
+async def trigger_manual_verification(
+    current_user: TokenData = Depends(require_permission("audit", "write")),
+    temple_id: str = Depends(get_current_temple_id),
+    db: AsyncSession = Depends(get_db),
+):
+    tid = UUID(temple_id)
+    result = await ChainVerificationService.verify_audit_chain(db, tid)
+    report = await ChainVerificationService.record_verification_report(db, tid, result)
+    await db.commit()
+    
+    # Audit logging for manual verification trigger
+    await AuditService.log_action(
+        db=db,
+        temple_id=tid,
+        user_id=UUID(current_user.sub) if current_user.sub else None,
+        role=current_user.role,
+        module_name="Audit",
+        action="MANUAL_INTEGRITY_SCAN_RUN",
+        action_type="EXECUTE",
+        entity_id=str(report.id),
+        new_value={"status": result["status"], "total_logs": result["total_logs"]},
+        details=f"Manual cryptographic audit chain integrity scan executed. Status: {result['status']}."
+    )
+    await db.commit()
+    return result
+
+@router.get("/governance/reports")
+async def get_verification_reports(
+    current_user: TokenData = Depends(require_permission("audit", "read")),
+    temple_id: str = Depends(get_current_temple_id),
+    db: AsyncSession = Depends(get_db),
+):
+    tid = UUID(temple_id)
+    stmt = (
+        select(AuditIntegrityVerificationReport)
+        .filter(AuditIntegrityVerificationReport.temple_id == tid)
+        .order_by(desc(AuditIntegrityVerificationReport.verified_at))
+        .limit(20)
+    )
+    res = await db.execute(stmt)
+    reports = res.scalars().all()
+    return reports
+
+@router.post("/governance/export")
+async def export_evidence_package(
+    payload: ExportPayload,
+    current_user: TokenData = Depends(require_permission("audit", "write")),
+    temple_id: str = Depends(get_current_temple_id),
+    db: AsyncSession = Depends(get_db),
+):
+    tid = UUID(temple_id)
+    zip_bytes = await ActivityLogQueryService.generate_evidence_package(
+        db=db,
+        temple_id=tid,
+        investigator_name=payload.investigator_name,
+        module_name=payload.module_name,
+        search=payload.search
+    )
+    
+    # Audit log of the export
+    await AuditService.log_action(
+        db=db,
+        temple_id=tid,
+        user_id=UUID(current_user.sub) if current_user.sub else None,
+        role=current_user.role,
+        module_name="Audit",
+        action="EVIDENCE_PACKAGE_EXPORTED",
+        action_type="EXECUTE",
+        entity_id=str(tid),
+        new_value={"investigator": payload.investigator_name, "module_filter": payload.module_name, "search_query": payload.search},
+        details=f"Signed evidence package exported by {payload.investigator_name}."
+    )
+    await db.commit()
+    
+    timestamp = datetime.now().strftime("%Y%m%d_%H%M%S")
+    filename = f"evidence_package_{temple_id}_{timestamp}.zip"
+    
+    return Response(
+        content=zip_bytes,
+        media_type="application/zip",
+        headers={
+            "Content-Disposition": f"attachment; filename={filename}",
+            "Access-Control-Expose-Headers": "Content-Disposition"
+        }
+    )
+
+
+@router.get("/monitoring/metrics")
+async def get_outbox_metrics(
+    current_user: TokenData = Depends(require_permission("audit", "read")),
+):
+    from app.modules.audit.services.activity_log_processor import OutboxMetrics
+    return {
+        "queue_size": OutboxMetrics.queue_size,
+        "processing_rate": OutboxMetrics.processing_rate,
+        "failure_count": OutboxMetrics.failure_count,
+        "poison_pill_skips": OutboxMetrics.poison_pill_skips
+    }

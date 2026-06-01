@@ -289,25 +289,70 @@ class RbacService:
         return result.scalars().all()
 
     @staticmethod
-    async def assign_user_role(db: AsyncSession, temple_id: str, assignment: UserRoleCreate) -> UserRole:
+    async def assign_user_role(
+        db: AsyncSession,
+        temple_id: str,
+        assignment: UserRoleCreate,
+        performer_id: Optional[str] = None,
+        performer_role: Optional[str] = None
+    ) -> UserRole:
         ur = UserRole(
             user_id=assignment.user_id,
             role_id=assignment.role_id,
             temple_id=UUID(temple_id),
         )
         db.add(ur)
+        await db.flush()  # flush to populate ur.id
+
+        from app.modules.audit.services.audit_service import AuditService
+        p_uuid = UUID(performer_id) if performer_id else None
+        await AuditService.log_action(
+            db=db,
+            temple_id=UUID(temple_id) if temple_id else None,
+            user_id=p_uuid,
+            role=performer_role,
+            module_name="RBAC",
+            action="ROLE_ASSIGNED",
+            action_type="UPDATE",
+            entity_id=str(ur.id),
+            new_value={"user_id": str(assignment.user_id), "role_id": str(assignment.role_id)},
+            details=f"Assigned role {assignment.role_id} to user {assignment.user_id}"
+        )
+
         await db.commit()
         await db.refresh(ur)
         return ur
 
     @staticmethod
-    async def remove_user_role(db: AsyncSession, temple_id: str, user_role_id: str) -> None:
+    async def remove_user_role(
+        db: AsyncSession,
+        temple_id: str,
+        user_role_id: str,
+        performer_id: Optional[str] = None,
+        performer_role: Optional[str] = None
+    ) -> None:
         result = await db.execute(
             select(UserRole).filter(UserRole.id == UUID(user_role_id), UserRole.temple_id == UUID(temple_id))
         )
         ur = result.scalars().first()
         if not ur:
             raise HTTPException(status_code=404, detail="UserRole not found")
+
+        from app.modules.audit.services.audit_service import AuditService
+        p_uuid = UUID(performer_id) if performer_id else None
+        await AuditService.log_action(
+            db=db,
+            temple_id=UUID(temple_id) if temple_id else None,
+            user_id=p_uuid,
+            role=performer_role,
+            module_name="RBAC",
+            action="ROLE_REVOKED",
+            action_type="UPDATE",
+            entity_id=str(ur.id),
+            old_value={"user_id": str(ur.user_id), "role_id": str(ur.role_id)},
+            details=f"Revoked user-role assignment {user_role_id} (user {ur.user_id}, role {ur.role_id})"
+        )
+
         await db.delete(ur)
         await db.commit()
 

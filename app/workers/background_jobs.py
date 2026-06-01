@@ -5,8 +5,9 @@ from sqlalchemy import select
 from app.core.database import AsyncSessionLocal
 from app.models.domain import (
     StoreStockReservation, StoreStock, InventoryStockLedger,
-    InventoryMovementType, AuditLog, StoreProduct
+    InventoryMovementType, StoreProduct
 )
+from app.modules.audit.services.audit_service import AuditService
 
 logging.basicConfig(level=logging.INFO)
 logger = logging.getLogger("tms.tasks.background_jobs")
@@ -90,7 +91,8 @@ async def cleanup_expired_reservations():
                 session.add(ledger_entry)
 
                 # Generate Audit Log
-                audit_entry = AuditLog(
+                await AuditService.log_action(
+                    db=session,
                     temple_id=reservation.temple_id,
                     user_id=None,
                     role="SYSTEM",
@@ -100,7 +102,6 @@ async def cleanup_expired_reservations():
                     entity_id=str(reservation.id),
                     details=f"Released reservation {reservation.id} of {reservation.quantity_reserved} units of product {reservation.product_id} due to expiry"
                 )
-                session.add(audit_entry)
 
                 released_count += 1
             except Exception as e:

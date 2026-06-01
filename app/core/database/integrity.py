@@ -168,6 +168,66 @@ class DeploymentIntegrityService:
             "timestamp": datetime.utcnow().isoformat()
         }
 
+def validate_audit_bypass_prevention() -> bool:
+    """
+    Architectural safeguard that scans the python files in the 'app/' directory on boot.
+    Raises a fatal error (blocking startup) if direct 'AuditLog(' instantiation is detected
+    in any unauthorized files.
+    """
+    import os
+    import re
+    
+    app_dir = os.path.dirname(os.path.dirname(os.path.dirname(os.path.abspath(__file__)))) # Points to backend/app/
+    
+    # Define authorized files that are allowed to import or reference AuditLog
+    allowed_suffixes = [
+        os.path.normpath("app/modules/audit/services/audit_service.py"),
+        os.path.normpath("app/api/api_v1/routes/audit.py"),
+        os.path.normpath("app/models/__init__.py"),
+        os.path.normpath("app/modules/governance/models/governance_models.py"),
+        os.path.normpath("app/core/database/integrity.py"),
+        os.path.normpath("app/core/integrity.py"),
+    ]
+    
+    pattern = re.compile(r'\bAuditLog\s*\(')
+    violations = []
+    
+    for root, dirs, files in os.walk(app_dir):
+        if "__pycache__" in root or "tests" in root:
+            continue
+        for file in files:
+            if not file.endswith(".py"):
+                continue
+            file_path = os.path.join(root, file)
+            normalized_path = os.path.normpath(file_path)
+            is_allowed = False
+            for suffix in allowed_suffixes:
+                if normalized_path.endswith(suffix):
+                    is_allowed = True
+                    break
+            
+            if is_allowed:
+                continue
+                
+            try:
+                with open(file_path, "r", encoding="utf-8") as f:
+                    content = f.read()
+                    if pattern.search(content):
+                        rel_path = os.path.relpath(file_path, app_dir)
+                        violations.append(rel_path)
+            except Exception as e:
+                logger.warning(f"Bypass scan skipped file {file_path}: {e}")
+                
+    if violations:
+        logger.critical(
+            f"AUDIT PIPELINE BYPASS DETECTED! Direct AuditLog instantiation is prohibited in: {violations}. "
+            "Please use AuditService.log_action() to route audit events through the immutable pipeline."
+        )
+        return False
+        
+    logger.info("Audit pipeline bypass check PASSED.")
+    return True
+
 async def validate_on_startup():
     """Safety guard for application startup."""
     is_valid = await DeploymentIntegrityService.validate_runtime_schema()
@@ -175,4 +235,10 @@ async def validate_on_startup():
         logger.critical("CRITICAL: Application cannot start due to schema integrity failure.")
         import sys
         sys.exit(1)
+        
+    if not validate_audit_bypass_prevention():
+        logger.critical("CRITICAL: Application cannot start due to audit pipeline bypass safeguard failure.")
+        import sys
+        sys.exit(1)
+        
     return is_valid

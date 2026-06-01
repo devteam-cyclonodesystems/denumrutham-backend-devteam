@@ -570,17 +570,19 @@ class RegistrationService:
             db.add(mapping)
 
         # Audit Log
-        from app.models.domain import AuditLog
-        audit = AuditLog(
+        from app.modules.audit.services.audit_service import AuditService
+        await AuditService.log_action(
+            db=db,
             temple_id=temple_id,
             user_id=approver_id,
+            role=None,
+            module_name="HR_PAYROLL",
             action="STAFF_APPROVED",
             action_type="UPDATE",
             entity_id=str(user.id),
             new_value={"status": "ACTIVE", "approval_status": "APPROVED"},
             details=f"Staff {user.name} approved by manager."
         )
-        db.add(audit)
 
         await db.commit()
 
@@ -620,17 +622,19 @@ class RegistrationService:
         user.rejection_reason = reason
 
         # Audit Log
-        from app.models.domain import AuditLog
-        audit = AuditLog(
+        from app.modules.audit.services.audit_service import AuditService
+        await AuditService.log_action(
+            db=db,
             temple_id=temple_id,
             user_id=rejector_id,
+            role=None,
+            module_name="HR_PAYROLL",
             action="STAFF_REJECTED",
             action_type="UPDATE",
             entity_id=str(user.id),
             new_value={"status": "REJECTED", "approval_status": "REJECTED", "reason": reason},
             details=f"Staff {user.name} rejected by manager."
         )
-        db.add(audit)
 
         await db.commit()
 
@@ -690,6 +694,22 @@ class RegistrationService:
                 reason="Approved via registration flow"
             )
             db.add(audit)
+
+            # Centralized Audit Log Integration
+            from app.modules.audit.services.audit_service import AuditService
+            await AuditService.log_action(
+                db=db,
+                temple_id=temple.id,
+                user_id=approver_id,
+                role="SUPER_ADMIN",
+                module_name="TEMPLE_MANAGEMENT",
+                action="TEMPLE_STATUS_CHANGED",
+                action_type="UPDATE",
+                entity_id=str(temple.id),
+                old_value={"status": current_status},
+                new_value={"status": "APPROVED"},
+                details=f"Temple '{temple.name}' status approved by super admin."
+            )
 
             if tx:
                 await tx.commit()
@@ -760,6 +780,22 @@ class RegistrationService:
                 reason="Rejected via registration flow"
             )
             db.add(audit)
+
+            # Centralized Audit Log Integration
+            from app.modules.audit.services.audit_service import AuditService
+            await AuditService.log_action(
+                db=db,
+                temple_id=temple.id,
+                user_id=approver_id,
+                role="SUPER_ADMIN",
+                module_name="TEMPLE_MANAGEMENT",
+                action="TEMPLE_STATUS_CHANGED",
+                action_type="UPDATE",
+                entity_id=str(temple.id),
+                old_value={"status": current_status},
+                new_value={"status": "REJECTED"},
+                details=f"Temple '{temple.name}' status rejected by super admin."
+            )
         await db.commit()
 
         # Event hook

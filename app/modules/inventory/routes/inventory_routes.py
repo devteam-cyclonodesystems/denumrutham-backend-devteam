@@ -29,7 +29,12 @@ async def create_item(
     current_user: TokenData = Depends(get_current_user),
     temple_id: str = Depends(get_current_temple_id),
 ):
-    return await InventoryService.create_item(db=db, item_in=item_in, temple_id=temple_id)
+    return await InventoryService.create_item(
+        db=db, item_in=item_in, temple_id=temple_id,
+        user_id=UUID(str(current_user.sub)) if current_user and current_user.sub else None,
+        username=current_user.username or "Admin" if current_user else "Admin",
+        user_role=current_user.role or "SYSTEM" if current_user else "SYSTEM"
+    )
 
 
 @router.get("/items", response_model=List[InventoryItemResponse], tags=["inventory"])

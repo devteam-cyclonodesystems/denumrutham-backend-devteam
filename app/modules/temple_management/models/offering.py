@@ -7,7 +7,7 @@ import uuid
 from datetime import datetime, timezone
 from sqlalchemy import (
     Column, String, Integer, Float, DateTime, ForeignKey,
-    Boolean, Text, Index, JSON,
+    Boolean, Text, Index, JSON, UniqueConstraint,
 )
 from sqlalchemy.dialects.postgresql import UUID
 from app.core.database.database import Base
@@ -43,7 +43,7 @@ class Offering(Base):
 
     id = Column(UUID(as_uuid=True), primary_key=True, default=uuid.uuid4)
     temple_id = Column(UUID(as_uuid=True), ForeignKey("temples.id"), nullable=False, index=True)
-    offering_number = Column(String, unique=True, nullable=False)
+    offering_number = Column(String, nullable=False)
     donor_name = Column(String, nullable=False)
     donor_phone = Column(String, nullable=True)
     donor_address = Column(Text, nullable=True)
@@ -71,6 +71,7 @@ class Offering(Base):
     source_device_id = Column(String, nullable=True)
 
     __table_args__ = (
+        UniqueConstraint("temple_id", "offering_number", name="uq_offering_number"),
         Index("idx_offering_temple", "temple_id"),
         Index("idx_offering_number", "offering_number"),
         Index("idx_offering_status", "temple_id", "payment_status"),
