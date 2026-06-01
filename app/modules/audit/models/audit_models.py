@@ -10,6 +10,11 @@ def utcnow():
 class ImmutableActivityLog(Base):
     """Immutable, append-only historical database record of staff action."""
     __tablename__ = "immutable_activity_logs"
+    __table_args__ = (
+        {
+            "postgresql_partition_by": "RANGE (created_utc)"
+        }
+    )
 
     id = Column(UUID(as_uuid=True), primary_key=True, default=uuid.uuid4)
     temple_id = Column(UUID(as_uuid=True), nullable=False, index=True)

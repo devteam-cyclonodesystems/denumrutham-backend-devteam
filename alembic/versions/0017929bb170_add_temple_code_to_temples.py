@@ -19,10 +19,24 @@ depends_on: Union[str, Sequence[str], None] = None
 
 
 def upgrade() -> None:
-    op.add_column('temples', sa.Column('temple_code', sa.String(), nullable=True))
-    op.create_index(op.f('ix_temples_temple_code'), 'temples', ['temple_code'], unique=True)
+    bind = op.get_bind()
+    inspector = sa.inspect(bind)
+    columns = [c['name'] for c in inspector.get_columns('temples')]
+    if 'temple_code' not in columns:
+        op.add_column('temples', sa.Column('temple_code', sa.String(), nullable=True))
+    
+    indexes = [idx['name'] for idx in inspector.get_indexes('temples')]
+    if 'ix_temples_temple_code' not in indexes:
+        op.create_index(op.f('ix_temples_temple_code'), 'temples', ['temple_code'], unique=True)
 
 
 def downgrade() -> None:
-    op.drop_index(op.f('ix_temples_temple_code'), table_name='temples')
-    op.drop_column('temples', 'temple_code')
+    bind = op.get_bind()
+    inspector = sa.inspect(bind)
+    indexes = [idx['name'] for idx in inspector.get_indexes('temples')]
+    if 'ix_temples_temple_code' in indexes:
+        op.drop_index(op.f('ix_temples_temple_code'), table_name='temples')
+    
+    columns = [c['name'] for c in inspector.get_columns('temples')]
+    if 'temple_code' in columns:
+        op.drop_column('temples', 'temple_code')
