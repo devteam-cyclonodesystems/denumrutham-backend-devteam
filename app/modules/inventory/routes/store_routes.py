@@ -40,8 +40,10 @@ async def create_product(
     prod_in: StoreProductCreate,
     db: AsyncSession = Depends(get_db),
     temple_id: str = Depends(get_current_temple_id),
+    current_user: TokenData = Depends(get_current_user),
 ):
     tid = UUID(str(temple_id))
+    user_uuid = UUID(str(current_user.sub)) if current_user.sub else None
     
     # Create StoreProduct record
     product = StoreProduct(
@@ -70,6 +72,21 @@ async def create_product(
     )
     db.add(stock)
     
+    # Add Audit log
+    from app.modules.audit.services.audit_service import AuditService
+    await AuditService.log_action(
+        db=db,
+        temple_id=tid,
+        user_id=user_uuid,
+        role=current_user.role,
+        module_name="STORE",
+        action="PRODUCT_CREATED",
+        action_type="CREATE",
+        entity_id=str(product.id),
+        new_value={"name": product.name, "unit_price": float(product.unit_price)},
+        details=f"Store product '{product.name}' created with price Rs.{product.unit_price}."
+    )
+    
     await db.commit()
     await db.refresh(product)
     return product
@@ -81,8 +98,10 @@ async def update_product(
     prod_in: StoreProductUpdate,
     db: AsyncSession = Depends(get_db),
     temple_id: str = Depends(get_current_temple_id),
+    current_user: TokenData = Depends(get_current_user),
 ):
     tid = UUID(str(temple_id))
+    user_uuid = UUID(str(current_user.sub)) if current_user.sub else None
     result = await db.execute(
         select(StoreProduct).filter(
             StoreProduct.id == product_id,
@@ -94,9 +113,26 @@ async def update_product(
     if not product:
         raise HTTPException(status_code=404, detail="Store product not found")
 
+    old_price = float(product.unit_price) if product.unit_price is not None else 0.0
     update_data = prod_in.model_dump(exclude_unset=True)
     for field, value in update_data.items():
         setattr(product, field, value)
+
+    # Add Audit log
+    from app.modules.audit.services.audit_service import AuditService
+    await AuditService.log_action(
+        db=db,
+        temple_id=tid,
+        user_id=user_uuid,
+        role=current_user.role,
+        module_name="STORE",
+        action="PRODUCT_UPDATED",
+        action_type="UPDATE",
+        entity_id=str(product.id),
+        old_value={"unit_price": old_price},
+        new_value={"unit_price": float(product.unit_price)},
+        details=f"Store product '{product.name}' updated."
+    )
 
     await db.commit()
     await db.refresh(product)
@@ -151,8 +187,25 @@ async def archive_product(
         
     product.is_archived = True
     product.archived_at = utcnow()
+    user_uuid = None
     if current_user.sub:
-        product.archived_by = UUID(str(current_user.sub))
+        user_uuid = UUID(str(current_user.sub))
+        product.archived_by = user_uuid
+        
+    # Add Audit log
+    from app.modules.audit.services.audit_service import AuditService
+    await AuditService.log_action(
+        db=db,
+        temple_id=tid,
+        user_id=user_uuid,
+        role=current_user.role,
+        module_name="STORE",
+        action="PRODUCT_DELETED",
+        action_type="DELETE",
+        entity_id=str(product.id),
+        new_value={"is_archived": True},
+        details=f"Store product '{product.name}' archived."
+    )
         
     await db.commit()
     return {"status": "success", "message": "Product archived successfully"}
@@ -294,6 +347,21 @@ async def create_sales_order(
                 source="system"
             )
 
+        # Add Audit log
+        from app.modules.audit.services.audit_service import AuditService
+        await AuditService.log_action(
+            db=db,
+            temple_id=tid,
+            user_id=user_uuid,
+            role=current_user.role,
+            module_name="STORE",
+            action="ORDER_CREATED",
+            action_type="CREATE",
+            entity_id=str(sales_order.id),
+            new_value={"order_number": sales_order.order_number, "total_amount": float(sales_order.total_amount)},
+            details=f"Store Sales Order {sales_order.order_number} created with total amount Rs.{sales_order.total_amount}."
+        )
+
     await db.commit()
     await db.refresh(sales_order)
     return sales_order
@@ -320,8 +388,10 @@ async def create_auction(
     auc_in: AuctionListingCreate,
     db: AsyncSession = Depends(get_db),
     temple_id: str = Depends(get_current_temple_id),
+    current_user: TokenData = Depends(get_current_user),
 ):
     tid = UUID(str(temple_id))
+    user_uuid = UUID(str(current_user.sub)) if current_user.sub else None
     
     # Verify product exists
     prod_res = await db.execute(
@@ -374,6 +444,21 @@ async def create_auction(
         stock.quantity = auc_in.quantity
         stock.version_number += 1
 
+    # Add Audit log
+    from app.modules.audit.services.audit_service import AuditService
+    await AuditService.log_action(
+        db=db,
+        temple_id=tid,
+        user_id=user_uuid,
+        role=current_user.role,
+        module_name="STORE",
+        action="AUCTION_CREATED",
+        action_type="CREATE",
+        entity_id=str(auction.id),
+        new_value={"auction_code": auction.auction_code, "start_price": float(auction.start_price)},
+        details=f"Store auction '{auction.auction_code}' created with start price Rs.{auction.start_price}."
+    )
+
     await db.commit()
 
     # Load fully with selectinloads
@@ -408,8 +493,10 @@ async def update_auction(
     auc_in: AuctionListingUpdate,
     db: AsyncSession = Depends(get_db),
     temple_id: str = Depends(get_current_temple_id),
+    current_user: TokenData = Depends(get_current_user),
 ):
     tid = UUID(str(temple_id))
+    user_uuid = UUID(str(current_user.sub)) if current_user.sub else None
     result = await db.execute(
         select(AuctionListing)
         .options(selectinload(AuctionListing.product), selectinload(AuctionListing.bids))
@@ -444,6 +531,21 @@ async def update_auction(
         elif stock.quantity < auction.quantity:
             stock.quantity = auction.quantity
             stock.version_number += 1
+
+    # Add Audit log
+    from app.modules.audit.services.audit_service import AuditService
+    await AuditService.log_action(
+        db=db,
+        temple_id=tid,
+        user_id=user_uuid,
+        role=current_user.role,
+        module_name="STORE",
+        action="AUCTION_UPDATED",
+        action_type="UPDATE",
+        entity_id=str(auction.id),
+        new_value={"status": auction.status},
+        details=f"Store auction '{auction.auction_code}' updated."
+    )
 
     await db.commit()
     
@@ -554,6 +656,21 @@ async def place_bid_and_reserve(
             remarks=f"Auction bid placed by {bidder_name}: Reservation locked for 10 minutes (Expires {expires_at.strftime('%H:%M:%S')})"
         )
         db.add(ledger)
+        
+    # Add Audit log
+    from app.modules.audit.services.audit_service import AuditService
+    await AuditService.log_action(
+        db=db,
+        temple_id=tid,
+        user_id=user_uuid,
+        role=current_user.role,
+        module_name="STORE",
+        action="AUCTION_BID_PLACED",
+        action_type="CREATE",
+        entity_id=str(bid_record.id),
+        new_value={"bid_amount": float(bid_amount), "bidder_name": bidder_name},
+        details=f"Bid of Rs.{bid_amount} placed on auction '{auction.auction_code}' by {bidder_name}."
+    )
         
     await db.commit()
     return {"status": "success", "current_bid": auction.current_bid, "reservation_id": reservation.id, "expires_at": expires_at}
@@ -686,6 +803,21 @@ async def settle_auction(
             description=f"Store Auction Settlement {order_number} (Code: {auction.auction_code})",
             reference_id=order_number,
             source="system"
+        )
+
+        # Add Audit log
+        from app.modules.audit.services.audit_service import AuditService
+        await AuditService.log_action(
+            db=db,
+            temple_id=tid,
+            user_id=user_uuid,
+            role=current_user.role,
+            module_name="STORE",
+            action="AUCTION_SETTLED",
+            action_type="UPDATE",
+            entity_id=str(auction.id),
+            new_value={"order_number": sales_order.order_number, "bid_amount": float(auction.current_bid)},
+            details=f"Auction '{auction.auction_code}' settled to {sales_order.customer_name} (Order {sales_order.order_number}) with bid Rs.{auction.current_bid}."
         )
         
     await db.commit()
