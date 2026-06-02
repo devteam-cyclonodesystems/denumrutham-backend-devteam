@@ -1663,6 +1663,27 @@ class InventoryService:
                 reference_id=invoice.ref_number,
                 source="system",
             )
+        # Add Audit log
+        from app.modules.audit.services.audit_service import AuditService
+        await AuditService.log_action(
+            db=db,
+            temple_id=tid,
+            user_id=real_user_uuid,
+            role=None,
+            module_name="INVENTORY",
+            action="INVOICE_PAID",
+            action_type="UPDATE",
+            entity_id=str(invoice.id),
+            new_value={
+                "ref_number": invoice.ref_number,
+                "amount": float(invoice.amount),
+                "additional_paid": float(additional_paid),
+                "total_paid_amount": float(invoice.total_paid_amount),
+                "balance_due": float(invoice.balance_due),
+                "payment_status": invoice.payment_status
+            },
+            details=f"Payment of Rs. {additional_paid} received for invoice {invoice.ref_number}. Remaining balance: Rs. {invoice.balance_due}."
+        )
            
         await db.commit()
         await db.refresh(invoice)
@@ -1741,7 +1762,7 @@ class InventoryService:
             grn_res = await db.execute(select(ProcurementGRN).filter(ProcurementGRN.invoice_number == invoice.ref_number, ProcurementGRN.temple_id == tid))
             grn = grn_res.scalars().first()
             if grn:
-                grn.status = ProcurementStatus.FAILED
+                grn.status = ProcurementStatus.CANCELLED
                 
             # 2. Reverse stock movements (negative adjustment)
             if invoice.items_data:
@@ -1784,6 +1805,32 @@ class InventoryService:
                     reference_id=invoice.ref_number,
                     source="system"
                 )
+                
+        # Resolve real user UUID for audit logging
+        real_user_uuid = None
+        if user_id:
+            try:
+                if isinstance(user_id, UUID):
+                    real_user_uuid = user_id
+                else:
+                    real_user_uuid = UUID(str(user_id))
+            except ValueError:
+                pass
+
+        # Add Audit log
+        from app.modules.audit.services.audit_service import AuditService
+        await AuditService.log_action(
+            db=db,
+            temple_id=tid,
+            user_id=real_user_uuid,
+            role=None,
+            module_name="INVENTORY",
+            action="INVOICE_CANCELLED",
+            action_type="DELETE",
+            entity_id=str(invoice.id),
+            new_value={"ref_number": invoice.ref_number, "status": invoice.status},
+            details=f"Procurement invoice {invoice.ref_number} cancelled. Reason: {reason or 'None'}."
+        )
                 
         await db.commit()
         await db.refresh(invoice)
