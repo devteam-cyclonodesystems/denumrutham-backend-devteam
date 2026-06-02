@@ -18,7 +18,7 @@ class DeploymentIntegrityService:
         """Capture git and build metadata."""
         try:
             # Note: In a container, we might rely on environment variables injected during build
-            git_commit = os.getenv("GIT_COMMIT")
+            git_commit = os.getenv("GIT_COMMIT") or os.getenv("RAILWAY_GIT_COMMIT_SHA") or os.getenv("COMMIT_SHA")
             if not git_commit:
                 git_commit = subprocess.check_output(["git", "rev-parse", "HEAD"], stderr=subprocess.STDOUT).decode().strip()
         except:
