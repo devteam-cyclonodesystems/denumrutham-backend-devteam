@@ -17,10 +17,13 @@ logger = logging.getLogger(__name__)
 
 # Metrics for Queue Observability
 class OutboxMetrics:
-    queue_size: int = 0
-    processing_rate: float = 0.0  # processed per loop execution
-    failure_count: int = 0
-    poison_pill_skips: int = 0
+    worker_running: bool = False
+    queue_depth: int = 0
+    oldest_pending_event_age_seconds: int = 0
+    total_processed: int = 0
+    total_failed: int = 0
+    total_retries: int = 0
+    last_heartbeat: Optional[datetime] = None
 
 # ---------------------------------------------------------------------------
 # Abstract Event Broker Interface (Supports Kafka / RabbitMQ / Redis Streams migration)
@@ -119,10 +122,20 @@ class ActivityLogProcessor:
                     )
                     cls._failure_registry.pop(entry.id, None)
                     await broker.acknowledge(db, entry)
-                    OutboxMetrics.poison_pill_skips += 1
+                    OutboxMetrics.total_retries += 1
                     continue
 
-                # 2. Fetch Temple Code and Tenant Name
+                # 2. Idempotency Check: Explicitly verify if this event was already processed
+                # This is necessary because ImmutableActivityLog uses a composite PK (id, created_utc)
+                # for partitioning, so a unique constraint on `id` alone is not possible at the DB schema level.
+                dup_stmt = select(ImmutableActivityLog.id).filter(ImmutableActivityLog.id == entry.id).limit(1)
+                dup_res = await db.execute(dup_stmt)
+                if dup_res.scalar_one_or_none():
+                    logger.warning(f"Idempotency Guard: Event {entry.id} already exists in immutable logs. Acknowledging outbox entry.")
+                    await broker.acknowledge(db, entry)
+                    continue
+
+                # 3. Fetch Temple Code and Tenant Name
                 temple_stmt = select(Temple).filter(Temple.id == entry.temple_id)
                 temple_res = await db.execute(temple_stmt)
                 temple = temple_res.scalar_one_or_none()
@@ -190,6 +203,7 @@ class ActivityLogProcessor:
                 
                 db.add(log_record)
                 await db.flush()  # Flush to ensure index/hash is visible in subsequent iterations of the same batch
+                
                 await broker.acknowledge(db, entry)
                 
                 processed_logs.append(log_record)
@@ -201,7 +215,7 @@ class ActivityLogProcessor:
                 
             except Exception as e:
                 cls._failure_registry[entry.id] = cls._failure_registry.get(entry.id, 0) + 1
-                OutboxMetrics.failure_count += 1
+                OutboxMetrics.total_failed += 1
                 logger.error(f"Failed to process activity outbox entry {entry.id}: {str(e)}", exc_info=True)
                 # Roll back the inner transaction of this batch so we can commit other items
                 continue
@@ -243,7 +257,13 @@ async def run_outbox_worker(shutdown_event: asyncio.Event) -> None:
     """
     Non-blocking background loop that processes activity logs outbox.
     Implements exponential backoff (2s to 60s max) if database connections fail.
+    Ensures per-process singleton protection.
     """
+    if OutboxMetrics.worker_running:
+        logger.warning("run_outbox_worker invoked but it is already running. Ignoring duplicate call.")
+        return
+
+    OutboxMetrics.worker_running = True
     broker = DatabaseOutboxBroker()
     current_backoff = 5.0
     min_backoff = 5.0
@@ -274,18 +294,30 @@ async def run_outbox_worker(shutdown_event: asyncio.Event) -> None:
 
                 # Update queue metrics size
                 size_res = await db.execute(select(sa_func_count()))
-                OutboxMetrics.queue_size = size_res.scalar() or 0
+                OutboxMetrics.queue_depth = size_res.scalar() or 0
+                
+                oldest_res = await db.execute(
+                    select(ActivityOutbox.created_at)
+                    .order_by(ActivityOutbox.created_at.asc())
+                    .limit(1)
+                )
+                oldest = oldest_res.scalar_one_or_none()
+                if oldest:
+                    OutboxMetrics.oldest_pending_event_age_seconds = int((now - oldest.astimezone(timezone.utc)).total_seconds())
+                else:
+                    OutboxMetrics.oldest_pending_event_age_seconds = 0
                 
                 processed = await ActivityLogProcessor.process_outbox_batch(db, broker, limit=50)
                 
                 # Update observability metrics
-                OutboxMetrics.processing_rate = processed
+                OutboxMetrics.total_processed += processed
+                OutboxMetrics.last_heartbeat = datetime.now(timezone.utc)
                 
                 # If we successfully processed events or queue is empty, reset backoff
                 current_backoff = min_backoff
                 
         except Exception as e:
-            OutboxMetrics.failure_count += 1
+            OutboxMetrics.total_failed += 1
             logger.error(f"Outbox worker encountered error: {str(e)}. Backing off for {current_backoff}s.")
             # Exponential backoff
             current_backoff = min(current_backoff * 2.0, max_backoff)
@@ -296,6 +328,7 @@ async def run_outbox_worker(shutdown_event: asyncio.Event) -> None:
             await asyncio.sleep(min(0.5, sleep_remaining))
             sleep_remaining -= 0.5
 
+    OutboxMetrics.worker_running = False
     logger.info("Background activity logs outbox processor worker stopped.")
 
 
