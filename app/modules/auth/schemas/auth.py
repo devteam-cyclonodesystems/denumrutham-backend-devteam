@@ -168,3 +168,18 @@ class ResetPasswordRequest(BaseModel):
         if not re.match(r'^(?=.*[a-z])(?=.*[A-Z])(?=.*\d)(?=.*[@$!%*?&]).{8,}$', v):
             raise ValueError("Password must contain uppercase, lowercase, number and special character")
         return v
+
+class ForceResetPasswordRequest(BaseModel):
+    """Input for setting a new password when already logged in but forced to change."""
+    new_password: str
+
+    @field_validator("new_password")
+    @classmethod
+    def validate_password(cls, v: str) -> str:
+        # Strong password policy check
+        if len(v) < 8:
+            raise ValueError("Password must be at least 8 characters long")
+        if not re.match(r'^(?=.*[a-z])(?=.*[A-Z])(?=.*\d)(?=.*[@$!%*?&]).{8,}$', v):
+            raise ValueError("Password must contain uppercase, lowercase, number and special character")
+        return v
+

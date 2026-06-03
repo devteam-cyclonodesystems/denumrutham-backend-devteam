@@ -13,7 +13,7 @@ from app.schemas.auth import (
     UnifiedRegister, TempleManagerRegister,
     OTPRequest, OTPVerify, LoginResponse,
     RegistrationResponse,
-    ForgotPasswordRequest, ResetPasswordRequest,
+    ForgotPasswordRequest, ResetPasswordRequest, ForceResetPasswordRequest,
 )
 from app.schemas.devotee_portal import DevoteeRegister
 from app.services.auth_service import AuthService
@@ -235,7 +235,7 @@ async def reset_password(
 
 @router.post("/reset-password-force")
 async def reset_password_force(
-    data: ResetPasswordRequest, # We can reuse this or create a simpler one
+    data: ForceResetPasswordRequest,
     db: AsyncSession = Depends(get_db),
     current_user: TokenData = Depends(get_current_user),
 ):
