@@ -189,6 +189,7 @@ class ActivityLogProcessor:
                 )
                 
                 db.add(log_record)
+                await db.flush()  # Flush to ensure index/hash is visible in subsequent iterations of the same batch
                 await broker.acknowledge(db, entry)
                 
                 processed_logs.append(log_record)
