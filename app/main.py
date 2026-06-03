@@ -55,9 +55,28 @@ async def lifespan(app: FastAPI):
     logger.info("Starting TMS API v%s", settings.VERSION)
     
     # Phase 5: Runtime Schema Validation
-    is_valid = await validate_on_startup()
-    if not is_valid:
-        logger.critical("APPLICATION STARTUP BLOCKED: Schema Integrity Failure.")
+    try:
+        is_valid = await validate_on_startup()
+        if not is_valid:
+            logger.critical("APPLICATION STARTUP BLOCKED: Schema Integrity Failure.")
+    except BaseException as e:
+        import traceback
+        tb_str = traceback.format_exc()
+        logger.critical(f"STARTUP CRASH DETECTED: {tb_str}")
+        try:
+            from app.modules.audit.models.audit_models import AuditIntegrityVerificationReport
+            from uuid import UUID
+            async with AsyncSessionLocal() as db:
+                report = AuditIntegrityVerificationReport(
+                    temple_id=UUID("f96f45a1-d3a3-422f-9260-abfcd8df1aaa"),
+                    status="STARTUP_ERROR",
+                    details=f"BaseException type: {type(e).__name__}\nTraceback:\n{tb_str}"
+                )
+                db.add(report)
+                await db.commit()
+        except Exception as db_err:
+            logger.critical(f"Failed to log startup error to DB: {db_err}")
+        raise e
 
     # Phase 2: Startup Audit Chain Verification
     try:
