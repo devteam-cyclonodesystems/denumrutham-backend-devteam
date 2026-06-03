@@ -177,7 +177,11 @@ def validate_audit_bypass_prevention() -> bool:
     import os
     import re
     
-    app_dir = os.path.dirname(os.path.dirname(os.path.dirname(os.path.abspath(__file__)))) # Points to backend/app/
+    try:
+        import app
+        app_dir = os.path.dirname(os.path.abspath(app.__file__))
+    except:
+        app_dir = os.path.dirname(os.path.dirname(os.path.dirname(os.path.abspath(__file__)))) # Points to backend/app/
     
     # Define authorized files that are allowed to import or reference AuditLog
     allowed_suffixes = [
