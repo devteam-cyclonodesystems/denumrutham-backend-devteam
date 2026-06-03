@@ -305,9 +305,13 @@ async def list_locations(
 async def create_location(
     loc_in: InventoryLocationCreate,
     db: AsyncSession = Depends(get_db),
+    current_user: TokenData = Depends(get_current_user),
     temple_id: str = Depends(get_current_temple_id),
 ):
-    return await InventoryService.create_location(db=db, loc_in=loc_in, temple_id=temple_id)
+    return await InventoryService.create_location(
+        db=db, loc_in=loc_in, temple_id=temple_id,
+        user_id=UUID(str(current_user.sub)) if current_user and current_user.sub else None
+    )
 
 
 @router.post("/issue-sessions", response_model=IssueSessionResponse, tags=["inventory"])

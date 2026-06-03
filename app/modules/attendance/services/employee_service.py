@@ -31,7 +31,10 @@ class EmployeeService:
         count = count_result.scalar() or 0
         emp_code = f"EMP-{str(count + 1).zfill(3)}"
 
+        import uuid
+        emp_id = uuid.uuid4()
         emp = Employee(
+            id=emp_id,
             temple_id=tid,
             emp_code=emp_code,
             name=emp_in.name,
@@ -47,6 +50,7 @@ class EmployeeService:
             salary_history=[],
         )
         db.add(emp)
+        await db.flush()
 
         # Add Audit log
         from app.modules.audit.services.audit_service import AuditService
@@ -58,7 +62,7 @@ class EmployeeService:
             module_name="HR_PAYROLL",
             action="EMPLOYEE_CREATED",
             action_type="CREATE",
-            entity_id=str(emp.id),
+            entity_id=str(emp_id),
             new_value={"name": emp.name, "emp_code": emp.emp_code},
             details=f"Employee '{emp.name}' created with code {emp.emp_code}."
         )

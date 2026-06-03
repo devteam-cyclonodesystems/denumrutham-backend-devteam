@@ -1872,7 +1872,10 @@ class InventoryService:
                 "unit": line.get("unit", "piece")
             })
 
+        import uuid
+        req_id = uuid.uuid4()
         req = InventoryItemRequest(
+            id=req_id,
             temple_id=tid,
             req_code=req_code,
             date=req_in.date,
@@ -1889,6 +1892,23 @@ class InventoryService:
             requested_by_user_id=user_id or req_in.requested_by_user_id,
         )
         db.add(req)
+        await db.flush()
+
+        # Add Audit log
+        from app.modules.audit.services.audit_service import AuditService
+        await AuditService.log_action(
+            db=db,
+            temple_id=tid,
+            user_id=user_id,
+            role=None,
+            module_name="INVENTORY",
+            action="ITEM_REQUEST_CREATED",
+            action_type="CREATE",
+            entity_id=str(req_id),
+            new_value={"req_code": req.req_code, "items_summary": req.items_summary},
+            details=f"Item request {req.req_code} created."
+        )
+
         await db.commit()
         await db.refresh(req)
         return req
@@ -1955,14 +1975,34 @@ class InventoryService:
     # --- Enterprise Modules ---
    
     @staticmethod
-    async def create_location(db: AsyncSession, loc_in: InventoryLocationCreate, temple_id: str) -> InventoryLocation:
+    async def create_location(db: AsyncSession, loc_in: InventoryLocationCreate, temple_id: str, user_id: UUID = None) -> InventoryLocation:
         tid = UUID(str(temple_id))
+        import uuid
+        loc_id = uuid.uuid4()
         loc = InventoryLocation(
+            id=loc_id,
             temple_id=tid,
             name=loc_in.name,
             description=loc_in.description
         )
         db.add(loc)
+        await db.flush()
+
+        # Add Audit log
+        from app.modules.audit.services.audit_service import AuditService
+        await AuditService.log_action(
+            db=db,
+            temple_id=tid,
+            user_id=user_id,
+            role=None,
+            module_name="INVENTORY",
+            action="LOCATION_CREATED",
+            action_type="CREATE",
+            entity_id=str(loc_id),
+            new_value={"name": loc.name, "description": loc.description},
+            details=f"Location '{loc.name}' created."
+        )
+
         await db.commit()
         await db.refresh(loc)
         return loc

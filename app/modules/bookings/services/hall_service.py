@@ -199,6 +199,21 @@ class HallService:
             changed_by=user_id
         )
 
+        # Global Audit Chain
+        from app.modules.audit.services.audit_service import AuditService
+        await AuditService.log_action(
+            db=db,
+            temple_id=tid,
+            user_id=UUID(str(user_id)) if user_id else None,
+            role=None,
+            module_name="BOOKINGS",
+            action="BOOKING_CREATED",
+            action_type="CREATE",
+            entity_id=str(booking.id),
+            new_value={"ref_number": booking.ref_number, "customer": booking.customer_name},
+            details=f"Hall booking '{booking.ref_number}' created for {booking.customer_name}."
+        )
+
         await db.commit()
         await db.refresh(booking)
         return booking
