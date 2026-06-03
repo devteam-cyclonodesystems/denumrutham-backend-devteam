@@ -10,6 +10,7 @@ Admin:
   POST /admin/onboarding/approve-temple/{id}     — Approve request
   POST /admin/onboarding/reject-temple/{id}      — Reject request
 """
+from uuid import UUID
 from fastapi import APIRouter, Depends, Query, Request
 from sqlalchemy.ext.asyncio import AsyncSession
 from slowapi import Limiter
@@ -121,7 +122,6 @@ async def get_temple_request(
     current_user: TokenData = Depends(require_system_permission("APPROVE_TEMPLE")),
 ):
     """Get details of a single temple registration request."""
-    from uuid import UUID
     item = await OnboardingService.get_request(db, UUID(request_id))
     return api_response(data=item, message="Temple request details")
 
@@ -139,7 +139,6 @@ async def approve_temple(
     Atomically creates production Temple + User + TempleProfile + UserTemple.
     Manager can login after this.
     """
-    from uuid import UUID
     result = await OnboardingService.approve_temple(
         db=db,
         request_id=UUID(request_id),
@@ -161,7 +160,6 @@ async def reject_temple(
     Requires a rejection reason (minimum 10 characters).
     No production records are created.
     """
-    from uuid import UUID
     result = await OnboardingService.reject_temple(
         db=db,
         request_id=UUID(request_id),

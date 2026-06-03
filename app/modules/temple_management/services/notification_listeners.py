@@ -9,6 +9,7 @@ when temple_events.emit_event() is called. The actual notification
 persistence happens inside send_notification via a short-lived DB session.
 """
 import logging
+from uuid import UUID
 from typing import Any, Dict, Optional
 
 logger = logging.getLogger(__name__)

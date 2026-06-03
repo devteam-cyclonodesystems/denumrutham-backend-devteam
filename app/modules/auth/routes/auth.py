@@ -1,6 +1,7 @@
 """
 Authentication & Registration Routes — Unified registration, OTP, and login with redirect.
 """
+from uuid import UUID
 from fastapi import APIRouter, Depends, Request
 from fastapi.security import OAuth2PasswordRequestForm
 from sqlalchemy.ext.asyncio import AsyncSession
@@ -240,7 +241,6 @@ async def reset_password_force(
 ):
     """Force password reset for newly created accounts."""
     from app.services.staff_service import StaffService
-    from uuid import UUID
     
     # We only need the password from data, token is not needed here as user is authenticated
     result = await StaffService.complete_force_password_reset(

@@ -2,6 +2,7 @@
 SuperAdmin API — Temple registry, context-switching, and CRUD endpoints.
 Only accessible by users with role == 'SUPERADMIN'.
 """
+from uuid import UUID
 from fastapi import APIRouter, Depends, Query, HTTPException
 from sqlalchemy.ext.asyncio import AsyncSession
 from pydantic import BaseModel, ConfigDict
@@ -125,7 +126,6 @@ async def update_temple(
     current_user: TokenData = Depends(get_current_superadmin),
 ):
     """Update temple details - Requires Approval Workflow."""
-    from uuid import UUID
     from app.services.approval_service import ApprovalService
     
     req = await ApprovalService.request_approval(
@@ -269,7 +269,6 @@ async def approve_temple(
     current_user: TokenData = Depends(require_system_permission("APPROVE_TEMPLE")),
 ):
     """Approve a pending temple registration (legacy flow)."""
-    from uuid import UUID
     from app.services.registration_service import RegistrationService
     return await RegistrationService.approve_temple(db, UUID(temple_id), UUID(current_user.sub))
 
@@ -281,7 +280,6 @@ async def reject_temple(
     current_user: TokenData = Depends(require_system_permission("APPROVE_TEMPLE")),
 ):
     """Reject a pending temple registration (legacy flow)."""
-    from uuid import UUID
     from app.services.registration_service import RegistrationService
     return await RegistrationService.reject_temple(db, UUID(temple_id), UUID(current_user.sub))
 
@@ -297,7 +295,6 @@ async def list_pending_staff(
     current_user: TokenData = Depends(require_system_permission("MANAGE_USERS")),
 ):
     """List pending staff registrations for a specific temple."""
-    from uuid import UUID
     from app.services.registration_service import RegistrationService
     return await RegistrationService.list_pending_staff(db, UUID(temple_id))
 
@@ -325,7 +322,6 @@ async def get_temple_audit_history(
       - Date range filtering via date_from/date_to (ISO 8601)
       - Sort order via sort (desc default)
     """
-    from uuid import UUID
     from datetime import datetime
 
     parsed_from = None
@@ -399,7 +395,6 @@ async def sync_push(
     Conflict resolution: SERVER WINS — no auto-merge.
     On conflict, returns latest server state for client reconciliation.
     """
-    from uuid import UUID
     from app.services.sync_engine import SyncEngine
 
     user_id = UUID(current_user.sub) if current_user.sub else None

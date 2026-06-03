@@ -19,6 +19,7 @@ Operational Notes:
 import logging
 from uuid import UUID
 from typing import List, Optional, Dict, Any
+from datetime import datetime, timezone
 from sqlalchemy.ext.asyncio import AsyncSession
 from sqlalchemy.future import select
 from sqlalchemy import func
@@ -29,8 +30,7 @@ from app.models.domain import (
     InventoryIssueSession, ProcurementGRN, RitualTemplate, RitualTemplateItem,
     InventoryReconciliation, InventoryIssueStatus, ProcurementStatus,
     StoreProduct, StoreStock, KalavaraStock,
-    SupplierPriceHistory, PriceApprovalRequest, InventoryPaymentTransaction,
-    utcnow
+    SupplierPriceHistory, PriceApprovalRequest, InventoryPaymentTransaction
 )
 from app.schemas.inventory import (
     InventoryItemCreate, SupplierCreate, InvoiceCreate, ItemRequestCreate,
@@ -937,8 +937,7 @@ class InventoryService:
                 select(func.count(InventoryInvoice.id)).filter(InventoryInvoice.temple_id == tid)
             )
             count = count_result.scalar() or 0
-            from datetime import datetime
-            now = datetime.utcnow()
+            now = datetime.now(timezone.utc)
             mm = str(now.month).zfill(2)
             yy = str(now.year)[-2:]
             ref = f"Inv{str(count + 1).zfill(3)}/{mm}{yy}"
@@ -1038,8 +1037,8 @@ class InventoryService:
             payment_status=payment_status,
             total_paid_amount=paid_amount,
             balance_due=balance_due,
-            last_payment_date=utcnow() if paid_amount > 0 else None,
-            payment_completed_at=utcnow() if payment_status == "FULL_PAYMENT" else None
+            last_payment_date=datetime.now(timezone.utc) if paid_amount > 0 else None,
+            payment_completed_at=datetime.now(timezone.utc) if payment_status == "FULL_PAYMENT" else None
         )
         db.add(invoice)
         await db.flush()
@@ -2634,5 +2633,4 @@ class InventoryService:
         return {"status": "success", "message": "Price approval request rejected."}
 
 def import_date():
-    from datetime import datetime
-    return datetime.utcnow().strftime("%Y-%m-%d")
+    return datetime.now(timezone.utc).strftime("%Y-%m-%d")

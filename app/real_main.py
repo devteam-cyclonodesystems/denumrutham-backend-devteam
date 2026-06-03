@@ -1,4 +1,5 @@
 import logging
+from uuid import UUID
 from contextlib import asynccontextmanager
 from fastapi import FastAPI, Request, HTTPException
 from fastapi.middleware.cors import CORSMiddleware
@@ -65,7 +66,6 @@ async def lifespan(app: FastAPI):
         logger.critical(f"STARTUP CRASH DETECTED: {tb_str}")
         try:
             from app.modules.audit.models.audit_models import AuditIntegrityVerificationReport
-            from uuid import UUID
             async with AsyncSessionLocal() as db:
                 report = AuditIntegrityVerificationReport(
                     temple_id=UUID("f96f45a1-d3a3-422f-9260-abfcd8df1aaa"),
