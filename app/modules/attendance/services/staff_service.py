@@ -530,6 +530,31 @@ class StaffService:
         
         await db.commit()
 
+        # Backfill all global permissions to all roles named "Manager" across all temples
+        from app.models.rbac import Role, RolePermission
+        perms_result = await db.execute(select(Permission))
+        all_perms = perms_result.scalars().all()
+        
+        roles_result = await db.execute(select(Role).filter(Role.name == "Manager"))
+        manager_roles = roles_result.scalars().all()
+        
+        for role in manager_roles:
+            for perm in all_perms:
+                mapping_result = await db.execute(
+                    select(RolePermission).filter(
+                        RolePermission.role_id == role.id,
+                        RolePermission.permission_id == perm.id
+                    )
+                )
+                if not mapping_result.scalars().first():
+                    rp = RolePermission(
+                        role_id=role.id,
+                        permission_id=perm.id,
+                        access_level="full"
+                    )
+                    db.add(rp)
+        await db.commit()
+
     @staticmethod
     async def seed_default_temple_roles(db: AsyncSession, temple_id: UUID):
         from app.models.rbac import Role, Permission, RolePermission
