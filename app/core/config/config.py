@@ -23,6 +23,10 @@ class Settings(BaseSettings):
     @model_validator(mode="after")
     def validate_secrets(self) -> 'Settings':
         if self.ENVIRONMENT.lower() == "production":
+            required_vars = ["DATABASE_URL", "SECRET_KEY"]
+            for var in required_vars:
+                if not os.getenv(var):
+                    raise ValueError(f"Missing required production environment variable: {var}")
             if self.SECRET_KEY == "supersecretkey-change-in-prod":
                 raise ValueError("SECRET_KEY must be changed from the default value in production.")
             if not self.JWT_SECRET:

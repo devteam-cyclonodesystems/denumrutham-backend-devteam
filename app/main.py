@@ -9,7 +9,10 @@ except BaseException as e:
     print(f"CRITICAL MAIN IMPORT ERROR: {tb_str}", file=sys.stderr)
     try:
         from sqlalchemy import create_engine, text
-        db_url = os.getenv("DATABASE_URL", "postgresql+asyncpg://neondb_owner:npg_R3hWbAYn0tuI@ep-proud-shadow-aom9gssv-pooler.c-2.ap-southeast-1.aws.neon.tech/neondb")
+        db_url = os.getenv("DATABASE_URL")
+        if not db_url:
+            print("CRITICAL: DATABASE_URL not set. Skipping import error logging.", file=sys.stderr)
+            raise e
         sync_url = db_url.replace("postgresql+asyncpg://", "postgresql://", 1)
         sync_engine = create_engine(sync_url)
         with sync_engine.connect() as conn:

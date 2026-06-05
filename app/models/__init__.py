@@ -1,5 +1,9 @@
 from app.modules.auth.models.auth_models import User, UserTemple, PasswordResetToken
-from app.modules.temple_management.models.temple_models import Temple, TempleProfile
+from app.modules.temple_management.models.temple_models import (
+    Temple, TempleProfile, TempleProfileDraft, TempleImage,
+    TempleWebsiteSettings, TempleAnnouncement, TempleActivity,
+    ImageCategory, ActivityStatus
+)
 from app.modules.bookings.models.booking_models import DevoteeProfile, RefundHistory
 from app.modules.governance.models.governance_models import AuditLog
 from app.modules.audit.models.audit_models import ImmutableActivityLog, ActivityOutbox, AuditGovernanceConfig
@@ -91,4 +95,11 @@ __all__ = [
     "ImmutableActivityLog",
     "ActivityOutbox",
     "AuditGovernanceConfig",
+    "TempleProfileDraft",
+    "TempleWebsiteSettings",
+    "TempleAnnouncement",
+    "TempleActivity",
+    "TempleImage",
+    "ImageCategory",
+    "ActivityStatus",
 ]

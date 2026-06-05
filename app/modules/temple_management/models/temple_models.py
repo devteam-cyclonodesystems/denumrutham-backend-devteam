@@ -3,7 +3,7 @@ import enum
 from datetime import datetime, timezone
 from sqlalchemy import Column, String, Boolean, DateTime, ForeignKey, Float, Text, Enum, Integer, Time, UniqueConstraint, Date, JSON, Index, text, CheckConstraint
 from sqlalchemy.dialects.postgresql import UUID
-from sqlalchemy.orm import relationship
+from sqlalchemy.orm import relationship, backref
 from app.core.database.database import Base
 from app.modules.governance.models.operational_states import TempleOperationalState
 from app.modules.bookings.models.booking_models import ServiceType
@@ -17,6 +17,22 @@ class TempleApprovalStatus(str, enum.Enum):
     PENDING = "PENDING"
     APPROVED = "APPROVED"
     REJECTED = "REJECTED"
+
+
+class ImageCategory(str, enum.Enum):
+    HERO_DESKTOP = "HERO_DESKTOP"
+    HERO_MOBILE = "HERO_MOBILE"
+    GALLERY = "GALLERY"
+    DEITY = "DEITY"
+    FESTIVAL = "FESTIVAL"
+    FACILITY = "FACILITY"
+    OTHER = "OTHER"
+
+
+class ActivityStatus(str, enum.Enum):
+    UPCOMING = "UPCOMING"
+    ACTIVE = "ACTIVE"
+    COMPLETED = "COMPLETED"
 
 
 class ServiceType(str, enum.Enum):
@@ -78,6 +94,7 @@ class Temple(Base):
     images = relationship("TempleImage", back_populates="temple")
     user_temples = relationship("UserTemple", back_populates="temple")
     followers = relationship("TempleFollower", back_populates="temple")
+    website_settings = relationship("TempleWebsiteSettings", back_populates="temple", uselist=False, cascade="all, delete-orphan")
 
 
 
@@ -116,6 +133,14 @@ class TempleProfile(Base):
     longitude = Column(Float, nullable=True)
     upi_id = Column(String, default="")
     image_url = Column(String, default="")
+    main_deity = Column(String, default="")
+    deities = Column(JSON, nullable=True)
+    facebook_url = Column(String, default="")
+    instagram_url = Column(String, default="")
+    youtube_url = Column(String, default="")
+    twitter_url = Column(String, default="")
+    website_url = Column(String, default="")
+    festivals_description = Column(Text, default="")
     created_at = Column(DateTime(timezone=True), default=utcnow)
 
     temple = relationship("Temple", back_populates="profile")
@@ -148,6 +173,14 @@ class TempleProfileDraft(Base):
     longitude = Column(Float, nullable=True)
     upi_id = Column(String, nullable=True)
     image_url = Column(String, nullable=True)
+    main_deity = Column(String, nullable=True)
+    deities = Column(JSON, nullable=True)
+    facebook_url = Column(String, nullable=True)
+    instagram_url = Column(String, nullable=True)
+    youtube_url = Column(String, nullable=True)
+    twitter_url = Column(String, nullable=True)
+    website_url = Column(String, nullable=True)
+    festivals_description = Column(Text, nullable=True)
     
     # Audit
     requested_by = Column(UUID(as_uuid=True), ForeignKey("users.id"), nullable=True)
@@ -166,9 +199,79 @@ class TempleImage(Base):
     temple_id = Column(UUID(as_uuid=True), ForeignKey("temples.id"), nullable=False, index=True)
     image_url = Column(String, nullable=False)
     caption = Column(String, default="")
+    category = Column(Enum(ImageCategory, name="image_category_enum"), nullable=False, default=ImageCategory.GALLERY)
     created_at = Column(DateTime(timezone=True), default=utcnow)
 
     temple = relationship("Temple", back_populates="images")
+
+
+class TempleWebsiteSettings(Base):
+    __tablename__ = "temple_website_settings"
+
+    id = Column(UUID(as_uuid=True), primary_key=True, default=uuid.uuid4)
+    temple_id = Column(UUID(as_uuid=True), ForeignKey("temples.id", ondelete="CASCADE"), unique=True, nullable=False, index=True)
+    theme_name = Column(String, nullable=False, default="default")
+    primary_color = Column(String, nullable=False, default="#ff6600")
+    secondary_color = Column(String, nullable=False, default="#ffcc00")
+    logo_url = Column(String, nullable=True)
+    hero_layout = Column(String, nullable=False, default="split")
+    section_order = Column(JSON, nullable=False, default=lambda: ["hero", "about", "deities", "announcements", "activities", "gallery", "offerings", "location"])
+    enable_mantras = Column(Boolean, nullable=False, default=True)
+    enable_festivals = Column(Boolean, nullable=False, default=True)
+    enable_donations = Column(Boolean, nullable=False, default=True)
+    enable_hall_booking = Column(Boolean, nullable=False, default=True)
+    enable_store = Column(Boolean, nullable=False, default=True)
+    seo_keywords = Column(String, nullable=True)
+    og_image_url = Column(String, nullable=True)
+    hero_title = Column(String, nullable=True)
+    hero_subtitle = Column(String, nullable=True)
+    seo_description = Column(String, nullable=True)
+    notice_board_content = Column(JSON, nullable=True)
+    created_at = Column(DateTime(timezone=True), default=utcnow)
+    updated_at = Column(DateTime(timezone=True), default=utcnow, onupdate=utcnow)
+
+    temple = relationship("Temple", back_populates="website_settings")
+
+
+class TempleAnnouncement(Base):
+    __tablename__ = "temple_announcements"
+
+    id = Column(UUID(as_uuid=True), primary_key=True, default=uuid.uuid4)
+    temple_id = Column(UUID(as_uuid=True), ForeignKey("temples.id", ondelete="CASCADE"), nullable=False, index=True)
+    title = Column(String, nullable=False)
+    content = Column(Text, nullable=False)
+    is_active = Column(Boolean, nullable=False, default=True)
+    is_pinned = Column(Boolean, nullable=False, default=False)
+    priority = Column(Integer, nullable=False, default=0)
+    display_order = Column(Integer, nullable=False, default=0)
+    start_date = Column(DateTime(timezone=True), nullable=True)
+    expiry_date = Column(DateTime(timezone=True), nullable=True)
+    created_at = Column(DateTime(timezone=True), default=utcnow)
+    updated_at = Column(DateTime(timezone=True), default=utcnow, onupdate=utcnow)
+    created_by = Column(UUID(as_uuid=True), ForeignKey("users.id"), nullable=True)
+
+    temple = relationship("Temple", backref=backref("announcements", cascade="all, delete-orphan"))
+
+
+class TempleActivity(Base):
+    __tablename__ = "temple_activities"
+
+    id = Column(UUID(as_uuid=True), primary_key=True, default=uuid.uuid4)
+    temple_id = Column(UUID(as_uuid=True), ForeignKey("temples.id", ondelete="CASCADE"), nullable=False, index=True)
+    title = Column(String, nullable=False)
+    description = Column(Text, nullable=True)
+    activity_date = Column(Date, nullable=False)
+    start_time = Column(Time, nullable=True)
+    end_time = Column(Time, nullable=True)
+    location = Column(String, nullable=True)
+    is_active = Column(Boolean, nullable=False, default=True)
+    status = Column(Enum(ActivityStatus, name="activity_status_enum"), nullable=False, default=ActivityStatus.UPCOMING)
+    livestream_url = Column(String, nullable=True)
+    created_at = Column(DateTime(timezone=True), default=utcnow)
+    updated_at = Column(DateTime(timezone=True), default=utcnow, onupdate=utcnow)
+    created_by = Column(UUID(as_uuid=True), ForeignKey("users.id"), nullable=True)
+
+    temple = relationship("Temple", backref=backref("activities", cascade="all, delete-orphan"))
 
 
 

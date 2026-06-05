@@ -13,7 +13,8 @@ class TempleService:
 
     @staticmethod
     async def list_temples(db: AsyncSession, skip: int = 0, limit: int = 50, search: Optional[str] = None):
-        query = select(Temple).outerjoin(TempleProfile, Temple.id == TempleProfile.temple_id).filter(
+        from sqlalchemy.orm import selectinload
+        query = select(Temple).options(selectinload(Temple.profile)).filter(
             Temple.is_active == True,
             Temple.status.in_(["APPROVED", "ACTIVE", "active"])
         )
@@ -36,10 +37,7 @@ class TempleService:
 
         items = []
         for temple in temples_raw:
-            profile_result = await db.execute(
-                select(TempleProfile).filter(TempleProfile.temple_id == temple.id)
-            )
-            profile = profile_result.scalars().first()
+            profile = temple.profile
 
             items.append({
                 "id": temple.id,
@@ -54,29 +52,30 @@ class TempleService:
 
     @staticmethod
     async def get_temple(db: AsyncSession, temple_id: str):
+        from sqlalchemy.orm import selectinload
         try:
             tid = UUID(temple_id)
         except ValueError:
             raise HTTPException(status_code=400, detail="Invalid temple ID")
 
-        result = await db.execute(select(Temple).filter(
-            Temple.id == tid,
-            Temple.is_active == True,
-            Temple.status.in_(["APPROVED", "ACTIVE", "active", "PENDING", "pending"])
-        ))
+        result = await db.execute(
+            select(Temple)
+            .options(
+                selectinload(Temple.profile),
+                selectinload(Temple.images)
+            )
+            .filter(
+                Temple.id == tid,
+                Temple.is_active == True,
+                Temple.status.in_(["APPROVED", "ACTIVE", "active", "PENDING", "pending"])
+            )
+        )
         temple = result.scalars().first()
         if not temple:
             raise HTTPException(status_code=404, detail="Temple not found")
 
-        profile_result = await db.execute(
-            select(TempleProfile).filter(TempleProfile.temple_id == tid)
-        )
-        profile = profile_result.scalars().first()
-
-        images_result = await db.execute(
-            select(TempleImage).filter(TempleImage.temple_id == tid)
-        )
-        images = images_result.scalars().all()
+        profile = temple.profile
+        images = temple.images or []
 
         return {
             "id": temple.id,
@@ -97,7 +96,15 @@ class TempleService:
             "longitude": profile.longitude if profile else None,
             "upi_id": profile.upi_id if profile else "",
             "image_url": profile.image_url if profile else "",
-            "images": [{"id": img.id, "image_url": img.image_url, "caption": img.caption or ""} for img in images],
+            "main_deity": profile.main_deity if profile else "",
+            "deities": profile.deities if profile else [],
+            "facebook_url": profile.facebook_url if profile else "",
+            "instagram_url": profile.instagram_url if profile else "",
+            "youtube_url": profile.youtube_url if profile else "",
+            "twitter_url": profile.twitter_url if profile else "",
+            "website_url": profile.website_url if profile else "",
+            "festivals_description": profile.festivals_description if profile else "",
+            "images": [{"id": img.id, "image_url": img.image_url, "caption": img.caption or "", "category": img.category} for img in images],
         }
 
     @staticmethod

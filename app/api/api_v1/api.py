@@ -11,8 +11,12 @@ from app.api.routes import (
     booking_history, manager_dashboard, upload, 
     payments, onboarding, admin, staff, offerings
 )
+from app.modules.temple_management.routes import digital_experience, public_portal
 
 api_router = APIRouter()
+
+# ── Public Temple Portal ──────────────────────────────────────────────
+api_router.include_router(public_portal.router, prefix="/public/temples", tags=["Public Temple Portal"])
 
 # ── Core Infrastructure ───────────────────────────────────────────────
 api_router.include_router(sync.router, prefix="/sync", tags=["System Sync"])
@@ -46,6 +50,7 @@ api_router.include_router(staff.router, prefix="/staff", tags=["Staff Management
 # ── Module Specific Routers ──────────────────────────────────────────
 api_router.include_router(halls.router, prefix="/manager", tags=["Hall Management"])
 api_router.include_router(offerings.router, prefix="/manager", tags=["Offering Management"])
+api_router.include_router(digital_experience.router, prefix="/manager", tags=["Digital Experience Portal"])
 api_router.include_router(employees.router, prefix="/employees", tags=["HR & Payroll"])
 api_router.include_router(archana_bookings.router, prefix="/archana-bookings", tags=["Archana Bookings"])
 api_router.include_router(transactions.router, prefix="/transactions", tags=["Financial Transactions"])

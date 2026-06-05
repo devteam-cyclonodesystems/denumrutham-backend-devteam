@@ -52,6 +52,7 @@ class TempleImageResponse(BaseModel):
     id: UUID4
     image_url: str
     caption: Optional[str] = ""
+    category: str
 
 
 class TempleProfileResponse(BaseModel):
@@ -74,6 +75,14 @@ class TempleProfileResponse(BaseModel):
     longitude: Optional[float] = None
     upi_id: Optional[str] = ""
     image_url: Optional[str] = ""
+    main_deity: Optional[str] = ""
+    deities: Optional[List[str]] = []
+    facebook_url: Optional[str] = ""
+    instagram_url: Optional[str] = ""
+    youtube_url: Optional[str] = ""
+    twitter_url: Optional[str] = ""
+    website_url: Optional[str] = ""
+    festivals_description: Optional[str] = ""
     images: List[TempleImageResponse] = []
 
 

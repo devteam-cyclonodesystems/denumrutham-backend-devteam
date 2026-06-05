@@ -499,10 +499,12 @@ class StaffService:
             ("tab", "governance:manage", "Configure Workflows and Rules"),
             ("tab", "settings:view", "View Temple Profile Settings"),
             ("tab", "settings:manage", "Configure Temple Rules & RBAC Permissions"),
+            ("button", "settings:edit", "Edit Temple Profile Settings"),
             ("tab", "staff:manage_roles", "Manage Staff Roles & Permissions"),
             ("tab", "staff:manage_employees", "Manage Staff Accounts"),
             ("tab", "offerings:view", "View Offerings Module"),
             ("tab", "communication:view", "View Communication Module"),
+            ("button", "communication:manage", "Manage Announcements and Activities"),
             ("tab", "activity-logs:view", "View Activity Logs"),
             ("tab", "workflows:view", "View Workflows Dashboard"),
         ]
