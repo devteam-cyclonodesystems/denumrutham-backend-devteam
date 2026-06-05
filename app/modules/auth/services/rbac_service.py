@@ -83,6 +83,7 @@ class RBACService:
             else:
                 target_keys.append(f"{resource_key}:{required_access}")
             
+            target_keys.append(f"{resource_key}:manage")
             target_keys.append(f"{resource_key}:all")
             target_keys.append(resource_key)
 
