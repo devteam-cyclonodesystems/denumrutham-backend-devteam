@@ -130,7 +130,7 @@ async def upload_image(
     file: UploadFile = File(...),
     current_user=Depends(get_current_user),
 ):
-    """Upload a temple image (JPEG, PNG, WebP). Max 5 MB."""
+    """Upload a temple image (JPEG, PNG, WebP). Max 5 MB, compressed and returned as Base64."""
     # 1. Immediate Content-Length Header check
     _verify_content_length(request, MAX_IMAGE_SIZE)
 
@@ -152,17 +152,45 @@ async def upload_image(
     # 4. Perform magic byte signature validation
     _validate_image_signature(content, ext)
 
-    # 5. Sanitize filename completely using uuid4() + extension
-    filename = f"{uuid4().hex}{ext}"
-    file_path = os.path.join(UPLOAD_DIR, filename)
+    # 5. PIL Compress to WebP and convert to Base64 data URL
+    import base64
+    from io import BytesIO
+    from PIL import Image
 
-    with open(file_path, "wb") as buffer:
-        buffer.write(content)
+    try:
+        image = Image.open(BytesIO(content))
+        # Keep transparency if any (WebP supports it)
+        max_width = 1920
+        if image.width > max_width:
+            new_height = int(image.height * (max_width / image.width))
+            image = image.resize((max_width, new_height), Image.Resampling.LANCZOS)
 
-    return api_response(
-        data={"url": f"/static/uploads/{filename}", "filename": filename},
-        message="Image uploaded successfully",
-    )
+        buffer = BytesIO()
+        image.save(buffer, format="WEBP", quality=75)
+        webp_bytes = buffer.getvalue()
+
+        encoded = base64.b64encode(webp_bytes).decode('utf-8')
+        data_url = f"data:image/webp;base64,{encoded}"
+
+        # Write to local static folder as a fallback reference
+        filename = f"{uuid4().hex}.webp"
+        file_path = os.path.join(UPLOAD_DIR, filename)
+        with open(file_path, "wb") as buffer_file:
+            buffer_file.write(webp_bytes)
+
+        return api_response(
+            data={"url": data_url, "filename": filename},
+            message="Image uploaded and compressed successfully",
+        )
+    except Exception as e:
+        logger.error(
+            f"Image processing and compression failure: {e}",
+            extra={"operation": "UPLOAD_IMAGE_COMPRESSION", "status": "FAILURE", "error": str(e)}
+        )
+        raise HTTPException(
+            status_code=400,
+            detail="Failed to process and compress the uploaded image."
+        )
 
 
 @router.post("/document")
