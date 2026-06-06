@@ -40,7 +40,8 @@ async def health_ready():
         redis_status = "error"
         redis_detail = str(e)
 
-    overall = "ready" if (db_status == "ok" and redis_status == "ok") else "degraded"
+    # Database is critical for readiness; Redis is non-critical due to in-memory fallback.
+    overall = "ready" if db_status == "ok" else "degraded"
     status_code = 200 if overall == "ready" else 503
 
     return JSONResponse(
