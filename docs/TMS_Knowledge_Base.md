@@ -14,6 +14,7 @@
 | INC-003 | Frontend module loading shows skeleton state indefinitely | P1 – Critical | ✅ Resolved | 2026-06-07 |
 | INC-004 | Granular RBAC deployment blocks TEMPLE_MANAGER access | P2 – High | ✅ Resolved | 2026-06-07 |
 | INC-005 | Missing live website settings database table on production | P1 – Critical | ✅ Resolved | 2026-06-07 |
+| INC-006 | Pydantic ValidationError on public portal image mapping | P1 – Critical | ✅ Resolved | 2026-06-07 |
 
 ---
 
@@ -246,6 +247,69 @@ Ran `alembic upgrade head` on the production PostgreSQL database, creating the `
 
 ### Related Tickets, PRs, Commits
 - Migration: `add_website_publication_snapshots.py`
+
+---
+
+## INC-006: Pydantic ValidationError on Public Portal Image Mapping
+
+| Field | Value |
+|-------|-------|
+| **Incident ID** | INC-006 |
+| **Incident Title** | Pydantic ValidationError in public temple portal endpoint when mapping gallery images |
+| **Date and Time** | 2026-06-07T07:58:00Z |
+| **Severity/Priority** | P1 – Critical |
+| **Current Status** | ✅ Resolved |
+
+### Description
+
+When loading the public devotee portal for a temple that has gallery images (such as Malottu Sree Bhadrakali Temple), the page crashed and failed to load modules. The backend server threw a `pydantic_core._pydantic_core.ValidationError`: field required `temple_id` and `created_at` in `TempleImageResponse` validation.
+
+### Root Cause
+
+The `/api/v1/public/temples/{slug}/portal` endpoint maps the query results of `temple.images` to `TempleImageResponse` models. However, the route handler forgot to specify the `temple_id` and `created_at` fields during mapping:
+```python
+# File: backend/app/modules/temple_management/routes/public_portal.py (BEFORE fix)
+images.append(
+    TempleImageResponse(
+        id=img.id,
+        image_url=img.image_url,
+        caption=img.caption or "",
+        category=img.category or "GALLERY"
+    )
+)
+```
+Since these fields are required by the `TempleImageResponse` Pydantic model (unlike other temples that had no images and skipped the loop), it raised a validation error immediately.
+
+### Affected Services, Components, or Features
+
+- Public Devotee Portal landing pages
+- `/api/v1/public/temples/{slug}/portal` API endpoint
+- Image gallery sections
+
+### Resolution Implemented
+
+Updated `app/modules/temple_management/routes/public_portal.py` to correctly map and pass `temple_id=img.temple_id` and `created_at=img.created_at` when instantiating `TempleImageResponse` for each image:
+```python
+# File: backend/app/modules/temple_management/routes/public_portal.py (AFTER fix)
+images.append(
+    TempleImageResponse(
+        id=img.id,
+        temple_id=img.temple_id,
+        image_url=img.image_url,
+        caption=img.caption or "",
+        category=img.category or "GALLERY",
+        created_at=img.created_at
+    )
+)
+```
+
+### Preventive Actions Taken
+
+- Ensure rich data structures are systematically validated through backend unit tests.
+- Added automated endpoint test coverage in the test suite that simulates temples with complete mock datasets (profile, settings, announcements, activities, and gallery images).
+
+### Related Tickets, PRs, Commits
+- Commit: `5040c52`
 
 ---
 
