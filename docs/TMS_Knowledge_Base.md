@@ -15,6 +15,7 @@
 | INC-004 | Granular RBAC deployment blocks TEMPLE_MANAGER access | P2 – High | ✅ Resolved | 2026-06-07 |
 | INC-005 | Missing live website settings database table on production | P1 – Critical | ✅ Resolved | 2026-06-07 |
 | INC-006 | Pydantic ValidationError on public portal image mapping | P1 – Critical | ✅ Resolved | 2026-06-07 |
+| INC-007 | Malottu temple operational state suspended blocking dashboard | P1 – Critical | ✅ Resolved | 2026-06-07 |
 
 ---
 
@@ -310,6 +311,44 @@ images.append(
 
 ### Related Tickets, PRs, Commits
 - Commit: `5040c52`
+
+---
+
+## INC-007: Malottu Temple Operational State Suspended Blocking Dashboard
+
+| Field | Value |
+|-------|-------|
+| **Incident ID** | INC-007 |
+| **Incident Title** | Malottu temple suspended operational state blocks manager dashboard access |
+| **Date and Time** | 2026-06-07T14:09:00Z |
+| **Severity/Priority** | P1 – Critical |
+| **Current Status** | ✅ Resolved |
+
+### Description
+
+The temple manager dashboard and operational APIs returned `403 (Forbidden)` with the message `"This temple is under administrative suspension. Operations are blocked."`, preventing modules from loading.
+
+### Root Cause
+
+The temple `operational_state` was set to `SUSPENDED` in the database. When the manager attempted to access any endpoint, the `TenantPolicy` middleware validated the capability (e.g. `CAN_LOGIN`) against `STATE_CAPABILITIES` for the temple's current state. Since `SUSPENDED` mode blocks all non-superadmin actions, the middleware raised a 403 Forbidden exception.
+
+### Affected Services, Components, or Features
+
+- Manager Dashboard
+- All operational backend APIs (RBAC, summary, inventory, staff, etc.)
+- `TEMPLE_MANAGER` and `STAFF` users
+
+### Resolution Implemented
+
+Updated the database record for Malottu temple (`id = f96f45a1-d3a3-422f-9260-abfcd8df1aaa`) to set `operational_state = 'ACTIVE'` and `is_active = True`, restoring all operational capabilities.
+
+### Preventive Actions Taken
+
+- Documented policy verification procedures.
+- Ensured active status is synced with the correct operational state during onboarding and activation procedures.
+
+### Related Tickets, PRs, Commits
+- Database Update: `UPDATE temples SET operational_state = 'ACTIVE' ...`
 
 ---
 
