@@ -198,6 +198,7 @@ def validate_audit_bypass_prevention() -> bool:
         os.path.normpath("app/modules/audit/services/activity_log_processor.py"),
         os.path.normpath("app/modules/audit/services/audit_chain_writer.py"),
         os.path.normpath("app/core/database/integrity.py"),
+        os.path.normpath("app/modules/audit/models/audit_models.py"),
     ]
     
     pattern = re.compile(r'\bAuditLog\s*\(')
