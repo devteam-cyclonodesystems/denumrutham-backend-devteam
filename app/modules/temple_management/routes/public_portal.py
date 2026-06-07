@@ -5,7 +5,7 @@ from sqlalchemy.ext.asyncio import AsyncSession
 from sqlalchemy.future import select
 from sqlalchemy.orm import selectinload
 from uuid import UUID
-from typing import List
+from typing import List, Optional
 
 from app.api.deps import get_db
 from app.models.domain import Temple, TempleWebsiteSettingsLive
