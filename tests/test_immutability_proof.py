@@ -284,8 +284,8 @@ async def test_audit_governance_apis(client):
     resp_metrics = await client.get("/api/v1/audit-logs/monitoring/metrics", headers=headers)
     assert resp_metrics.status_code == 200, resp_metrics.text
     metrics_json = resp_metrics.json()
-    assert "queue_size" in metrics_json
-    assert "processing_rate" in metrics_json
+    assert "queue_depth" in metrics_json
+    assert "total_processed" in metrics_json
 
     # 5. Export POST
     resp_export = await client.post(

@@ -2,7 +2,6 @@ from pydantic import BaseModel, ConfigDict, EmailStr, UUID4, field_validator
 from typing import Optional, List
 from datetime import datetime
 from app.modules.bookings.models.booking_models import BookingStatus, TicketStatus
-from app.modules.billing.models.billing_models import PaymentStatus
 from app.modules.temple_management.models.temple_models import TempleApprovalStatus
 import re
 

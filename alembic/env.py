@@ -59,7 +59,7 @@ def run_migrations_online() -> None:
     from app.core.config import settings
     from sqlalchemy import create_engine
     
-    db_url = str(settings.DATABASE_URL).replace("+asyncpg", "")
+    db_url = str(settings.DATABASE_URL).replace("+asyncpg", "").replace("+aiosqlite", "")
     connectable = create_engine(db_url, poolclass=pool.NullPool)
 
     with connectable.connect() as connection:

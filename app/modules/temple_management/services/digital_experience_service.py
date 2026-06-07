@@ -12,6 +12,8 @@ from app.models.domain import (
     TempleImage,
     ImageCategory,
     ActivityStatus,
+    TempleWebsiteSettingsLive,
+    Temple,
 )
 from app.modules.audit.services.audit_service import AuditService
 
@@ -600,3 +602,182 @@ class DigitalExperienceService:
         
         await db.commit()
         return True
+
+    @staticmethod
+    async def publish_settings(
+        db: AsyncSession,
+        temple_id: UUID,
+        current_user_id: UUID,
+        role: str
+    ) -> TempleWebsiteSettingsLive:
+        # We wrap the entire validation, serialization, upsert, and logging in a nested transaction
+        async with db.begin_nested():
+            # 1. Fetch Temple to perform validations
+            temple_stmt = select(Temple).filter(Temple.id == temple_id)
+            temple_res = await db.execute(temple_stmt)
+            temple = temple_res.scalars().first()
+            if not temple:
+                raise HTTPException(status_code=404, detail="Temple not found")
+                
+            # Operational checks
+            if not temple.is_active or temple.status != "APPROVED":
+                raise HTTPException(
+                    status_code=400, 
+                    detail="Cannot publish website for an inactive or unapproved temple"
+                )
+                
+            # Slug validation
+            slug = temple.domain
+            import re
+            if not slug or not re.match(r"^[a-z0-9-]+$", slug):
+                raise HTTPException(
+                    status_code=400,
+                    detail=f"Temple website has an invalid or missing slug: '{slug}'"
+                )
+                
+            # Check unique slug conflict (ensure no other temple shares it)
+            conflict_stmt = select(Temple).filter(Temple.domain == slug, Temple.id != temple_id)
+            conflict_res = await db.execute(conflict_stmt)
+            if conflict_res.scalars().first():
+                raise HTTPException(
+                    status_code=400,
+                    detail=f"Temple slug conflict: '{slug}' is already in use by another temple"
+                )
+
+            # 2. Fetch the latest committed draft settings
+            draft_stmt = select(TempleWebsiteSettings).filter(TempleWebsiteSettings.temple_id == temple_id)
+            draft_res = await db.execute(draft_stmt)
+            draft = draft_res.scalars().first()
+            if not draft:
+                raise HTTPException(
+                    status_code=404, 
+                    detail="Website settings not found. Save settings before publishing."
+                )
+
+            # 3. Build snapshot using explicit serialization contract
+            try:
+                snapshot = {
+                    "theme_name": draft.theme_name or "default",
+                    "primary_color": draft.primary_color or "#ff6600",
+                    "secondary_color": draft.secondary_color or "#ffcc00",
+                    "logo_url": draft.logo_url,
+                    "hero_layout": draft.hero_layout or "split",
+                    "section_order": draft.section_order or ["hero", "about", "deities", "announcements", "activities", "gallery", "offerings", "location"],
+                    "enable_mantras": draft.enable_mantras if draft.enable_mantras is not None else True,
+                    "enable_festivals": draft.enable_festivals if draft.enable_festivals is not None else True,
+                    "enable_donations": draft.enable_donations if draft.enable_donations is not None else True,
+                    "enable_hall_booking": draft.enable_hall_booking if draft.enable_hall_booking is not None else True,
+                    "enable_store": draft.enable_store if draft.enable_store is not None else True,
+                    "seo_keywords": draft.seo_keywords,
+                    "og_image_url": draft.og_image_url,
+                    "hero_title": draft.hero_title,
+                    "hero_subtitle": draft.hero_subtitle,
+                    "seo_description": draft.seo_description,
+                    "notice_board_content": draft.notice_board_content,
+                }
+            except Exception as e:
+                raise HTTPException(
+                    status_code=400, 
+                    detail=f"Failed to serialize settings snapshot: {str(e)}"
+                )
+
+            # 4. Upsert Live Snapshot
+            live_stmt = select(TempleWebsiteSettingsLive).filter(TempleWebsiteSettingsLive.temple_id == temple_id)
+            live_res = await db.execute(live_stmt)
+            live = live_res.scalars().first()
+            
+            if live:
+                old_version = live.version
+                live.settings_snapshot = snapshot
+                live.version = old_version + 1
+                live.published_at = datetime.now(timezone.utc)
+                live.published_by = current_user_id
+                live.status = "PUBLISHED"
+                live.schema_version = 1
+            else:
+                live = TempleWebsiteSettingsLive(
+                    temple_id=temple_id,
+                    settings_snapshot=snapshot,
+                    version=1,
+                    schema_version=1,
+                    status="PUBLISHED",
+                    published_at=datetime.now(timezone.utc),
+                    published_by=current_user_id
+                )
+                db.add(live)
+
+            # Log to central audit trail
+            await AuditService.log_action(
+                db=db,
+                temple_id=temple_id,
+                user_id=current_user_id,
+                role=role,
+                module_name="digital_experience",
+                action="PUBLISH_WEBSITE",
+                action_type="CREATE",
+                entity_id=str(live.id if live.id else temple_id),
+                new_value={"version": live.version, "status": "PUBLISHED"},
+                details=f"Published website for temple {temple_id} (slug: {slug})"
+            )
+            
+        # Commit the transaction
+        await db.commit()
+        if live.id:
+            await db.refresh(live)
+        return live
+
+    @staticmethod
+    async def unpublish_settings(
+        db: AsyncSession,
+        temple_id: UUID,
+        current_user_id: UUID,
+        role: str
+    ) -> bool:
+        async with db.begin_nested():
+            # 1. Fetch live snapshot
+            live_stmt = select(TempleWebsiteSettingsLive).filter(TempleWebsiteSettingsLive.temple_id == temple_id)
+            live_res = await db.execute(live_stmt)
+            live = live_res.scalars().first()
+            if not live:
+                raise HTTPException(status_code=404, detail="Website is not currently published")
+                
+            # 2. Delete live snapshot record
+            await db.delete(live)
+            
+            # 3. Log to central audit trail
+            await AuditService.log_action(
+                db=db,
+                temple_id=temple_id,
+                user_id=current_user_id,
+                role=role,
+                module_name="digital_experience",
+                action="UNPUBLISH_WEBSITE",
+                action_type="DELETE",
+                entity_id=str(live.id),
+                details=f"Unpublished website for temple {temple_id}"
+            )
+            
+        await db.commit()
+        return True
+
+    @staticmethod
+    async def get_publication_status(
+        db: AsyncSession,
+        temple_id: UUID
+    ) -> dict:
+        live_stmt = select(TempleWebsiteSettingsLive).filter(TempleWebsiteSettingsLive.temple_id == temple_id)
+        live_res = await db.execute(live_stmt)
+        live = live_res.scalars().first()
+        
+        if live:
+            return {
+                "isPublished": True,
+                "publishedAt": live.published_at.isoformat() if live.published_at else None,
+                "publishedBy": str(live.published_by) if live.published_by else None
+            }
+        else:
+            return {
+                "isPublished": False,
+                "publishedAt": None,
+                "publishedBy": None
+            }

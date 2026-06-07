@@ -55,6 +55,68 @@ async def update_settings(
 
 
 # =============================================================================
+# WEBSITE PUBLICATION ROUTES
+# =============================================================================
+@router.get(
+    "/website-settings/status",
+    tags=["digital-experience-settings"]
+)
+async def get_publication_status(
+    db: AsyncSession = Depends(get_db),
+    current_user: TokenData = Depends(require_permission("settings", "view")),
+    temple_id: str = Depends(get_current_temple_id),
+):
+    """Get the publication status of the temple website."""
+    return await DigitalExperienceService.get_publication_status(db, UUID(temple_id))
+
+
+@router.post(
+    "/website-settings/publish",
+    tags=["digital-experience-settings"]
+)
+async def publish_website(
+    db: AsyncSession = Depends(get_db),
+    current_user: TokenData = Depends(require_permission("settings", "edit")),
+    temple_id: str = Depends(get_current_temple_id),
+):
+    """Publish the current draft website settings."""
+    live = await DigitalExperienceService.publish_settings(
+        db=db,
+        temple_id=UUID(temple_id),
+        current_user_id=UUID(current_user.sub),
+        role=current_user.role,
+    )
+    return {
+        "status": "success",
+        "message": "Website published successfully",
+        "publishedAt": live.published_at.isoformat() if live.published_at else None,
+        "version": live.version
+    }
+
+
+@router.post(
+    "/website-settings/unpublish",
+    tags=["digital-experience-settings"]
+)
+async def unpublish_website(
+    db: AsyncSession = Depends(get_db),
+    current_user: TokenData = Depends(require_permission("settings", "edit")),
+    temple_id: str = Depends(get_current_temple_id),
+):
+    """Unpublish the temple website, deleting its public live snapshot."""
+    await DigitalExperienceService.unpublish_settings(
+        db=db,
+        temple_id=UUID(temple_id),
+        current_user_id=UUID(current_user.sub),
+        role=current_user.role,
+    )
+    return {
+        "status": "success",
+        "message": "Website unpublished successfully"
+    }
+
+
+# =============================================================================
 # ANNOUNCEMENTS ROUTES
 # =============================================================================
 @router.get(

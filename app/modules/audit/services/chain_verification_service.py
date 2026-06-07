@@ -3,9 +3,10 @@ import logging
 from uuid import UUID
 from typing import List, Dict, Any, Tuple, Optional
 from sqlalchemy.ext.asyncio import AsyncSession
+from sqlalchemy import text
 from sqlalchemy.future import select
 
-from app.modules.audit.models.audit_models import ImmutableActivityLog, AuditIntegrityVerificationReport
+from app.modules.audit.models.audit_models import ImmutableActivityLog, AuditIntegrityVerificationReport, AuditChainVersion
 from app.modules.audit.services.activity_log_processor import ActivityLogProcessor
 from app.modules.governance.services.operational_state_service import OperationalStateService
 from app.modules.governance.models.operational_states import TempleOperationalState
@@ -17,11 +18,27 @@ class ChainVerificationService:
     async def verify_audit_chain(db: AsyncSession, temple_id: UUID) -> Dict[str, Any]:
         """
         Verifies the cryptographic chain of audit logs for a given temple.
-        Recalculates the hash chain from genesis block (index = 1) up to the latest log.
+        Recalculates the hash chain from genesis block (index = 1) up to the latest log
+        for the currently active chain version.
         """
+        # Get active chain version
+        version_stmt = (
+            select(AuditChainVersion.chain_version)
+            .filter(
+                AuditChainVersion.temple_id == temple_id,
+                AuditChainVersion.chain_status == 'ACTIVE'
+            )
+            .limit(1)
+        )
+        version_res = await db.execute(version_stmt)
+        active_version = version_res.scalar() or 1
+
         stmt = (
             select(ImmutableActivityLog)
-            .filter(ImmutableActivityLog.temple_id == temple_id)
+            .filter(
+                ImmutableActivityLog.temple_id == temple_id,
+                ImmutableActivityLog.chain_version == active_version
+            )
             .order_by(ImmutableActivityLog.audit_chain_index.asc())
         )
         res = await db.execute(stmt)

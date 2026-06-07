@@ -9,7 +9,8 @@ from abc import ABC, abstractmethod
 from sqlalchemy.ext.asyncio import AsyncSession
 from sqlalchemy.future import select
 from sqlalchemy import text
-from app.modules.audit.models.audit_models import ActivityOutbox, ImmutableActivityLog
+from app.modules.audit.models.audit_models import ActivityOutbox, ImmutableActivityLog, AuditChainVersion
+from app.modules.audit.services.audit_chain_writer import AuditChainWriter
 from app.modules.temple_management.models.temple_models import Temple
 from app.core.database.database import AsyncSessionLocal
 
@@ -125,102 +126,132 @@ class ActivityLogProcessor:
                     OutboxMetrics.total_retries += 1
                     continue
 
-                # 2. Idempotency Check: Explicitly verify if this event was already processed
-                # This is necessary because ImmutableActivityLog uses a composite PK (id, created_utc)
-                # for partitioning, so a unique constraint on `id` alone is not possible at the DB schema level.
-                dup_stmt = select(ImmutableActivityLog.id).filter(ImmutableActivityLog.id == entry.id).limit(1)
-                dup_res = await db.execute(dup_stmt)
-                if dup_res.scalar_one_or_none():
-                    logger.warning(f"Idempotency Guard: Event {entry.id} already exists in immutable logs. Acknowledging outbox entry.")
-                    await broker.acknowledge(db, entry)
-                    continue
+                # Run each entry in a nested savepoint transaction to prevent partial success states
+                async with db.begin_nested():
+                    # 2. Idempotency Check: Explicitly verify if this event was already processed
+                    dup_stmt = select(ImmutableActivityLog.id).filter(ImmutableActivityLog.id == entry.id).limit(1)
+                    dup_res = await db.execute(dup_stmt)
+                    if dup_res.scalar_one_or_none():
+                        logger.warning(f"Idempotency Guard: Event {entry.id} already exists in immutable logs. Acknowledging outbox entry.")
+                        await broker.acknowledge(db, entry)
+                        continue
 
-                # 3. Fetch Temple Code and Tenant Name
-                temple_stmt = select(Temple).filter(Temple.id == entry.temple_id)
-                temple_res = await db.execute(temple_stmt)
-                temple = temple_res.scalar_one_or_none()
-                
-                temple_code = temple.temple_code if (temple and temple.temple_code) else "SYSTEM"
-                tenant_name = temple.name if temple else "Denumrutham System"
-                
-                # 3. Lock the audit chain of this tenant and get the latest index/hash
-                chain_stmt = (
-                    select(ImmutableActivityLog)
-                    .filter(ImmutableActivityLog.temple_id == entry.temple_id)
-                    .order_by(ImmutableActivityLog.audit_chain_index.desc())
-                    .limit(1)
-                    .with_for_update()
-                )
-                chain_res = await db.execute(chain_stmt)
-                latest_log = chain_res.scalar_one_or_none()
-                
-                if latest_log:
-                    prev_hash = latest_log.current_hash
-                    next_index = latest_log.audit_chain_index + 1
-                else:
-                    prev_hash = "0" * 64
-                    next_index = 1
+                    # 3. Fetch Temple Code and Tenant Name with row lock
+                    temple_stmt = select(Temple).filter(Temple.id == entry.temple_id).with_for_update()
+                    temple_res = await db.execute(temple_stmt)
+                    temple = temple_res.scalar_one_or_none()
                     
-                created_utc = datetime.now(timezone.utc)
-                curr_hash = cls.calculate_log_hash(
-                    log_id=entry.id,
-                    temple_id=entry.temple_id,
-                    action_type=entry.action_type,
-                    created_utc=created_utc,
-                    after_value=entry.after_value,
-                    prev_hash=prev_hash
-                )
-                
-                # 4. Create immutable log entry
-                log_record = ImmutableActivityLog(
-                    id=entry.id,
-                    temple_id=entry.temple_id,
-                    temple_code=temple_code,
-                    tenant_name=tenant_name,
-                    module_name=entry.module_name,
-                    entity_name=entry.entity_name,
-                    entity_id=entry.entity_id,
-                    action_type=entry.action_type,
-                    action_category=entry.action_category,
-                    description=entry.description,
-                    before_value=entry.before_value,
-                    after_value=entry.after_value,
-                    performed_by_user_id=entry.performed_by_user_id,
-                    performed_by_name=entry.performed_by_name,
-                    performed_by_role=entry.performed_by_role,
-                    masked_pii=entry.masked_pii,
-                    hashed_pii=entry.hashed_pii,
-                    ip_address=entry.ip_address,
-                    correlation_id=entry.correlation_id,
-                    request_id=entry.request_id,
-                    severity=entry.severity,
-                    risk_score=entry.risk_score,
-                    previous_hash=prev_hash,
-                    current_hash=curr_hash,
-                    audit_chain_index=next_index,
-                    created_utc=created_utc
-                )
-                
-                db.add(log_record)
-                await db.flush()  # Flush to ensure index/hash is visible in subsequent iterations of the same batch
-                
-                await broker.acknowledge(db, entry)
-                
-                processed_logs.append(log_record)
-                processed_count += 1
-                
-                # Clear failure count on success
-                cls._failure_registry.pop(entry.id, None)
-                logger.info(f"Processed outbox entry {entry.id} into audit chain index {next_index}")
-                
+                    temple_code = temple.temple_code if (temple and temple.temple_code) else "SYSTEM"
+                    tenant_name = temple.name if temple else "Denumrutham System"
+                    
+                    # 4. Fetch the active chain version
+                    version_stmt = (
+                        select(AuditChainVersion.chain_version)
+                        .filter(
+                            AuditChainVersion.temple_id == entry.temple_id,
+                            AuditChainVersion.chain_status == 'ACTIVE'
+                        )
+                        .limit(1)
+                    )
+                    version_res = await db.execute(version_stmt)
+                    active_version = version_res.scalar() or 1
+
+                    # 5. Lock the audit chain of this tenant and get the latest index/hash for the active version
+                    chain_stmt = (
+                        select(ImmutableActivityLog)
+                        .filter(
+                            ImmutableActivityLog.temple_id == entry.temple_id,
+                            ImmutableActivityLog.chain_version == active_version
+                        )
+                        .order_by(ImmutableActivityLog.audit_chain_index.desc())
+                        .limit(1)
+                        .with_for_update()
+                    )
+                    chain_res = await db.execute(chain_stmt)
+                    latest_log = chain_res.scalar_one_or_none()
+                    
+                    if latest_log:
+                        prev_hash = latest_log.current_hash
+                        next_index = latest_log.audit_chain_index + 1
+                    else:
+                        prev_hash = "0" * 64
+                        next_index = 1
+                        
+                    created_utc = datetime.now(timezone.utc)
+                    curr_hash = cls.calculate_log_hash(
+                        log_id=entry.id,
+                        temple_id=entry.temple_id,
+                        action_type=entry.action_type,
+                        created_utc=created_utc,
+                        after_value=entry.after_value,
+                        prev_hash=prev_hash
+                    )
+                    
+                    # 6. Create registry lookup and immutable log entry via single writer service
+                    log_record = await AuditChainWriter.write_record(
+                        db=db,
+                        entry_id=entry.id,
+                        temple_id=entry.temple_id,
+                        temple_code=temple_code,
+                        tenant_name=tenant_name,
+                        module_name=entry.module_name,
+                        entity_name=entry.entity_name,
+                        entity_id=entry.entity_id,
+                        action_type=entry.action_type,
+                        action_category=entry.action_category,
+                        description=entry.description,
+                        before_value=entry.before_value,
+                        after_value=entry.after_value,
+                        performed_by_user_id=entry.performed_by_user_id,
+                        performed_by_name=entry.performed_by_name,
+                        performed_by_role=entry.performed_by_role,
+                        masked_pii=entry.masked_pii,
+                        hashed_pii=entry.hashed_pii,
+                        ip_address=entry.ip_address,
+                        correlation_id=entry.correlation_id,
+                        request_id=entry.request_id,
+                        severity=entry.severity,
+                        risk_score=entry.risk_score,
+                        previous_hash=prev_hash,
+                        current_hash=curr_hash,
+                        audit_chain_index=next_index,
+                        chain_version=active_version,
+                        created_utc=created_utc
+                    )
+                    
+                    # 7. Real-Time Verification Hook: Inline post-write validation
+                    recalc = cls.calculate_log_hash(
+                        log_id=log_record.id,
+                        temple_id=log_record.temple_id,
+                        action_type=log_record.action_type,
+                        created_utc=log_record.created_utc,
+                        after_value=log_record.after_value,
+                        prev_hash=log_record.previous_hash
+                    )
+                    if log_record.current_hash != recalc:
+                        raise ValueError(
+                            f"Post-write validation failure: current_hash mismatch. "
+                            f"Calculated {recalc}, got {log_record.current_hash}"
+                        )
+                    
+                    await db.flush()  # Flush within nested transaction to enforce DB unique constraints
+                    await broker.acknowledge(db, entry)
+                    
+                    processed_logs.append(log_record)
+                    processed_count += 1
+                    
+                    # Clear failure count on success
+                    cls._failure_registry.pop(entry.id, None)
+                    logger.info(f"Processed outbox entry {entry.id} into audit chain index {next_index}")
+                    
             except Exception as e:
                 cls._failure_registry[entry.id] = cls._failure_registry.get(entry.id, 0) + 1
                 OutboxMetrics.total_failed += 1
                 logger.error(f"Failed to process activity outbox entry {entry.id}: {str(e)}", exc_info=True)
-                # Roll back the inner transaction of this batch so we can commit other items
+                # The nested transaction savepoint automatically rolls back changes for this entry
                 continue
 
-        # Commit database transaction
+        # Commit overall transaction
         await db.commit()
 
         # Broadcast events via Redis Pub/Sub for real-time manager UI updates

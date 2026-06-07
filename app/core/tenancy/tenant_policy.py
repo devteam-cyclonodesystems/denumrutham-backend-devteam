@@ -81,6 +81,8 @@ class TenantPolicy:
                 detail = "This temple is under administrative suspension. Operations are blocked."
             elif state == TempleOperationalState.READ_ONLY:
                 detail = "This temple is in read-only mode. Mutations are blocked."
+            elif state == TempleOperationalState.DEGRADED:
+                detail = "This temple is in degraded mode due to audit chain security verification failure. Mutations are blocked."
             
             raise HTTPException(
                 status_code=status.HTTP_403_FORBIDDEN,

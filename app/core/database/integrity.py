@@ -171,8 +171,8 @@ class DeploymentIntegrityService:
 def validate_audit_bypass_prevention() -> bool:
     """
     Architectural safeguard that scans the python files in the 'app/' directory on boot.
-    Raises a fatal error (blocking startup) if direct 'AuditLog(' instantiation is detected
-    in any unauthorized files.
+    Raises a fatal error (blocking startup) if direct 'AuditLog(' or 'ImmutableActivityLog(' 
+    instantiation is detected in any unauthorized files.
     """
     import os
     import re
@@ -193,7 +193,15 @@ def validate_audit_bypass_prevention() -> bool:
         os.path.normpath("app/core/integrity.py"),
     ]
     
+    # Define authorized files for ImmutableActivityLog instantiation
+    allowed_suffixes_immutable = [
+        os.path.normpath("app/modules/audit/services/activity_log_processor.py"),
+        os.path.normpath("app/modules/audit/services/audit_chain_writer.py"),
+        os.path.normpath("app/core/database/integrity.py"),
+    ]
+    
     pattern = re.compile(r'\bAuditLog\s*\(')
+    pattern_immutable = re.compile(r'\bImmutableActivityLog\s*\(')
     violations = []
     
     for root, dirs, files in os.walk(app_dir):
@@ -204,28 +212,37 @@ def validate_audit_bypass_prevention() -> bool:
                 continue
             file_path = os.path.join(root, file)
             normalized_path = os.path.normpath(file_path)
-            is_allowed = False
+            
+            is_allowed_audit = False
             for suffix in allowed_suffixes:
                 if normalized_path.endswith(suffix):
-                    is_allowed = True
+                    is_allowed_audit = True
+                    break
+                    
+            is_allowed_immutable = False
+            for suffix in allowed_suffixes_immutable:
+                if normalized_path.endswith(suffix):
+                    is_allowed_immutable = True
                     break
             
-            if is_allowed:
-                continue
-                
             try:
                 with open(file_path, "r", encoding="utf-8") as f:
                     content = f.read()
-                    if pattern.search(content):
+                    
+                    if not is_allowed_audit and pattern.search(content):
                         rel_path = os.path.relpath(file_path, app_dir)
-                        violations.append(rel_path)
+                        violations.append(f"{rel_path} (direct AuditLog)")
+                        
+                    if not is_allowed_immutable and pattern_immutable.search(content):
+                        rel_path = os.path.relpath(file_path, app_dir)
+                        violations.append(f"{rel_path} (direct ImmutableActivityLog)")
             except Exception as e:
                 logger.warning(f"Bypass scan skipped file {file_path}: {e}")
                 
     if violations:
         logger.critical(
-            f"AUDIT PIPELINE BYPASS DETECTED! Direct AuditLog instantiation is prohibited in: {violations}. "
-            "Please use AuditService.log_action() to route audit events through the immutable pipeline."
+            f"AUDIT PIPELINE BYPASS DETECTED! Direct AuditLog/ImmutableActivityLog instantiation is prohibited in: {violations}. "
+            "Please use AuditService.log_action() or AuditChainWriter for routing audit events through the immutable pipeline."
         )
         return False
         

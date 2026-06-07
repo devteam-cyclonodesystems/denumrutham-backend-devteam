@@ -2,7 +2,7 @@ import uuid
 import enum
 from datetime import datetime, timezone
 from sqlalchemy import Column, String, Boolean, DateTime, ForeignKey, Float, Text, Enum, Integer, Time, UniqueConstraint, Date, JSON, Index, text, CheckConstraint
-from sqlalchemy.dialects.postgresql import UUID
+from sqlalchemy.dialects.postgresql import UUID, JSONB
 from sqlalchemy.orm import relationship, backref
 from app.core.database.database import Base
 from app.modules.governance.models.operational_states import TempleOperationalState
@@ -95,6 +95,7 @@ class Temple(Base):
     user_temples = relationship("UserTemple", back_populates="temple")
     followers = relationship("TempleFollower", back_populates="temple")
     website_settings = relationship("TempleWebsiteSettings", back_populates="temple", uselist=False, cascade="all, delete-orphan")
+    website_settings_live = relationship("TempleWebsiteSettingsLive", uselist=False, cascade="all, delete-orphan")
 
 
 
@@ -231,6 +232,29 @@ class TempleWebsiteSettings(Base):
     updated_at = Column(DateTime(timezone=True), default=utcnow, onupdate=utcnow)
 
     temple = relationship("Temple", back_populates="website_settings")
+
+
+JSONB_VARIANT = JSONB().with_variant(JSON, "sqlite")
+
+
+class TempleWebsiteSettingsLive(Base):
+    """Live public website snapshot for the Website Builder."""
+    __tablename__ = "temple_website_settings_live"
+
+    id = Column(UUID(as_uuid=True), primary_key=True, default=uuid.uuid4)
+    temple_id = Column(
+        UUID(as_uuid=True), 
+        ForeignKey("temples.id", ondelete="CASCADE"), 
+        unique=True, 
+        nullable=False, 
+        index=True
+    )
+    settings_snapshot = Column(JSONB_VARIANT, nullable=False)
+    schema_version = Column(Integer, default=1, nullable=False)
+    version = Column(Integer, default=1, nullable=False)
+    status = Column(String, default="PUBLISHED", nullable=False)
+    published_at = Column(DateTime(timezone=True), nullable=False, default=utcnow)
+    published_by = Column(UUID(as_uuid=True), ForeignKey("users.id", ondelete="SET NULL"), nullable=True)
 
 
 class TempleAnnouncement(Base):

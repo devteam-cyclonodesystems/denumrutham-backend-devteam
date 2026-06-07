@@ -6,7 +6,10 @@ from app.modules.temple_management.models.temple_models import (
 )
 from app.modules.bookings.models.booking_models import DevoteeProfile, RefundHistory
 from app.modules.governance.models.governance_models import AuditLog
-from app.modules.audit.models.audit_models import ImmutableActivityLog, ActivityOutbox, AuditGovernanceConfig
+from app.modules.audit.models.audit_models import (
+    ImmutableActivityLog, ActivityOutbox, AuditGovernanceConfig,
+    AuditChainIncident, AuditChainVersion, AuditChainIndexRegistry
+)
 from app.models.onboarding import TempleRequest, UserRequest
 from app.models.system_rbac import SystemRole, SystemPermission, SystemRolePermission
 from app.models.archana import (
@@ -95,6 +98,9 @@ __all__ = [
     "ImmutableActivityLog",
     "ActivityOutbox",
     "AuditGovernanceConfig",
+    "AuditChainIncident",
+    "AuditChainVersion",
+    "AuditChainIndexRegistry",
     "TempleProfileDraft",
     "TempleWebsiteSettings",
     "TempleAnnouncement",

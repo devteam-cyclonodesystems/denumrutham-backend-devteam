@@ -55,6 +55,7 @@ class ImmutableActivityLog(Base):
     previous_hash = Column(String(64), nullable=False)
     current_hash = Column(String(64), nullable=False)
     audit_chain_index = Column(BigInteger, nullable=False)
+    chain_version = Column(Integer, nullable=False, default=1)
     
     # Created Timestamp (part of composite primary key for table partitioning)
     created_utc = Column(DateTime(timezone=True), primary_key=True, default=utcnow, index=True)
@@ -343,5 +344,51 @@ class AuditIntegrityVerificationReport(Base):
     failed_logs_count = Column(Integer, nullable=False, default=0)
     failed_log_ids = Column(JSON, nullable=True)  # List of failed log UUIDs as JSON array
     details = Column(Text, nullable=True)
+
+
+class AuditChainIncident(Base):
+    """Audit incident ledger tracking sequence breaks, bypass attempts, etc."""
+    __tablename__ = "audit_chain_incidents"
+
+    id = Column(UUID(as_uuid=True), primary_key=True, default=uuid.uuid4)
+    temple_id = Column(UUID(as_uuid=True), ForeignKey("temples.id", ondelete="CASCADE"), nullable=False)
+    chain_version = Column(Integer, nullable=False)
+    incident_type = Column(String(50), nullable=False)
+    severity = Column(String(20), nullable=False, default="HIGH")
+    detected_at = Column(DateTime(timezone=True), default=utcnow, nullable=False)
+    resolved_at = Column(DateTime(timezone=True), nullable=True)
+    root_cause = Column(Text, nullable=False)
+    evidence_reference = Column(JSON, nullable=False)
+    resolution_summary = Column(Text, nullable=True)
+    status = Column(String(20), nullable=False, default="OPEN")
+
+
+class AuditChainVersion(Base):
+    """Tracks active/sealed audit chain versions and their cryptographic handshakes."""
+    __tablename__ = "audit_chain_versions"
+
+    id = Column(UUID(as_uuid=True), primary_key=True, default=uuid.uuid4)
+    temple_id = Column(UUID(as_uuid=True), ForeignKey("temples.id", ondelete="CASCADE"), nullable=False)
+    chain_version = Column(Integer, nullable=False)
+    chain_status = Column(String(20), nullable=False, default="ACTIVE")
+    verification_status = Column(String(20), nullable=False, default="PASS")
+    created_at = Column(DateTime(timezone=True), default=utcnow, nullable=False)
+    sealed_at = Column(DateTime(timezone=True), nullable=True)
+    seal_reason = Column(Text, nullable=True)
+    parent_chain_version = Column(Integer, nullable=True)
+    parent_terminal_hash = Column(String(64), nullable=True)
+    incident_id = Column(UUID(as_uuid=True), ForeignKey("audit_chain_incidents.id", ondelete="SET NULL"), nullable=True)
+    recovery_method = Column(String(50), nullable=True)
+    created_by = Column(UUID(as_uuid=True), ForeignKey("users.id", ondelete="SET NULL"), nullable=True)
+
+
+class AuditChainIndexRegistry(Base):
+    """Enforces absolute uniqueness for temple_id and audit_chain_index combinations."""
+    __tablename__ = "audit_chain_index_registry"
+
+    temple_id = Column(UUID(as_uuid=True), ForeignKey("temples.id", ondelete="CASCADE"), primary_key=True)
+    audit_chain_index = Column(BigInteger, primary_key=True)
+    created_utc = Column(DateTime(timezone=True), nullable=False)
+
 
 

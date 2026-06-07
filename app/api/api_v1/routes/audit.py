@@ -303,8 +303,11 @@ async def get_outbox_metrics(
 ):
     from app.modules.audit.services.activity_log_processor import OutboxMetrics
     return {
-        "queue_size": OutboxMetrics.queue_size,
-        "processing_rate": OutboxMetrics.processing_rate,
-        "failure_count": OutboxMetrics.failure_count,
-        "poison_pill_skips": OutboxMetrics.poison_pill_skips
+        "worker_running": OutboxMetrics.worker_running,
+        "queue_depth": OutboxMetrics.queue_depth,
+        "oldest_pending_event_age_seconds": OutboxMetrics.oldest_pending_event_age_seconds,
+        "total_processed": OutboxMetrics.total_processed,
+        "total_failed": OutboxMetrics.total_failed,
+        "total_retries": OutboxMetrics.total_retries,
+        "last_heartbeat": OutboxMetrics.last_heartbeat.isoformat() if OutboxMetrics.last_heartbeat else None
     }

@@ -10,6 +10,7 @@ class TempleOperationalState(str, enum.Enum):
     SYNC_LOCKED = "SYNC_LOCKED"
     OFFLINE_ONLY = "OFFLINE_ONLY"
     RECOVERY_MODE = "RECOVERY_MODE"
+    DEGRADED = "DEGRADED"
 
 class OperationalCapability(str, enum.Enum):
     CAN_LOGIN = "CAN_LOGIN"
@@ -75,5 +76,9 @@ STATE_CAPABILITIES = {
     TempleOperationalState.RECOVERY_MODE: {
         OperationalCapability.CAN_READ,
         OperationalCapability.CAN_ADMIN,
+    },
+    TempleOperationalState.DEGRADED: {
+        OperationalCapability.CAN_LOGIN,
+        OperationalCapability.CAN_READ,
     },
 }

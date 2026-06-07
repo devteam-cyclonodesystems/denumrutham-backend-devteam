@@ -260,6 +260,15 @@ async def test_tenant_isolation(client, auth_headers):
 @pytest.mark.asyncio
 async def test_public_portal_endpoint(client, auth_headers):
     """Verify that GET /api/v1/public/temples/{slug}/portal returns consolidated profile, settings, announcements, and activities."""
+    # Update test temple status to APPROVED in database to allow publication
+    async with AsyncSessionLocal() as db:
+        stmt = select(Temple).filter(Temple.id == TEMPLE_ID)
+        res = await db.execute(stmt)
+        t = res.scalars().first()
+        if t:
+            t.status = "APPROVED"
+            await db.commit()
+
     # 1. Create one active announcement and activity so they are returned
     payload_ann = {
         "title": "Public Pinned Announcement",
@@ -286,7 +295,31 @@ async def test_public_portal_endpoint(client, auth_headers):
     resp2 = await client.post("/api/v1/manager/activities", json=payload_act, headers=auth_headers)
     assert resp2.status_code == 201
 
-    # 2. Request public portal details by slug 'test'
+    # 2. Request public portal details before publishing (should be 404)
+    resp_before = await client.get("/api/v1/public/temples/test/portal")
+    assert resp_before.status_code == 404
+
+    # 3. Verify public temples list does not contain it yet
+    list_before = await client.get("/api/v1/public/temples")
+    assert list_before.status_code == 200
+    assert not any(t["slug"] == "test" for t in list_before.json())
+
+    # 4. Fetch status (should indicate not published)
+    status_before = await client.get("/api/v1/manager/website-settings/status", headers=auth_headers)
+    assert status_before.status_code == 200
+    assert status_before.json()["isPublished"] is False
+
+    # 5. Publish website
+    pub_resp = await client.post("/api/v1/manager/website-settings/publish", headers=auth_headers)
+    assert pub_resp.status_code == 200
+    assert pub_resp.json()["status"] == "success"
+
+    # 6. Fetch status again (should indicate published)
+    status_after = await client.get("/api/v1/manager/website-settings/status", headers=auth_headers)
+    assert status_after.status_code == 200
+    assert status_after.json()["isPublished"] is True
+
+    # 7. Request public portal details after publishing (should be 200)
     resp = await client.get("/api/v1/public/temples/test/portal")
     assert resp.status_code == 200
     
@@ -302,6 +335,20 @@ async def test_public_portal_endpoint(client, auth_headers):
     assert any(a["title"] == "Public Pinned Announcement" for a in data["announcements"])
     assert any(a["title"] == "Public Shivaratri Activity" for a in data["activities"])
     
-    # 3. Test non-existent slug returns 404
-    resp_404 = await client.get("/api/v1/public/temples/non-existent-slug/portal")
-    assert resp_404.status_code == 404
+    # 8. Verify public temples list contains the published temple
+    list_after = await client.get("/api/v1/public/temples")
+    assert list_after.status_code == 200
+    assert any(t["slug"] == "test" for t in list_after.json())
+
+    # 9. Unpublish website
+    unpub_resp = await client.post("/api/v1/manager/website-settings/unpublish", headers=auth_headers)
+    assert unpub_resp.status_code == 200
+    assert unpub_resp.json()["status"] == "success"
+
+    # 10. Fetch status and portal after unpublishing (should be unpublished / 404)
+    status_unpub = await client.get("/api/v1/manager/website-settings/status", headers=auth_headers)
+    assert status_unpub.json()["isPublished"] is False
+
+    resp_unpub = await client.get("/api/v1/public/temples/test/portal")
+    assert resp_unpub.status_code == 404
+
