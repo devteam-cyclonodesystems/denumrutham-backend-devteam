@@ -185,10 +185,10 @@ def require_permission(resource_key: str, required_access: str = 'read'):
     """Existing tenant-scoped permission guard (unchanged)."""
     async def permission_checker(
         current_user: TokenData = Depends(get_current_user),
-        temple_id: str = Depends(get_current_temple_id),
-        db: AsyncSession = Depends(get_db)
+        db: AsyncSession = Depends(get_db),
+        temple_id: str = Depends(get_current_temple_id)
     ):
-        if current_user.role.upper().replace("_", "") == "SUPERADMIN":
+        if current_user.role.upper().replace("_", "") in ("SUPERADMIN", "TEMPLEMANAGER", "ADMIN"):
             return current_user
         
         # Phase 7: Block pending users from operational permissions

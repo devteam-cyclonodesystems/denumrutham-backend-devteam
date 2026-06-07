@@ -59,7 +59,7 @@ class RBACService:
         from app.models.domain import User
         user_res = await db.execute(select(User).filter(User.id == user_id))
         user = user_res.scalar_one_or_none()
-        if user and user.role in ("SUPERADMIN", "SUPER_ADMIN"):
+        if user and user.role.upper().replace("_", "") in ("SUPERADMIN", "TEMPLEMANAGER", "ADMIN"):
             return True
 
         user_perms = await RBACService.get_user_permissions(db, user_id, temple_id)
@@ -362,7 +362,7 @@ class RbacService:
     @staticmethod
     async def get_my_permissions(db: AsyncSession, sub: str, role: str) -> List[PermissionEntry]:
         """Return merged permissions for the calling user."""
-        if role == "SUPERADMIN":
+        if role.upper().replace("_", "") in ("SUPERADMIN", "TEMPLEMANAGER", "ADMIN"):
             return [PermissionEntry(resource_type="all", resource_key="all", access_level="full")]
 
         user_id = UUID(sub)

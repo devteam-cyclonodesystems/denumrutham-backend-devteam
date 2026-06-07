@@ -12,6 +12,7 @@
 | INC-001 | Missing `Optional` import crashes all API routes | P1 – Critical | ✅ Resolved | 2026-06-07 |
 | INC-002 | Readiness probe returning 503 blocks Railway routing | P1 – Critical | ✅ Resolved | 2026-06-06 |
 | INC-003 | Frontend module loading shows skeleton state indefinitely | P1 – Critical | ✅ Resolved | 2026-06-07 |
+| INC-004 | Granular RBAC deployment blocks TEMPLE_MANAGER access | P2 – High | ✅ Resolved | 2026-06-07 |
 
 ---
 
@@ -171,6 +172,41 @@ Resolved via INC-001 fix. No separate code change required.
 
 - Root cause: INC-001
 - Commit: `be9adf4` (backend)
+
+---
+
+## INC-004: Granular RBAC Deployment Blocks TEMPLE_MANAGER Access
+
+| Field | Value |
+|-------|-------|
+| **Incident ID** | INC-004 |
+| **Incident Title** | Granular RBAC deployment blocks TEMPLE_MANAGER access to operational modules |
+| **Date and Time** | 2026-06-07 |
+| **Severity/Priority** | P2 – High |
+| **Current Status** | ✅ Resolved |
+
+### Description
+After transitioning to granular RBAC, `TEMPLE_MANAGER` users were unable to load any operational modules (Vazhipadu, Inventory, Offerings, etc.) from the Manager Dashboard. The frontend console reported `[RBAC] Access denied for user...` and the user interface showed an empty sidebar because the permissions endpoint (`/api/v1/rbac/my-permissions`) returned an empty array.
+
+### Root Cause
+The new granular RBAC system correctly enforced permissions dynamically via the `role_permissions` and `user_roles` database tables. However, the `TEMPLE_MANAGER` role is inherently an administrative role for the tenant. Since the database wasn't seeded with explicit granular permissions for existing `TEMPLE_MANAGER` roles, they defaulted to zero permissions. Both the backend and frontend RBAC engines lacked a built-in system bypass for the `TEMPLE_MANAGER` role, unlike `SUPERADMIN` which correctly bypassed the granular checks.
+
+### Affected Services, Components, or Features
+- Manager Dashboard (Sidebar)
+- All operational modules (except Dashboard and Website Builder)
+- All `TEMPLE_MANAGER` and `ADMIN` users
+
+### Resolution Implemented
+1. Updated `app/modules/auth/services/rbac_service.py` to allow `TEMPLE_MANAGER` and `ADMIN` to automatically receive `all:all` full access permissions in `get_my_permissions()`.
+2. Updated `app/core/security/deps.py` (`require_permission`) to allow `TEMPLE_MANAGER` and `ADMIN` to bypass the granular database permission checks.
+3. Updated `frontend/src/utils/rbac.ts` (`RBACEngine`) to provide an immediate local bypass for `TEMPLE_MANAGER` and `ADMIN` without needing explicit database mappings.
+
+### Preventive Actions Taken
+- Ensuring that tenant administrator roles (`TEMPLE_MANAGER`) have built-in operational override rights parallel to system-wide `SUPERADMIN` roles.
+- This prevents access lockouts when rolling out new modules or transitioning to more restrictive granular RBAC architectures.
+
+### Related Tickets, PRs, Commits
+- Commit: `9f1f32b` (Full Stack)
 
 ---
 
