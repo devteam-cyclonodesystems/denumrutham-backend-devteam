@@ -81,9 +81,11 @@ async def get_public_temple_portal(
             images.append(
                 TempleImageResponse(
                     id=img.id,
+                    temple_id=img.temple_id,
                     image_url=img.image_url,
                     caption=img.caption or "",
-                    category=img.category or "GALLERY"
+                    category=img.category or "GALLERY",
+                    created_at=img.created_at
                 )
             )
 
