@@ -13,6 +13,7 @@
 | INC-002 | Readiness probe returning 503 blocks Railway routing | P1 – Critical | ✅ Resolved | 2026-06-06 |
 | INC-003 | Frontend module loading shows skeleton state indefinitely | P1 – Critical | ✅ Resolved | 2026-06-07 |
 | INC-004 | Granular RBAC deployment blocks TEMPLE_MANAGER access | P2 – High | ✅ Resolved | 2026-06-07 |
+| INC-005 | Missing live website settings database table on production | P1 – Critical | ✅ Resolved | 2026-06-07 |
 
 ---
 
@@ -207,6 +208,44 @@ The new granular RBAC system correctly enforced permissions dynamically via the 
 
 ### Related Tickets, PRs, Commits
 - Commit: `9f1f32b` (Full Stack)
+
+---
+
+## INC-005: Missing Live Website Settings Database Table on Production
+
+| Field | Value |
+|-------|-------|
+| **Incident ID** | INC-005 |
+| **Incident Title** | Missing `temple_website_settings_live` database table on production PostgreSQL database |
+| **Date and Time** | 2026-06-07T07:05:00Z |
+| **Severity/Priority** | P1 – Critical |
+| **Current Status** | ✅ Resolved |
+
+### Description
+
+The devotee public portal ("Explore Temples" list view) failed to load and displayed an "Unable to Load Temples" error message. The developer console/API server logs showed `UndefinedTableError: relation "temple_website_settings_live" does not exist` when requesting `/api/v1/public/temples`.
+
+### Root Cause
+
+The migration file `add_website_publication_snapshots.py` (which creates the `temple_website_settings_live` table) had not been executed on the production PostgreSQL database. The `/api/v1/public/temples` endpoint uses an inner join with `TempleWebsiteSettingsLive`, meaning it failed immediately when the database lacked the table relation.
+
+### Affected Services, Components, or Features
+
+- Devotee Portal Homepage ("Explore Temples" listing)
+- Public-facing temple listings and landing pages
+- `/api/v1/public/temples` API endpoint
+
+### Resolution Implemented
+
+Ran `alembic upgrade head` on the production PostgreSQL database, creating the `temple_website_settings_live` table and running the safe data migration to populate settings for existing active, approved temples.
+
+### Preventive Actions Taken
+
+- Ensure database migrations are executed as part of the CD/deployment pipeline before launching backend service updates.
+- Verify migration checks during local and staging environments are systematically run against target databases.
+
+### Related Tickets, PRs, Commits
+- Migration: `add_website_publication_snapshots.py`
 
 ---
 
