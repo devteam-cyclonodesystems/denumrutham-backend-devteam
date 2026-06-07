@@ -1,0 +1,252 @@
+# TMS Knowledge Base — Incident Tracker
+
+> This document serves as the centralized incident tracker for the Denumrutham Temple Management System (TMS).
+> Every incident, defect, outage, deployment issue, integration failure, performance issue, or other significant problem must be recorded here.
+
+---
+
+## Incident Index
+
+| ID | Title | Severity | Status | Date |
+|----|-------|----------|--------|------|
+| INC-001 | Missing `Optional` import crashes all API routes | P1 – Critical | ✅ Resolved | 2026-06-07 |
+| INC-002 | Readiness probe returning 503 blocks Railway routing | P1 – Critical | ✅ Resolved | 2026-06-06 |
+| INC-003 | Frontend module loading shows skeleton state indefinitely | P1 – Critical | ✅ Resolved | 2026-06-07 |
+
+---
+
+## INC-001: Missing `Optional` Import Crashes All API Routes
+
+| Field | Value |
+|-------|-------|
+| **Incident ID** | INC-001 |
+| **Incident Title** | Missing `Optional` import in `public_portal.py` crashes entire API router |
+| **Date and Time** | 2026-06-07T06:00:00Z |
+| **Severity/Priority** | P1 – Critical |
+| **Current Status** | ✅ Resolved |
+
+### Description
+
+The `list_public_temples` endpoint in `public_portal.py` used `Optional[str]` as a type hint for the `search` parameter, but `Optional` was not imported from the `typing` module. This caused a `NameError` at Python module import time.
+
+### Root Cause
+
+```python
+# File: backend/app/modules/temple_management/routes/public_portal.py
+# Line 8 (BEFORE fix):
+from typing import List  # ❌ Missing Optional
+
+# Line 175:
+async def list_public_temples(
+    search: Optional[str] = None,  # NameError: 'Optional' not defined
+    ...
+)
+```
+
+The `list_public_temples` function was added as part of the Temple Preview retirement initiative (Explore Temples endpoint). The `Optional` type was used but never added to the import statement.
+
+### Affected Services, Components, or Features
+
+- **ALL backend API routes** — The import error in `public_portal.py` occurs at line 14 of `api.py`, which is the single entry point for all API router registration. When this import fails, no routes are registered.
+- **Frontend sidebar/navigation** — Without `/api/v1/rbac/my-permissions` responding, the `ManagerLayout` never sets `permissionsLoaded = true`, causing all guarded navigation items to render as skeleton placeholders indefinitely.
+- **All authenticated functionality** — Login, bookings, donations, RBAC, audit, etc. — all endpoints unreachable.
+
+### Cascade Failure Chain
+
+```
+public_portal.py import fails (NameError: Optional)
+  → api.py line 14 import fails
+    → api_router never created
+      → ALL endpoints unregistered
+        → /rbac/my-permissions returns 404/500
+          → Frontend permissionsLoaded stays false
+            → Sidebar shows skeleton forever
+              → All modules inaccessible
+```
+
+### Resolution Implemented
+
+```diff
+# backend/app/modules/temple_management/routes/public_portal.py
+- from typing import List
++ from typing import List, Optional
+```
+
+- **Commit**: `be9adf4` on backend `main`
+- **Push**: `denumrutham-backend` → `main`
+
+### Preventive Actions Taken
+
+1. **Import validation**: All future route files must import every type hint they use.
+2. **Pre-commit check**: Run `python -c "from app.api.api_v1.api import api_router"` before every push to verify all route imports resolve.
+3. **Knowledge Base created**: This incident tracker now exists to catch patterns early.
+
+### Lessons Learned
+
+- A single missing import in ONE route file can cascade to take down the ENTIRE application.
+- The monolithic router registration in `api.py` (single import line for all routes) creates a single point of failure.
+- Consider adding try/except guards around router imports in `api.py` to isolate failures to individual modules rather than crashing all routes.
+
+### Related Tickets, PRs, Commits
+
+- Commit: `be9adf4` (backend)
+- Related to: Temple Preview Retirement initiative
+
+---
+
+## INC-002: Readiness Probe Returning 503 Blocks Railway Routing
+
+| Field | Value |
+|-------|-------|
+| **Incident ID** | INC-002 |
+| **Incident Title** | Health/readiness probe returns 503, Railway stops routing traffic |
+| **Date and Time** | 2026-06-06 |
+| **Severity/Priority** | P1 – Critical |
+| **Current Status** | ✅ Resolved |
+
+### Description
+
+The Railway deployment health check endpoint `/health/ready` returned HTTP 503, causing Railway's routing layer to stop sending traffic to the backend. This made the entire application unreachable.
+
+### Root Cause
+
+The readiness probe at `/health/ready` performed a database connectivity check. When the database connection parameters were incorrect or the database was temporarily unavailable during deployment, the probe returned 503, which Railway interpreted as "service unhealthy" and stopped routing.
+
+### Affected Services, Components, or Features
+
+- All backend API routes
+- Frontend (no backend to connect to)
+- All user-facing functionality
+
+### Resolution Implemented
+
+The readiness probe was updated to degrade gracefully — returning 200 with a status indicator even when the database is temporarily unreachable during startup, rather than returning 503 which triggers Railway's routing block.
+
+### Preventive Actions Taken
+
+1. Readiness probes should not hard-fail on transient startup conditions.
+2. Separate liveness (is the process alive?) from readiness (is it fully ready?) probes.
+
+### Related Tickets, PRs, Commits
+
+- Part of the Temple Preview Retirement deployment chain
+
+---
+
+## INC-003: Frontend Module Loading Shows Skeleton State Indefinitely
+
+| Field | Value |
+|-------|-------|
+| **Incident ID** | INC-003 |
+| **Incident Title** | Frontend sidebar modules show loading skeleton placeholders forever |
+| **Date and Time** | 2026-06-07 |
+| **Severity/Priority** | P1 – Critical |
+| **Current Status** | ✅ Resolved |
+
+### Description
+
+After deploying new backend changes, the manager dashboard sidebar showed all modules as gray skeleton/loading placeholders. Only Dashboard and Help & Support (unguarded items) were visible.
+
+### Root Cause
+
+This is a **symptom** of INC-001. The `ManagerLayout` component loads user permissions via `/api/v1/rbac/my-permissions`. When the backend fails to register any routes (due to the import error in INC-001), this call fails, and `permissionsLoaded` remains `false`. The sidebar rendering logic returns `null` for all permission-guarded navigation items.
+
+### Affected Services, Components, or Features
+
+- Manager Dashboard sidebar navigation
+- All permission-guarded modules (Poojas, Bookings, Donations, RBAC, Audit, etc.)
+- User experience (appears as if nothing is loading)
+
+### Resolution Implemented
+
+Resolved via INC-001 fix. No separate code change required.
+
+### Preventive Actions Taken
+
+1. Frontend should show an error state (not infinite loading) when permission fetch fails after a timeout.
+2. Consider implementing a retry mechanism with exponential backoff for permission fetching.
+3. Add a visual indicator (toast/alert) when the backend is unreachable.
+
+### Related Tickets, PRs, Commits
+
+- Root cause: INC-001
+- Commit: `be9adf4` (backend)
+
+---
+
+## Incident Management Process
+
+### When a New Incident Is Reported
+
+1. **Search this Knowledge Base** for similar or related incidents before creating a new entry.
+2. If a matching or related incident exists:
+   - Update the existing entry with new information.
+   - Link the related incidents.
+3. If no match exists:
+   - Create a new incident entry using the template below.
+   - Assign the next sequential ID (`INC-XXX`).
+   - Add it to the Incident Index table at the top.
+
+### Incident Template
+
+```markdown
+## INC-XXX: [Title]
+
+| Field | Value |
+|-------|-------|
+| **Incident ID** | INC-XXX |
+| **Incident Title** | [Brief description] |
+| **Date and Time** | YYYY-MM-DDTHH:MM:SSZ |
+| **Severity/Priority** | P1/P2/P3/P4 |
+| **Current Status** | 🔴 Open / 🟡 In Progress / ✅ Resolved / ⬛ Closed |
+
+### Description
+[Detailed description of what happened]
+
+### Root Cause
+[Technical root cause analysis]
+
+### Affected Services, Components, or Features
+[List affected areas]
+
+### Resolution Implemented
+[What was done to fix it]
+
+### Preventive Actions Taken
+[What was done to prevent recurrence]
+
+### Lessons Learned
+[Key takeaways]
+
+### Related Tickets, PRs, Commits
+[Links to related items]
+```
+
+### Severity Definitions
+
+| Level | Definition |
+|-------|-----------|
+| **P1 – Critical** | Complete service outage or data loss. All users affected. Requires immediate action. |
+| **P2 – High** | Major feature broken. Many users affected. Requires action within hours. |
+| **P3 – Medium** | Minor feature degraded. Some users affected. Can be scheduled for next sprint. |
+| **P4 – Low** | Cosmetic or minor issue. Few users affected. Can be addressed at convenience. |
+
+---
+
+## Recurring Patterns & Systemic Issues
+
+### Pattern: Single Import Failure Cascades to Full Outage
+
+**Occurrences**: INC-001, INC-003
+
+**Root Issue**: The API router registration in `api.py` uses a single `from ... import` statement. If ANY imported route module has a Python error, ALL routes fail to register.
+
+**Recommended Fix**: Wrap each router import in a try/except block with logging, so a failure in one module only disables that module's endpoints, not the entire API.
+
+### Pattern: Backend Failures Manifest as Frontend Loading States
+
+**Occurrences**: INC-002, INC-003
+
+**Root Issue**: The frontend has no timeout or error state for critical API calls like permission loading. When the backend is down, the UI shows infinite loading instead of an actionable error message.
+
+**Recommended Fix**: Add timeout handling and error states to all critical frontend API calls (permissions, auth, config).
