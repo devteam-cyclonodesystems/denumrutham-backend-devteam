@@ -11,6 +11,7 @@ from app.modules.temple_management.schemas.digital_experience import (
     TempleAnnouncementCreate, TempleAnnouncementUpdate, TempleAnnouncementResponse,
     TempleActivityCreate, TempleActivityUpdate, TempleActivityResponse,
     TempleImageCreate, TempleImageUpdate, TempleImageResponse,
+    TempleFestivalCreate, TempleFestivalUpdate, TempleFestivalResponse,
 )
 
 router = APIRouter()
@@ -369,3 +370,89 @@ async def delete_image(
         role=current_user.role,
     )
     return {"status": "success", "message": "Image deleted successfully"}
+
+
+# =============================================================================
+# FESTIVALS ROUTES
+# =============================================================================
+@router.get(
+    "/festivals",
+    response_model=List[TempleFestivalResponse],
+    tags=["digital-experience-festivals"]
+)
+async def list_festivals(
+    include_inactive: bool = Query(False),
+    db: AsyncSession = Depends(get_db),
+    current_user: TokenData = Depends(require_permission("settings", "view")),
+    temple_id: str = Depends(get_current_temple_id),
+):
+    """List festivals for the manager's temple."""
+    return await DigitalExperienceService.list_festivals(
+        db, UUID(temple_id), include_inactive=include_inactive
+    )
+
+
+@router.post(
+    "/festivals",
+    response_model=TempleFestivalResponse,
+    status_code=201,
+    tags=["digital-experience-festivals"]
+)
+async def create_festival(
+    data: TempleFestivalCreate,
+    db: AsyncSession = Depends(get_db),
+    current_user: TokenData = Depends(require_permission("settings", "edit")),
+    temple_id: str = Depends(get_current_temple_id),
+):
+    """Create a new festival for the manager's temple."""
+    return await DigitalExperienceService.create_festival(
+        db=db,
+        temple_id=UUID(temple_id),
+        data=data.model_dump(exclude_unset=True),
+        current_user_id=UUID(current_user.sub),
+        role=current_user.role,
+    )
+
+
+@router.put(
+    "/festivals/{festival_id}",
+    response_model=TempleFestivalResponse,
+    tags=["digital-experience-festivals"]
+)
+async def update_festival(
+    festival_id: UUID,
+    data: TempleFestivalUpdate,
+    db: AsyncSession = Depends(get_db),
+    current_user: TokenData = Depends(require_permission("settings", "edit")),
+    temple_id: str = Depends(get_current_temple_id),
+):
+    """Update an existing festival."""
+    return await DigitalExperienceService.update_festival(
+        db=db,
+        temple_id=UUID(temple_id),
+        festival_id=festival_id,
+        data=data.model_dump(exclude_unset=True),
+        current_user_id=UUID(current_user.sub),
+        role=current_user.role,
+    )
+
+
+@router.delete(
+    "/festivals/{festival_id}",
+    tags=["digital-experience-festivals"]
+)
+async def delete_festival(
+    festival_id: UUID,
+    db: AsyncSession = Depends(get_db),
+    current_user: TokenData = Depends(require_permission("settings", "edit")),
+    temple_id: str = Depends(get_current_temple_id),
+):
+    """Delete a festival."""
+    await DigitalExperienceService.delete_festival(
+        db=db,
+        temple_id=UUID(temple_id),
+        festival_id=festival_id,
+        current_user_id=UUID(current_user.sub),
+        role=current_user.role,
+    )
+    return {"status": "success", "message": "Festival deleted successfully"}

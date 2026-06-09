@@ -430,3 +430,112 @@ async def test_public_bootstrap_endpoint(client, auth_headers):
     assert any(a["name"] == "Submit Offering" for a in actions)
 
 
+@pytest.mark.asyncio
+async def test_festival_crud(client, auth_headers):
+    """Verify full CRUD lifecycle for the dedicated TempleFestival entity."""
+    # 1. Create Festival
+    payload = {
+        "name": "Makaravilakku Festival",
+        "description": "Annual festival with special poojas.",
+        "start_date": "2026-01-14",
+        "end_date": "2026-01-18",
+        "priority": 5,
+        "banner_image": "https://images.example.com/fest.jpg",
+        "catalogue_urls": ["https://images.example.com/brochure.pdf"],
+        "is_active": True
+    }
+    resp = await client.post("/api/v1/manager/festivals", json=payload, headers=auth_headers)
+    assert resp.status_code == 201
+    fest = resp.json()
+    assert fest["name"] == "Makaravilakku Festival"
+    assert fest["priority"] == 5
+    assert "id" in fest
+
+    # 2. List
+    list_resp = await client.get("/api/v1/manager/festivals", headers=auth_headers)
+    assert list_resp.status_code == 200
+    items = list_resp.json()
+    assert any(i["id"] == fest["id"] for i in items)
+
+    # 3. Update
+    up_payload = {"name": "Makaravilakku Festival Refined", "priority": 10}
+    up_resp = await client.put(f"/api/v1/manager/festivals/{fest['id']}", json=up_payload, headers=auth_headers)
+    assert up_resp.status_code == 200
+    assert up_resp.json()["name"] == "Makaravilakku Festival Refined"
+    assert up_resp.json()["priority"] == 10
+
+    # 4. Delete
+    del_resp = await client.delete(f"/api/v1/manager/festivals/{fest['id']}", headers=auth_headers)
+    assert del_resp.status_code == 200
+
+    # Confirm deletion
+    list_resp2 = await client.get("/api/v1/manager/festivals", headers=auth_headers)
+    assert not any(i["id"] == fest["id"] for i in list_resp2.json())
+
+
+@pytest.mark.asyncio
+async def test_status_engine_timings_and_activities(client, auth_headers):
+    """Verify that multi-session timings and activities are saved, published, and resolve correctly in bootstrap."""
+    # Update settings draft with location, timings, and activities settings
+    settings_payload = {
+        "location_settings": {
+            "google_maps_url": "https://maps.google.com/test",
+            "latitude": 9.5,
+            "longitude": 76.5,
+            "location_label": "Navigate to Temple"
+        },
+        "timings_settings": [
+            {
+                "session_name": "Morning Darshan",
+                "day_of_week": "Daily",
+                "opening_time": "05:00 AM",
+                "closing_time": "12:00 PM",
+                "is_special": False
+            },
+            {
+                "session_name": "Evening Darshan",
+                "day_of_week": "Daily",
+                "opening_time": "05:00 PM",
+                "closing_time": "08:30 PM",
+                "is_special": False
+            }
+        ],
+        "daily_activities_settings": [
+            {
+                "activity_name": "Nirmalyam",
+                "time": "04:30 AM",
+                "repeat_days": ["Daily"],
+                "description": "First offering of the day"
+            },
+            {
+                "activity_name": "Deeparadhana",
+                "time": "06:30 PM",
+                "repeat_days": ["Daily"],
+                "description": "Evening light worship"
+            }
+        ]
+    }
+    
+    # Save settings draft
+    resp = await client.put("/api/v1/manager/website-settings", json=settings_payload, headers=auth_headers)
+    assert resp.status_code == 200
+    data = resp.json()
+    assert data["location_settings"]["location_label"] == "Navigate to Temple"
+    assert len(data["timings_settings"]) == 2
+    assert len(data["daily_activities_settings"]) == 2
+
+    # Publish settings
+    pub_resp = await client.post("/api/v1/manager/website-settings/publish", headers=auth_headers)
+    assert pub_resp.status_code == 200
+
+    # Get bootstrap and check settings are present
+    boot_resp = await client.get("/api/v1/public/temples/test/bootstrap")
+    assert boot_resp.status_code == 200
+    boot_data = boot_resp.json()
+    
+    boot_settings = boot_data["settings"]
+    assert boot_settings["location_settings"]["google_maps_url"] == "https://maps.google.com/test"
+    assert len(boot_settings["timings_settings"]) == 2
+    assert len(boot_settings["daily_activities_settings"]) == 2
+
+

@@ -233,6 +233,9 @@ class TempleWebsiteSettings(Base):
     hero_subtitle = Column(String, nullable=True)
     seo_description = Column(String, nullable=True)
     notice_board_content = Column(JSON, nullable=True)
+    location_settings = Column(JSONB_VARIANT, nullable=True, default=dict)
+    timings_settings = Column(JSONB_VARIANT, nullable=True, default=list)
+    daily_activities_settings = Column(JSONB_VARIANT, nullable=True, default=list)
     created_at = Column(DateTime(timezone=True), default=utcnow)
     updated_at = Column(DateTime(timezone=True), default=utcnow, onupdate=utcnow)
 
@@ -303,6 +306,23 @@ class TempleActivity(Base):
     temple = relationship("Temple", backref=backref("activities", cascade="all, delete-orphan"))
 
 
+class TempleFestival(Base):
+    __tablename__ = "temple_festivals"
+
+    id = Column(UUID(as_uuid=True), primary_key=True, default=uuid.uuid4)
+    temple_id = Column(UUID(as_uuid=True), ForeignKey("temples.id", ondelete="CASCADE"), nullable=False, index=True)
+    name = Column(String, nullable=False)
+    description = Column(Text, nullable=True)
+    start_date = Column(Date, nullable=False)
+    end_date = Column(Date, nullable=False)
+    priority = Column(Integer, nullable=False, default=0)
+    banner_image = Column(String, nullable=True)
+    catalogue_urls = Column(JSONB_VARIANT, nullable=False, default=list)
+    is_active = Column(Boolean, nullable=False, default=True)
+    created_at = Column(DateTime(timezone=True), default=utcnow)
+    updated_at = Column(DateTime(timezone=True), default=utcnow, onupdate=utcnow)
+
+    temple = relationship("Temple", backref=backref("festivals", cascade="all, delete-orphan"))
 
 
 class TempleService(Base):

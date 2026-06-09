@@ -27,6 +27,33 @@ class FeatureVisibilitySchema(BaseModel):
     enableAnnouncements: bool = True
 
 
+# ---------- Nested Website Settings schemas ----------
+class LocationSettingsSchema(BaseModel):
+    google_maps_url: Optional[str] = None
+    latitude: Optional[float] = None
+    longitude: Optional[float] = None
+    location_label: Optional[str] = None
+
+class TimingWindowSchema(BaseModel):
+    session_name: str
+    day_of_week: str
+    opening_time: str
+    closing_time: str
+    is_special: Optional[bool] = False
+    effective_from: Optional[str] = None  # YYYY-MM-DD
+    effective_to: Optional[str] = None    # YYYY-MM-DD
+    priority: Optional[int] = 0
+
+class DailyActivitySchema(BaseModel):
+    activity_name: str
+    time: str
+    repeat_days: List[str]
+    description: Optional[str] = None
+    is_special_schedule: Optional[bool] = False
+    effective_from: Optional[str] = None  # YYYY-MM-DD
+    effective_to: Optional[str] = None    # YYYY-MM-DD
+
+
 # ---------- Website Settings ----------
 class TempleWebsiteSettingsBase(BaseModel):
     theme_name: Optional[str] = "default"
@@ -49,6 +76,9 @@ class TempleWebsiteSettingsBase(BaseModel):
     hero_subtitle: Optional[str] = None
     seo_description: Optional[str] = None
     notice_board_content: Optional[dict] = None
+    location_settings: Optional[LocationSettingsSchema] = None
+    timings_settings: Optional[List[TimingWindowSchema]] = None
+    daily_activities_settings: Optional[List[DailyActivitySchema]] = None
 
     @field_validator("primary_color", "secondary_color")
     @classmethod
@@ -77,6 +107,9 @@ class TempleWebsiteSettingsUpdate(BaseModel):
     hero_subtitle: Optional[str] = None
     seo_description: Optional[str] = None
     notice_board_content: Optional[dict] = None
+    location_settings: Optional[LocationSettingsSchema] = None
+    timings_settings: Optional[List[TimingWindowSchema]] = None
+    daily_activities_settings: Optional[List[DailyActivitySchema]] = None
 
     @field_validator("primary_color", "secondary_color")
     @classmethod
@@ -235,3 +268,36 @@ class PublicBootstrapResponse(BaseModel):
     activities: List[dict]
     advertisements: List[dict]
     publicActions: List[PublicActionSchema]
+    festivals: Optional[List[dict]] = []
+
+
+# ---------- Temple Festivals ----------
+class TempleFestivalBase(BaseModel):
+    name: str
+    description: Optional[str] = None
+    start_date: date
+    end_date: date
+    priority: Optional[int] = 0
+    banner_image: Optional[str] = None
+    catalogue_urls: Optional[List[str]] = []
+    is_active: Optional[bool] = True
+
+class TempleFestivalCreate(TempleFestivalBase):
+    pass
+
+class TempleFestivalUpdate(BaseModel):
+    name: Optional[str] = None
+    description: Optional[str] = None
+    start_date: Optional[date] = None
+    end_date: Optional[date] = None
+    priority: Optional[int] = None
+    banner_image: Optional[str] = None
+    catalogue_urls: Optional[List[str]] = None
+    is_active: Optional[bool] = None
+
+class TempleFestivalResponse(TempleFestivalBase):
+    model_config = ConfigDict(from_attributes=True)
+    id: UUID
+    temple_id: UUID
+    created_at: datetime
+    updated_at: datetime

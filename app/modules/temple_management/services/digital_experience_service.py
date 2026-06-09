@@ -9,6 +9,7 @@ from app.models.domain import (
     TempleWebsiteSettings,
     TempleAnnouncement,
     TempleActivity,
+    TempleFestival,
     TempleImage,
     ImageCategory,
     ActivityStatus,
@@ -485,6 +486,168 @@ class DigitalExperienceService:
 
 
     # =========================================================================
+    # FESTIVALS CRUD
+    # =========================================================================
+    @staticmethod
+    async def list_festivals(
+        db: AsyncSession,
+        temple_id: UUID,
+        include_inactive: bool = False
+    ) -> List[TempleFestival]:
+        stmt = select(TempleFestival).filter(TempleFestival.temple_id == temple_id)
+        if not include_inactive:
+            stmt = stmt.filter(TempleFestival.is_active == True)
+        stmt = stmt.order_by(
+            TempleFestival.start_date.asc(),
+            TempleFestival.priority.desc()
+        )
+        result = await db.execute(stmt)
+        return result.scalars().all()
+
+    @staticmethod
+    async def create_festival(
+        db: AsyncSession,
+        temple_id: UUID,
+        data: dict,
+        current_user_id: UUID,
+        role: str
+    ) -> TempleFestival:
+        festival = TempleFestival(
+            temple_id=temple_id,
+            name=data.get("name"),
+            description=data.get("description"),
+            start_date=data.get("start_date"),
+            end_date=data.get("end_date"),
+            priority=data.get("priority", 0),
+            banner_image=data.get("banner_image"),
+            catalogue_urls=data.get("catalogue_urls", []),
+            is_active=data.get("is_active", True)
+        )
+        db.add(festival)
+        await db.flush()
+
+        new_val = {
+            c.name: getattr(festival, c.name)
+            for c in TempleFestival.__table__.columns
+            if c.name not in ["id", "temple_id", "created_at", "updated_at"]
+        }
+
+        await AuditService.log_action(
+            db=db,
+            temple_id=temple_id,
+            user_id=current_user_id,
+            role=role,
+            module_name="digital_experience",
+            action="CREATE_FESTIVAL",
+            action_type="CREATE",
+            entity_id=str(festival.id),
+            new_value=_serialize_for_audit(new_val),
+            details=f"Created festival: {festival.name}"
+        )
+
+        await db.commit()
+        await db.refresh(festival)
+        return festival
+
+    @staticmethod
+    async def update_festival(
+        db: AsyncSession,
+        temple_id: UUID,
+        festival_id: UUID,
+        data: dict,
+        current_user_id: UUID,
+        role: str
+    ) -> TempleFestival:
+        result = await db.execute(
+            select(TempleFestival).filter(
+                TempleFestival.id == festival_id,
+                TempleFestival.temple_id == temple_id
+            )
+        )
+        festival = result.scalars().first()
+        if not festival:
+            raise HTTPException(status_code=404, detail="Festival not found")
+
+        old_val = {
+            c.name: getattr(festival, c.name)
+            for c in TempleFestival.__table__.columns
+            if c.name not in ["id", "temple_id", "created_at", "updated_at"]
+        }
+
+        for key, value in data.items():
+            if hasattr(festival, key) and key not in ["id", "temple_id", "created_at", "updated_at"]:
+                setattr(festival, key, value)
+
+        festival.updated_at = datetime.now(timezone.utc)
+
+        new_val = {
+            c.name: getattr(festival, c.name)
+            for c in TempleFestival.__table__.columns
+            if c.name not in ["id", "temple_id", "created_at", "updated_at"]
+        }
+
+        await AuditService.log_action(
+            db=db,
+            temple_id=temple_id,
+            user_id=current_user_id,
+            role=role,
+            module_name="digital_experience",
+            action="UPDATE_FESTIVAL",
+            action_type="UPDATE",
+            entity_id=str(festival.id),
+            old_value=_serialize_for_audit(old_val),
+            new_value=_serialize_for_audit(new_val),
+            details=f"Updated festival: {festival.name}"
+        )
+
+        await db.commit()
+        await db.refresh(festival)
+        return festival
+
+    @staticmethod
+    async def delete_festival(
+        db: AsyncSession,
+        temple_id: UUID,
+        festival_id: UUID,
+        current_user_id: UUID,
+        role: str
+    ) -> bool:
+        result = await db.execute(
+            select(TempleFestival).filter(
+                TempleFestival.id == festival_id,
+                TempleFestival.temple_id == temple_id
+            )
+        )
+        festival = result.scalars().first()
+        if not festival:
+            raise HTTPException(status_code=404, detail="Festival not found")
+
+        old_val = {
+            c.name: getattr(festival, c.name)
+            for c in TempleFestival.__table__.columns
+            if c.name not in ["id", "temple_id", "created_at", "updated_at"]
+        }
+
+        await db.delete(festival)
+
+        await AuditService.log_action(
+            db=db,
+            temple_id=temple_id,
+            user_id=current_user_id,
+            role=role,
+            module_name="digital_experience",
+            action="DELETE_FESTIVAL",
+            action_type="DELETE",
+            entity_id=str(festival_id),
+            old_value=_serialize_for_audit(old_val),
+            details=f"Deleted festival: {festival.name}"
+        )
+
+        await db.commit()
+        return True
+
+
+    # =========================================================================
     # IMAGES CRUD
     # =========================================================================
     @staticmethod
@@ -722,6 +885,9 @@ class DigitalExperienceService:
                     "hero_subtitle": draft.hero_subtitle,
                     "seo_description": draft.seo_description,
                     "notice_board_content": draft.notice_board_content,
+                    "location_settings": draft.location_settings,
+                    "timings_settings": draft.timings_settings,
+                    "daily_activities_settings": draft.daily_activities_settings,
                 }
             except Exception as e:
                 raise HTTPException(

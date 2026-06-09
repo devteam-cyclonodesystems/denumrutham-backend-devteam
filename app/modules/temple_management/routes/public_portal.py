@@ -24,6 +24,12 @@ from app.modules.temple_management.schemas.digital_experience import (
 )
 from app.schemas.devotee_portal import TempleProfileResponse
 from pydantic import BaseModel
+from app.modules.temple_management.services.status_engine import (
+    IST,
+    resolve_full_temple_status,
+    resolve_current_or_next_activity,
+    resolve_upcoming_festival
+)
 
 logger = logging.getLogger("tms.security")
 
@@ -148,6 +154,9 @@ async def get_public_temple_portal(
             hero_subtitle=settings_snapshot.get("hero_subtitle"),
             seo_description=settings_snapshot.get("seo_description"),
             notice_board_content=settings_snapshot.get("notice_board_content"),
+            location_settings=settings_snapshot.get("location_settings"),
+            timings_settings=settings_snapshot.get("timings_settings"),
+            daily_activities_settings=settings_snapshot.get("daily_activities_settings"),
             created_at=live.published_at,
             updated_at=live.published_at
         )
@@ -186,9 +195,6 @@ async def list_public_temples(
     Retrieve a list of all published temples.
     Uses JOIN with TempleWebsiteSettingsLive and preloads profiles/snapshots to prevent N+1 queries.
     """
-    from datetime import timedelta, timezone, time
-    IST = timezone(timedelta(hours=5, minutes=30))
-
     stmt = (
         select(Temple)
         .join(TempleWebsiteSettingsLive, Temple.id == TempleWebsiteSettingsLive.temple_id)
@@ -196,7 +202,8 @@ async def list_public_temples(
             selectinload(Temple.profile),
             selectinload(Temple.website_settings_live),
             selectinload(Temple.images),
-            selectinload(Temple.activities)
+            selectinload(Temple.activities),
+            selectinload(Temple.festivals)
         )
         .filter(Temple.is_active == True, Temple.status == "APPROVED")
     )
@@ -227,85 +234,55 @@ async def list_public_temples(
         # Fallback image resolution for backward compatibility
         image_url = hero_image_url
 
-        # 2. Compute temple status based on IST
-        opening_time = profile.opening_time if profile else None
-        closing_time = profile.closing_time if profile else None
-        
-        temple_status = "Closed"
-        if opening_time and closing_time:
-            try:
-                ist_now = datetime.now(IST)
-                current_minutes = ist_now.hour * 60 + ist_now.minute
-                
-                def parse_to_minutes(t_str):
-                    t_str = t_str.strip().upper()
-                    am_pm_match = re.match(r"^(\d{1,2}):(\d{2})\s*(AM|PM)$", t_str)
-                    if am_pm_match:
-                        hours = int(am_pm_match.group(1))
-                        minutes = int(am_pm_match.group(2))
-                        period = am_pm_match.group(3)
-                        if period == 'PM' and hours != 12:
-                            hours += 12
-                        if period == 'AM' and hours == 12:
-                            hours = 0
-                        return hours * 60 + minutes
-                    match24 = re.match(r"^(\d{1,2}):(\d{2})", t_str)
-                    if match24:
-                        hours = int(match24.group(1))
-                        minutes = int(match24.group(2))
-                        return hours * 60 + minutes
-                    return None
+        # 2. Resolve timings, activities, and festivals using the new status engine
+        timings_settings = None
+        activities_settings = None
+        if temple.website_settings_live and temple.website_settings_live.settings_snapshot:
+            snap = temple.website_settings_live.settings_snapshot
+            timings_settings = snap.get("timings_settings")
+            activities_settings = snap.get("daily_activities_settings")
 
-                open_mins = parse_to_minutes(opening_time)
-                close_mins = parse_to_minutes(closing_time)
-                if open_mins is not None and close_mins is not None:
-                    if 0 < (open_mins - current_minutes) <= 30:
-                        temple_status = "Opening Soon"
-                    elif open_mins <= current_minutes < close_mins:
-                        if (close_mins - current_minutes) <= 30:
-                            temple_status = "Closing Soon"
-                        else:
-                            temple_status = "Open"
-                    else:
-                        temple_status = "Closed"
-            except Exception:
-                pass
-
-        # 3. Resolve current activity
-        current_activity = None
-        active_acts = [a for a in temple.activities if a.is_active] if temple.activities else []
         ist_now = datetime.now(IST)
         today_date = ist_now.date()
-        
-        active_today = next((a for a in active_acts if a.status.value == "ACTIVE" and a.activity_date == today_date), None)
-        if active_today:
-            current_activity = f"{active_today.title} in Progress"
-        else:
-            upcoming_today = [a for a in active_acts if a.status.value == "UPCOMING" and a.activity_date == today_date]
-            if upcoming_today:
-                upcoming_today.sort(key=lambda x: x.start_time if x.start_time else time.min)
-                next_act = upcoming_today[0]
-                if next_act.start_time:
-                    hr = next_act.start_time.hour
-                    mn = next_act.start_time.minute
-                    period = "PM" if hr >= 12 else "AM"
-                    disphr = 12 if hr == 0 else (hr - 12 if hr > 12 else hr)
-                    current_activity = f"{next_act.title} at {disphr}:{mn:02d} {period}"
-                else:
-                    current_activity = next_act.title
+        current_minutes = ist_now.hour * 60 + ist_now.minute
 
-        # Serialize activities for client-side festival and upcoming badge processing
+        legacy_op = profile.opening_time if profile else None
+        legacy_cl = profile.closing_time if profile else None
+
+        status_res = resolve_full_temple_status(
+            timings_settings, legacy_op, legacy_cl, today_date, current_minutes
+        )
+
+        temple_status = f"{status_res['dot']} {status_res['status']}"
+        
+        is_open = status_res["status"] in ["Open", "Closing Soon"]
+        activity_str = resolve_current_or_next_activity(
+            activities_settings, today_date, current_minutes, is_open
+        )
+        if activity_str:
+            current_activity = f"{temple_status} | {activity_str}"
+        else:
+            current_activity = status_res["label"]
+
+        # 3. Resolve upcoming festival badge
+        upcoming_festival = resolve_upcoming_festival(
+            temple.festivals, today_date
+        )
+
+        # Build list of active activities
         activities_list = []
-        for act in active_acts:
-            activities_list.append({
-                "id": str(act.id),
-                "title": act.title,
-                "activity_date": act.activity_date.isoformat(),
-                "start_time": act.start_time.isoformat() if act.start_time else None,
-                "end_time": act.end_time.isoformat() if act.end_time else None,
-                "status": act.status.value,
-                "is_active": act.is_active
-            })
+        if temple.activities:
+            for act in temple.activities:
+                if act.is_active:
+                    activities_list.append({
+                        "id": str(act.id),
+                        "title": act.title,
+                        "activity_date": act.activity_date.isoformat(),
+                        "start_time": act.start_time.isoformat() if act.start_time else None,
+                        "end_time": act.end_time.isoformat() if act.end_time else None,
+                        "status": act.status.value,
+                        "is_active": act.is_active
+                    })
 
         items.append({
             "id": str(temple.id),
@@ -316,10 +293,11 @@ async def list_public_temples(
             "image_url": image_url or "",
             "hero_image_url": hero_image_url or "",
             "slug": temple.domain,
-            "opening_time": opening_time,
-            "closing_time": closing_time,
+            "opening_time": legacy_op,
+            "closing_time": legacy_cl,
             "temple_status": temple_status,
             "current_activity": current_activity,
+            "upcoming_festival": upcoming_festival,
             "activities": activities_list
         })
     return items
@@ -353,7 +331,8 @@ async def get_public_temple_bootstrap(
         .options(
             selectinload(Temple.profile),
             selectinload(Temple.images),
-            selectinload(Temple.website_settings_live)
+            selectinload(Temple.website_settings_live),
+            selectinload(Temple.festivals)
         )
         .filter(Temple.domain == slug, Temple.is_active == True, Temple.status == "APPROVED")
     )
@@ -454,9 +433,32 @@ async def get_public_temple_bootstrap(
         "hero_subtitle": settings_snapshot.get("hero_subtitle"),
         "seo_description": settings_snapshot.get("seo_description"),
         "notice_board_content": settings_snapshot.get("notice_board_content"),
+        "location_settings": settings_snapshot.get("location_settings"),
+        "timings_settings": settings_snapshot.get("timings_settings"),
+        "daily_activities_settings": settings_snapshot.get("daily_activities_settings"),
         "created_at": live.published_at.isoformat() if live.published_at else None,
         "updated_at": live.published_at.isoformat() if live.published_at else None
     }
+
+    # Serialize active festivals
+    festivals = []
+    if temple.festivals:
+        for f in temple.festivals:
+            if f.is_active:
+                festivals.append({
+                    "id": str(f.id),
+                    "temple_id": str(f.temple_id),
+                    "name": f.name,
+                    "description": f.description,
+                    "start_date": f.start_date.isoformat(),
+                    "end_date": f.end_date.isoformat(),
+                    "priority": f.priority,
+                    "banner_image": f.banner_image,
+                    "catalogue_urls": f.catalogue_urls,
+                    "is_active": f.is_active,
+                    "created_at": f.created_at.isoformat() if f.created_at else None,
+                    "updated_at": f.updated_at.isoformat() if f.updated_at else None
+                })
 
     # 6. Fetch announcements & activities
     announcements_db = await DigitalExperienceService.list_announcements(
@@ -580,7 +582,8 @@ async def get_public_temple_bootstrap(
         announcements=announcements,
         activities=activities,
         advertisements=advertisements,
-        publicActions=public_actions
+        publicActions=public_actions,
+        festivals=festivals
     )
 
 
