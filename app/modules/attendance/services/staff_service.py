@@ -507,6 +507,14 @@ class StaffService:
             ("button", "communication:manage", "Manage Announcements and Activities"),
             ("tab", "activity-logs:view", "View Activity Logs"),
             ("tab", "workflows:view", "View Workflows Dashboard"),
+            # Website Builder Module
+            ("tab", "website:view", "View Website Builder Settings"),
+            ("button", "website:edit", "Save Website Changes"),
+            ("button", "website:publish", "Publish Website"),
+            ("tab", "festivals:view", "View Festivals Catalog"),
+            ("button", "festivals:create", "Create Festival"),
+            ("button", "festivals:edit", "Edit Festival"),
+            ("button", "festivals:delete", "Delete Festival"),
         ]
 
         for r_type, r_key, desc in global_perms:

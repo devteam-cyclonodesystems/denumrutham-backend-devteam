@@ -27,7 +27,7 @@ router = APIRouter()
 )
 async def get_settings(
     db: AsyncSession = Depends(get_db),
-    current_user: TokenData = Depends(require_permission("settings", "view")),
+    current_user: TokenData = Depends(require_permission("website", "view")),
     temple_id: str = Depends(get_current_temple_id),
 ):
     """Retrieve website settings for the manager's temple."""
@@ -42,7 +42,7 @@ async def get_settings(
 async def update_settings(
     data: TempleWebsiteSettingsUpdate,
     db: AsyncSession = Depends(get_db),
-    current_user: TokenData = Depends(require_permission("settings", "edit")),
+    current_user: TokenData = Depends(require_permission("website", "edit")),
     temple_id: str = Depends(get_current_temple_id),
 ):
     """Update website settings for the manager's temple."""
@@ -64,7 +64,7 @@ async def update_settings(
 )
 async def get_publication_status(
     db: AsyncSession = Depends(get_db),
-    current_user: TokenData = Depends(require_permission("settings", "view")),
+    current_user: TokenData = Depends(require_permission("website", "view")),
     temple_id: str = Depends(get_current_temple_id),
 ):
     """Get the publication status of the temple website."""
@@ -77,7 +77,7 @@ async def get_publication_status(
 )
 async def publish_website(
     db: AsyncSession = Depends(get_db),
-    current_user: TokenData = Depends(require_permission("settings", "edit")),
+    current_user: TokenData = Depends(require_permission("website", "publish")),
     temple_id: str = Depends(get_current_temple_id),
 ):
     """Publish the current draft website settings."""
@@ -101,7 +101,7 @@ async def publish_website(
 )
 async def unpublish_website(
     db: AsyncSession = Depends(get_db),
-    current_user: TokenData = Depends(require_permission("settings", "edit")),
+    current_user: TokenData = Depends(require_permission("website", "publish")),
     temple_id: str = Depends(get_current_temple_id),
 ):
     """Unpublish the temple website, deleting its public live snapshot."""
@@ -299,7 +299,7 @@ async def delete_activity(
 )
 async def list_images(
     db: AsyncSession = Depends(get_db),
-    current_user: TokenData = Depends(require_permission("settings", "view")),
+    current_user: TokenData = Depends(require_permission("website", "view")),
     temple_id: str = Depends(get_current_temple_id),
 ):
     """List gallery images for the manager's temple."""
@@ -315,7 +315,7 @@ async def list_images(
 async def create_image(
     data: TempleImageCreate,
     db: AsyncSession = Depends(get_db),
-    current_user: TokenData = Depends(require_permission("settings", "edit")),
+    current_user: TokenData = Depends(require_permission("website", "edit")),
     temple_id: str = Depends(get_current_temple_id),
 ):
     """Register/add a new image to the manager's temple gallery."""
@@ -337,7 +337,7 @@ async def update_image(
     image_id: UUID,
     data: TempleImageUpdate,
     db: AsyncSession = Depends(get_db),
-    current_user: TokenData = Depends(require_permission("settings", "edit")),
+    current_user: TokenData = Depends(require_permission("website", "edit")),
     temple_id: str = Depends(get_current_temple_id),
 ):
     """Update caption/category of a gallery image."""
@@ -358,7 +358,7 @@ async def update_image(
 async def delete_image(
     image_id: UUID,
     db: AsyncSession = Depends(get_db),
-    current_user: TokenData = Depends(require_permission("settings", "edit")),
+    current_user: TokenData = Depends(require_permission("website", "edit")),
     temple_id: str = Depends(get_current_temple_id),
 ):
     """Delete a gallery image."""
@@ -383,7 +383,7 @@ async def delete_image(
 async def list_festivals(
     include_inactive: bool = Query(False),
     db: AsyncSession = Depends(get_db),
-    current_user: TokenData = Depends(require_permission("settings", "view")),
+    current_user: TokenData = Depends(require_permission("festivals", "view")),
     temple_id: str = Depends(get_current_temple_id),
 ):
     """List festivals for the manager's temple."""
@@ -401,7 +401,7 @@ async def list_festivals(
 async def create_festival(
     data: TempleFestivalCreate,
     db: AsyncSession = Depends(get_db),
-    current_user: TokenData = Depends(require_permission("settings", "edit")),
+    current_user: TokenData = Depends(require_permission("festivals", "create")),
     temple_id: str = Depends(get_current_temple_id),
 ):
     """Create a new festival for the manager's temple."""
@@ -423,7 +423,7 @@ async def update_festival(
     festival_id: UUID,
     data: TempleFestivalUpdate,
     db: AsyncSession = Depends(get_db),
-    current_user: TokenData = Depends(require_permission("settings", "edit")),
+    current_user: TokenData = Depends(require_permission("festivals", "edit")),
     temple_id: str = Depends(get_current_temple_id),
 ):
     """Update an existing festival."""
@@ -444,7 +444,7 @@ async def update_festival(
 async def delete_festival(
     festival_id: UUID,
     db: AsyncSession = Depends(get_db),
-    current_user: TokenData = Depends(require_permission("settings", "edit")),
+    current_user: TokenData = Depends(require_permission("festivals", "delete")),
     temple_id: str = Depends(get_current_temple_id),
 ):
     """Delete a festival."""
