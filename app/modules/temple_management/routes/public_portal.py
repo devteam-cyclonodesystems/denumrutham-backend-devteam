@@ -186,12 +186,17 @@ async def list_public_temples(
     Retrieve a list of all published temples.
     Uses JOIN with TempleWebsiteSettingsLive and preloads profiles/snapshots to prevent N+1 queries.
     """
+    from datetime import timedelta, timezone, time
+    IST = timezone(timedelta(hours=5, minutes=30))
+
     stmt = (
         select(Temple)
         .join(TempleWebsiteSettingsLive, Temple.id == TempleWebsiteSettingsLive.temple_id)
         .options(
             selectinload(Temple.profile),
-            selectinload(Temple.website_settings_live)
+            selectinload(Temple.website_settings_live),
+            selectinload(Temple.images),
+            selectinload(Temple.activities)
         )
         .filter(Temple.is_active == True, Temple.status == "APPROVED")
     )
@@ -205,13 +210,102 @@ async def list_public_temples(
     for temple in temples:
         profile = temple.profile
         
-        # Fallback image resolution: profile image -> snapshot og_image_url -> snapshot logo_url -> None
-        image_url = None
-        if profile and profile.image_url:
-            image_url = profile.image_url
-        elif temple.website_settings_live and temple.website_settings_live.settings_snapshot:
+        # 1. Resolve hero image: HERO_DESKTOP image -> profile.image_url -> snapshot og_image -> None
+        hero_image_url = None
+        if temple.images:
+            hero_desktop = next((img for img in temple.images if img.category == 'HERO_DESKTOP'), None)
+            if hero_desktop:
+                hero_image_url = hero_desktop.image_url
+
+        if not hero_image_url and profile and profile.image_url:
+            hero_image_url = profile.image_url
+
+        if not hero_image_url and temple.website_settings_live and temple.website_settings_live.settings_snapshot:
             snap = temple.website_settings_live.settings_snapshot
-            image_url = snap.get("og_image_url") or snap.get("logo_url")
+            hero_image_url = snap.get("og_image_url") or snap.get("logo_url")
+
+        # Fallback image resolution for backward compatibility
+        image_url = hero_image_url
+
+        # 2. Compute temple status based on IST
+        opening_time = profile.opening_time if profile else None
+        closing_time = profile.closing_time if profile else None
+        
+        temple_status = "Closed"
+        if opening_time and closing_time:
+            try:
+                ist_now = datetime.now(IST)
+                current_minutes = ist_now.hour * 60 + ist_now.minute
+                
+                def parse_to_minutes(t_str):
+                    t_str = t_str.strip().upper()
+                    am_pm_match = re.match(r"^(\d{1,2}):(\d{2})\s*(AM|PM)$", t_str)
+                    if am_pm_match:
+                        hours = int(am_pm_match.group(1))
+                        minutes = int(am_pm_match.group(2))
+                        period = am_pm_match.group(3)
+                        if period == 'PM' and hours != 12:
+                            hours += 12
+                        if period == 'AM' and hours == 12:
+                            hours = 0
+                        return hours * 60 + minutes
+                    match24 = re.match(r"^(\d{1,2}):(\d{2})", t_str)
+                    if match24:
+                        hours = int(match24.group(1))
+                        minutes = int(match24.group(2))
+                        return hours * 60 + minutes
+                    return None
+
+                open_mins = parse_to_minutes(opening_time)
+                close_mins = parse_to_minutes(closing_time)
+                if open_mins is not None and close_mins is not None:
+                    if 0 < (open_mins - current_minutes) <= 30:
+                        temple_status = "Opening Soon"
+                    elif open_mins <= current_minutes < close_mins:
+                        if (close_mins - current_minutes) <= 30:
+                            temple_status = "Closing Soon"
+                        else:
+                            temple_status = "Open"
+                    else:
+                        temple_status = "Closed"
+            except Exception:
+                pass
+
+        # 3. Resolve current activity
+        current_activity = None
+        active_acts = [a for a in temple.activities if a.is_active] if temple.activities else []
+        ist_now = datetime.now(IST)
+        today_date = ist_now.date()
+        
+        active_today = next((a for a in active_acts if a.status.value == "ACTIVE" and a.activity_date == today_date), None)
+        if active_today:
+            current_activity = f"{active_today.title} in Progress"
+        else:
+            upcoming_today = [a for a in active_acts if a.status.value == "UPCOMING" and a.activity_date == today_date]
+            if upcoming_today:
+                upcoming_today.sort(key=lambda x: x.start_time if x.start_time else time.min)
+                next_act = upcoming_today[0]
+                if next_act.start_time:
+                    hr = next_act.start_time.hour
+                    mn = next_act.start_time.minute
+                    period = "PM" if hr >= 12 else "AM"
+                    disphr = 12 if hr == 0 else (hr - 12 if hr > 12 else hr)
+                    current_activity = f"{next_act.title} at {disphr}:{mn:02d} {period}"
+                else:
+                    current_activity = next_act.title
+
+        # Serialize activities for client-side festival and upcoming badge processing
+        activities_list = []
+        for act in active_acts:
+            activities_list.append({
+                "id": str(act.id),
+                "title": act.title,
+                "activity_date": act.activity_date.isoformat(),
+                "start_time": act.start_time.isoformat() if act.start_time else None,
+                "end_time": act.end_time.isoformat() if act.end_time else None,
+                "status": act.status.value,
+                "is_active": act.is_active
+            })
 
         items.append({
             "id": str(temple.id),
@@ -220,7 +314,13 @@ async def list_public_temples(
             "district": profile.district if profile else "",
             "state": profile.state if profile else "",
             "image_url": image_url or "",
-            "slug": temple.domain
+            "hero_image_url": hero_image_url or "",
+            "slug": temple.domain,
+            "opening_time": opening_time,
+            "closing_time": closing_time,
+            "temple_status": temple_status,
+            "current_activity": current_activity,
+            "activities": activities_list
         })
     return items
 
