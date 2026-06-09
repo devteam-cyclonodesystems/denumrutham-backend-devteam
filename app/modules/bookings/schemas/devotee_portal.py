@@ -2,6 +2,7 @@ from pydantic import BaseModel, ConfigDict, UUID4
 from typing import Optional, List
 from datetime import datetime
 from app.modules.bookings.models.booking_models import ServiceType, ServiceBookingStatus, PaymentMethod, NotificationMode, BookingSource
+from app.modules.billing.models.billing_models import PaymentStatus
 
 # ---------- Devotee Auth ----------
 class DevoteeRegister(BaseModel):
