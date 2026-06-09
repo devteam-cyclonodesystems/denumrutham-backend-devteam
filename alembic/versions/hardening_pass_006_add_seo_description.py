@@ -13,7 +13,7 @@ import sqlalchemy as sa
 revision: str = 'hardening_pass_006_add_seo_description'
 down_revision: Union[str, Sequence[str], None] = 'hardening_pass_005_seed_additional_permissions'
 branch_labels: Union[str, Sequence[str], None] = None
-depends_on: Union[str, Sequence[str], None] = None
+depends_on: Union[str, Sequence[str], None] = 'db8df6465e0a'
 
 def upgrade() -> None:
     # Add column with safety checks

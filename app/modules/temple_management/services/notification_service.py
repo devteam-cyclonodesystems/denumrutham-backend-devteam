@@ -167,3 +167,158 @@ class NotificationService:
             notif.is_read = True
             await db.flush()
         return notif
+
+    # ── Unified Routing via Abstraction Layer ─────────────────────────────
+    @staticmethod
+    async def route_notification(
+        db: AsyncSession,
+        temple_id: UUID,
+        mode: str,  # "PUSH", "EMAIL", "SMS"
+        recipient: str,  # user_id, email, or phone
+        title: str,
+        message: str,
+        payload: Optional[dict] = None
+    ) -> bool:
+        """
+        Routes a notification via PushNotificationProvider, EmailNotificationProvider,
+        or SMSNotificationProvider depending on the mode. Registers the event.
+        """
+        from app.core.notifications import (
+            PushNotificationProvider,
+            EmailNotificationProvider,
+            SMSNotificationProvider
+        )
+
+        payload = payload or {}
+        mode_upper = mode.upper() if mode else "EMAIL"
+
+        if mode_upper == "PUSH":
+            provider = PushNotificationProvider()
+        elif mode_upper == "EMAIL":
+            provider = EmailNotificationProvider()
+        elif mode_upper == "SMS":
+            provider = SMSNotificationProvider()
+        else:
+            logger.warning("Unsupported notification mode: %s. Falling back to Email.", mode)
+            provider = EmailNotificationProvider()
+            mode_upper = "EMAIL"
+
+        success = await provider.send_notification(recipient, f"[{title}] {message}", payload)
+
+        user_id = None
+        try:
+            user_id = UUID(recipient)
+        except (ValueError, TypeError):
+            pass
+
+        await NotificationService._stage_notification(
+            db=db,
+            temple_id=temple_id,
+            title=title,
+            message=message,
+            user_id=user_id,
+            role=payload.get("role")
+        )
+        return success
+
+    @staticmethod
+    def dispatch_follower_notifications_background(
+        temple_id: UUID,
+        category: str,
+        title: str,
+        message: str,
+        payload: Optional[dict] = None
+    ):
+        """
+        Spins up a non-blocking background task to dispatch follower notifications.
+        """
+        import asyncio
+        from app.core.database.database import AsyncSessionLocal
+        
+        async def _run():
+            try:
+                async with AsyncSessionLocal() as db:
+                    # Run within a transaction boundary
+                    async with db.begin():
+                        await NotificationService.dispatch_follower_notifications(
+                            db=db,
+                            temple_id=temple_id,
+                            category=category,
+                            title=title,
+                            message=message,
+                            payload=payload
+                        )
+            except Exception as e:
+                logger.error("Error in background follower notification dispatch: %s", e)
+                
+        asyncio.create_task(_run())
+
+    # ── Devotee Follower Preferences Dispatch ─────────────────────────────
+    @staticmethod
+    async def dispatch_follower_notifications(
+        db: AsyncSession,
+        temple_id: UUID,
+        category: str,  # "FESTIVAL", "ANNOUNCEMENT", "EVENT", "REMINDER"
+        title: str,
+        message: str,
+        payload: Optional[dict] = None
+    ):
+        """
+        Queries all followers of the temple and dispatches notifications
+        according to their category and channel preferences.
+        """
+        from app.modules.temple_management.models.temple_models import TempleFollower, TempleFollowerPreference
+        from app.modules.auth.models.auth_models import User
+
+        payload = payload or {}
+        category_upper = category.upper() if category else "ANNOUNCEMENT"
+
+        # Fetch followers who have this temple active
+        stmt = (
+            select(TempleFollower, TempleFollowerPreference)
+            .join(TempleFollowerPreference, TempleFollower.id == TempleFollowerPreference.follower_id, isouter=True)
+            .filter(TempleFollower.temple_id == temple_id)
+            .filter(TempleFollower.is_active == True)
+        )
+        result = await db.execute(stmt)
+        rows = result.all()
+
+        for follower, pref in rows:
+            enabled = True
+            if pref:
+                if category_upper == "FESTIVAL":
+                    enabled = pref.festival_enabled
+                elif category_upper == "ANNOUNCEMENT":
+                    enabled = pref.announcement_enabled
+                elif category_upper == "EVENT":
+                    enabled = pref.event_enabled
+                elif category_upper == "REMINDER":
+                    enabled = pref.pooja_reminder_enabled
+
+            if enabled:
+                user_stmt = select(User).filter(User.id == follower.user_id)
+                user_res = await db.execute(user_stmt)
+                user = user_res.scalar_one_or_none()
+                if not user:
+                    continue
+
+                mode = "EMAIL"
+                recipient = user.email
+
+                if pref and pref.push_enabled:
+                    mode = "PUSH"
+                    recipient = str(user.id)
+                elif not recipient and user.phone:
+                    mode = "SMS"
+                    recipient = user.phone
+
+                if recipient:
+                    await NotificationService.route_notification(
+                        db=db,
+                        temple_id=temple_id,
+                        mode=mode,
+                        recipient=recipient,
+                        title=title,
+                        message=message,
+                        payload={**payload, "category": category_upper, "follower_id": str(follower.id)}
+                    )

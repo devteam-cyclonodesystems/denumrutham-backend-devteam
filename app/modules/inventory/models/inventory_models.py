@@ -514,6 +514,10 @@ class StoreStock(Base):
     # Relationships
     product = relationship("StoreProduct", foreign_keys=[product_id])
 
+    __mapper_args__ = {
+        "version_id_col": version_number
+    }
+
 
 
 
@@ -529,6 +533,7 @@ class StoreSalesOrder(Base):
     total_amount = Column(Float, default=0.0, nullable=False)
     payment_mode = Column(String, default="Cash")  # Cash, Card, UPI
     status = Column(String, default="Completed")  # Completed, Cancelled
+    payment_status = Column(String, default="CREATED") # CREATED, PENDING, PAID, FAILED, CANCELLED
     created_by = Column(UUID(as_uuid=True), ForeignKey("users.id"), nullable=True)
     idempotency_key = Column(String, unique=True, nullable=True)
     created_at = Column(DateTime(timezone=True), default=utcnow)

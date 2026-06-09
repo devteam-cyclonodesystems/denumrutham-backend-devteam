@@ -2,13 +2,30 @@ import uuid
 import enum
 from datetime import datetime, timezone
 from sqlalchemy import Column, String, Boolean, DateTime, ForeignKey, Float, Text, Enum, Integer, Time, UniqueConstraint, Date, JSON, Index, text, CheckConstraint, Numeric, event
-from sqlalchemy.dialects.postgresql import UUID
+from sqlalchemy.dialects.postgresql import UUID, JSONB
 from sqlalchemy.orm import relationship
 from app.core.database.database import Base
 from app.modules.governance.models.operational_states import TempleOperationalState
 
 def utcnow():
     return datetime.now(timezone.utc)
+
+
+JSONB_VARIANT = JSONB().with_variant(JSON, "sqlite")
+
+
+class NotificationMode(str, enum.Enum):
+    PUSH = "PUSH"
+    EMAIL = "EMAIL"
+    SMS = "SMS"
+
+
+class BookingSource(str, enum.Enum):
+    WEB_PUBLIC = "WEB_PUBLIC"
+    MOBILE_APP = "MOBILE_APP"
+    COUNTER = "COUNTER"
+    ADMIN = "ADMIN"
+
 
 
 
@@ -39,8 +56,10 @@ class ServiceType(str, enum.Enum):
 
 
 class ServiceBookingStatus(str, enum.Enum):
+    CREATED = "CREATED"
     PENDING = "PENDING"
     PAID = "PAID"
+    FAILED = "FAILED"
     CANCELLED = "CANCELLED"
 
 
@@ -135,10 +154,15 @@ class ServiceBooking(Base):
     service_id = Column(UUID(as_uuid=True), ForeignKey("temple_services.id"), nullable=False)
     booking_date = Column(DateTime(timezone=True), nullable=False)
     amount = Column(Float, nullable=False)
-    status = Column(Enum(ServiceBookingStatus), default=ServiceBookingStatus.PENDING)
+    status = Column(Enum(ServiceBookingStatus), default=ServiceBookingStatus.CREATED)
     devotee_name = Column(String, default="")
     devotee_phone = Column(String, default="")
     notes = Column(Text, default="")
+    notification_mode = Column(Enum(NotificationMode), nullable=False, default=NotificationMode.EMAIL)
+    notification_destination = Column(String, nullable=True)
+    dakshina_amount = Column(Float, nullable=False, default=0.0)
+    booking_source = Column(Enum(BookingSource), nullable=False, default=BookingSource.WEB_PUBLIC)
+    booking_metadata = Column(JSONB_VARIANT, nullable=False, default=dict)
     created_at = Column(DateTime(timezone=True), default=utcnow)
 
 
@@ -337,6 +361,7 @@ class CartItem(Base):
     id = Column(UUID(as_uuid=True), primary_key=True, default=uuid.uuid4)
     cart_id = Column(UUID(as_uuid=True), ForeignKey("carts.id", ondelete="CASCADE"), nullable=False)
     service_id = Column(UUID(as_uuid=True), ForeignKey("temple_services.id"), nullable=True)
+    product_id = Column(UUID(as_uuid=True), ForeignKey("store_products.id", ondelete="CASCADE"), nullable=True)
     item_name = Column(String, nullable=False)
     quantity = Column(Integer, default=1)
     unit_price = Column(Float, nullable=False, default=0.0)
@@ -344,6 +369,14 @@ class CartItem(Base):
     created_at = Column(DateTime(timezone=True), default=utcnow)
 
     cart = relationship("Cart", back_populates="items")
+    product = relationship("StoreProduct", foreign_keys=[product_id])
+
+    __table_args__ = (
+        CheckConstraint(
+            "service_id IS NOT NULL OR product_id IS NOT NULL",
+            name="chk_cart_item_target"
+        ),
+    )
 
 
 
@@ -385,6 +418,15 @@ class GuestBooking(Base):
     guest_name = Column(String, nullable=False)
     guest_phone = Column(String, nullable=False)
     guest_email = Column(String, nullable=True)
+    booking_date = Column(DateTime(timezone=True), nullable=False, default=utcnow)
+    amount = Column(Float, nullable=False, default=0.0)
+    notes = Column(Text, default="")
+    notification_mode = Column(Enum(NotificationMode), nullable=False, default=NotificationMode.EMAIL)
+    notification_destination = Column(String, nullable=True)
+    dakshina_amount = Column(Float, nullable=False, default=0.0)
+    booking_source = Column(Enum(BookingSource), nullable=False, default=BookingSource.WEB_PUBLIC)
+    booking_metadata = Column(JSONB_VARIANT, nullable=False, default=dict)
+    payment_status = Column(String, default="CREATED")
 
 
 # ====================================================================

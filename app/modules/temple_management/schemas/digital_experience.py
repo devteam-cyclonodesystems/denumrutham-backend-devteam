@@ -13,6 +13,20 @@ def validate_hex_color(value: str) -> str:
     return value
 
 
+class FeatureVisibilitySchema(BaseModel):
+    enablePoojaBooking: bool = True
+    enableOfferings: bool = True
+    enableStore: bool = True
+    enableHallBooking: bool = True
+    enableFollow: bool = True
+    enableTempleAds: bool = True
+    enablePlatformAds: bool = True
+    enableGallery: bool = True
+    enableActivities: bool = True
+    enableNoticeBoard: bool = True
+    enableAnnouncements: bool = True
+
+
 # ---------- Website Settings ----------
 class TempleWebsiteSettingsBase(BaseModel):
     theme_name: Optional[str] = "default"
@@ -20,6 +34,7 @@ class TempleWebsiteSettingsBase(BaseModel):
     secondary_color: Optional[str] = "#ffcc00"
     logo_url: Optional[str] = None
     hero_layout: Optional[str] = "split"
+    feature_visibility: Optional[dict] = None
     section_order: Optional[List[str]] = [
         "hero", "about", "deities", "announcements", "activities", "gallery", "offerings", "location"
     ]
@@ -49,6 +64,7 @@ class TempleWebsiteSettingsUpdate(BaseModel):
     secondary_color: Optional[str] = None
     logo_url: Optional[str] = None
     hero_layout: Optional[str] = None
+    feature_visibility: Optional[dict] = None
     section_order: Optional[List[str]] = None
     enable_mantras: Optional[bool] = None
     enable_festivals: Optional[bool] = None
@@ -201,3 +217,21 @@ class TempleProfileDraftUpdate(BaseModel):
     twitter_url: Optional[str] = None
     website_url: Optional[str] = None
     festivals_description: Optional[str] = None
+
+
+class PublicActionSchema(BaseModel):
+    name: str
+    toggle: str
+    api: str
+
+
+class PublicBootstrapResponse(BaseModel):
+    version: str = "2.0"
+    generatedAt: datetime
+    profile: dict
+    settings: dict
+    featureVisibility: dict
+    announcements: List[dict]
+    activities: List[dict]
+    advertisements: List[dict]
+    publicActions: List[PublicActionSchema]

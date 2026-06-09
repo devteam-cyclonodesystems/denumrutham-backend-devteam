@@ -89,6 +89,8 @@ class AddressResponse(BaseModel):
     created_at: datetime
 
 
+from app.modules.bookings.models.booking_models import NotificationMode, BookingSource
+
 # ── Guest Booking ─────────────────────────────────────────────────────
 
 class GuestBookingCreate(BaseModel):
@@ -100,6 +102,11 @@ class GuestBookingCreate(BaseModel):
     guest_email: Optional[str] = None
     booking_date: str  # ISO date string
     notes: Optional[str] = ""
+    notification_mode: NotificationMode = NotificationMode.EMAIL
+    notification_destination: Optional[str] = None
+    dakshina_amount: float = 0.0
+    booking_source: BookingSource = BookingSource.WEB_PUBLIC
+    booking_metadata: dict = {}
 
 
 class GuestBookingResponse(BaseModel):
@@ -114,4 +121,9 @@ class GuestBookingResponse(BaseModel):
     amount: float
     status: str
     notes: Optional[str] = ""
+    notification_mode: NotificationMode
+    notification_destination: Optional[str] = None
+    dakshina_amount: float
+    booking_source: BookingSource
+    booking_metadata: dict
     created_at: datetime

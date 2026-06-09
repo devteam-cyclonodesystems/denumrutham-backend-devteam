@@ -11,12 +11,20 @@ from app.api.routes import (
     booking_history, manager_dashboard, upload, 
     payments, onboarding, admin, staff, offerings
 )
-from app.modules.temple_management.routes import digital_experience, public_portal
+from app.modules.temple_management.routes import digital_experience, public_portal, recommendations
+from app.modules.governance.routes.platform_advertisements import router as platform_ads_router
+from app.modules.temple_management.routes.temple_advertisements import router as temple_ads_router
+from app.modules.analytics.routes.telemetry import (
+    public_router as telemetry_public_router,
+    manager_router as telemetry_manager_router,
+    superadmin_router as telemetry_superadmin_router,
+)
 
 api_router = APIRouter()
 
-# ── Public Temple Portal ──────────────────────────────────────────────
+# ── Public Temple Portal & Telemetry ─────────────────────────────────
 api_router.include_router(public_portal.router, prefix="/public/temples", tags=["Public Temple Portal"])
+api_router.include_router(telemetry_public_router, prefix="/public", tags=["Public Telemetry"])
 
 # ── Core Infrastructure ───────────────────────────────────────────────
 api_router.include_router(sync.router, prefix="/sync", tags=["System Sync"])
@@ -43,6 +51,8 @@ api_router.include_router(change_requests.router, prefix="/change-requests", tag
 
 # ── Admin & Management ───────────────────────────────────────────────
 api_router.include_router(superadmin.router, prefix="/superadmin", tags=["Super Admin"])
+api_router.include_router(platform_ads_router, prefix="/superadmin", tags=["Platform Advertisements"])
+api_router.include_router(telemetry_superadmin_router, prefix="/superadmin", tags=["Super Admin Telemetry"])
 api_router.include_router(manager_dashboard.router, prefix="/manager", tags=["Manager Dashboard"])
 api_router.include_router(admin.router, prefix="/admin", tags=["Platform Admin"])
 api_router.include_router(staff.router, prefix="/staff", tags=["Staff Management"])
@@ -51,6 +61,9 @@ api_router.include_router(staff.router, prefix="/staff", tags=["Staff Management
 api_router.include_router(halls.router, prefix="/manager", tags=["Hall Management"])
 api_router.include_router(offerings.router, prefix="/manager", tags=["Offering Management"])
 api_router.include_router(digital_experience.router, prefix="/manager", tags=["Digital Experience Portal"])
+api_router.include_router(recommendations.router, prefix="/manager", tags=["Recommendation Management"])
+api_router.include_router(temple_ads_router, prefix="/manager", tags=["Temple Advertisements"])
+api_router.include_router(telemetry_manager_router, prefix="/manager", tags=["Manager Telemetry"])
 api_router.include_router(employees.router, prefix="/employees", tags=["HR & Payroll"])
 api_router.include_router(archana_bookings.router, prefix="/archana-bookings", tags=["Archana Bookings"])
 api_router.include_router(transactions.router, prefix="/transactions", tags=["Financial Transactions"])

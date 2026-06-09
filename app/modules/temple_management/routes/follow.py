@@ -76,3 +76,116 @@ async def get_follower_count(
     """Get the follower count for a temple. Public endpoint."""
     count = await FollowService.get_follower_count(db, temple_id)
     return api_response(data={"temple_id": str(temple_id), "follower_count": count}, message="Follower count retrieved")
+
+
+from pydantic import BaseModel
+class UpdateFollowerPreferencesRequest(BaseModel):
+    push_enabled: bool
+    festival_enabled: bool
+    announcement_enabled: bool
+    event_enabled: bool
+    pooja_reminder_enabled: bool
+    custom_categories: dict = {}
+
+
+@router.get("/{temple_id}/preferences")
+async def get_follower_preferences(
+    temple_id: UUID,
+    current_user: TokenData = Depends(get_current_user),
+    db: AsyncSession = Depends(get_db)
+):
+    """Get notifications preferences for a temple follower, creating follower/preference record if needed."""
+    # Check if already following
+    is_following = await FollowService.is_following(db, UUID(current_user.sub), temple_id)
+    if not is_following:
+        follower = await FollowService.follow_temple(db, UUID(current_user.sub), temple_id)
+    else:
+        follower_res = await db.execute(
+            select(TempleFollower).filter(
+                TempleFollower.user_id == UUID(current_user.sub),
+                TempleFollower.temple_id == temple_id
+            )
+        )
+        follower = follower_res.scalars().first()
+
+    if not follower:
+        raise HTTPException(status_code=404, detail="Follower record not found")
+
+    from app.models.domain import TempleFollowerPreference
+    stmt = select(TempleFollowerPreference).filter(TempleFollowerPreference.follower_id == follower.id)
+    res = await db.execute(stmt)
+    pref = res.scalars().first()
+
+    if not pref:
+        pref = TempleFollowerPreference(
+            follower_id=follower.id,
+            push_enabled=True,
+            festival_enabled=True,
+            announcement_enabled=True,
+            event_enabled=True,
+            pooja_reminder_enabled=True,
+            custom_categories={}
+        )
+        db.add(pref)
+        await db.commit()
+        await db.refresh(pref)
+
+    return api_response(data={
+        "push_enabled": pref.push_enabled,
+        "festival_enabled": pref.festival_enabled,
+        "announcement_enabled": pref.announcement_enabled,
+        "event_enabled": pref.event_enabled,
+        "pooja_reminder_enabled": pref.pooja_reminder_enabled,
+        "custom_categories": pref.custom_categories
+    }, message="Preferences retrieved")
+
+
+@router.put("/{temple_id}/preferences")
+async def update_follower_preferences(
+    temple_id: UUID,
+    data: UpdateFollowerPreferencesRequest,
+    current_user: TokenData = Depends(get_current_user),
+    db: AsyncSession = Depends(get_db)
+):
+    """Update notifications preferences for a temple follower."""
+    is_following = await FollowService.is_following(db, UUID(current_user.sub), temple_id)
+    if not is_following:
+        follower = await FollowService.follow_temple(db, UUID(current_user.sub), temple_id)
+    else:
+        follower_res = await db.execute(
+            select(TempleFollower).filter(
+                TempleFollower.user_id == UUID(current_user.sub),
+                TempleFollower.temple_id == temple_id
+            )
+        )
+        follower = follower_res.scalars().first()
+
+    if not follower:
+        raise HTTPException(status_code=404, detail="Follower record not found")
+
+    from app.models.domain import TempleFollowerPreference
+    stmt = select(TempleFollowerPreference).filter(TempleFollowerPreference.follower_id == follower.id)
+    res = await db.execute(stmt)
+    pref = res.scalars().first()
+
+    if not pref:
+        pref = TempleFollowerPreference(
+            follower_id=follower.id,
+            push_enabled=data.push_enabled,
+            festival_enabled=data.festival_enabled,
+            announcement_enabled=data.announcement_enabled,
+            event_enabled=data.event_enabled,
+            pooja_reminder_enabled=data.pooja_reminder_enabled,
+            custom_categories=data.custom_categories
+        )
+        db.add(pref)
+    else:
+        pref.push_enabled = data.push_enabled
+        pref.festival_enabled = data.festival_enabled
+        pref.announcement_enabled = data.announcement_enabled
+        pref.event_enabled = data.event_enabled
+        pref.pooja_reminder_enabled = data.pooja_reminder_enabled
+        pref.custom_categories = data.custom_categories
+
+    await db.commit()
+    return api_response(message="Preferences updated successfully")

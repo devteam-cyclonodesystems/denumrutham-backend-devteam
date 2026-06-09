@@ -2,10 +2,12 @@ import uuid
 import enum
 from datetime import datetime, timezone
 from sqlalchemy import Column, String, Boolean, DateTime, ForeignKey, Float, Text, Enum, Integer, Time, UniqueConstraint, Date, JSON, Index, text, CheckConstraint
-from sqlalchemy.dialects.postgresql import UUID
+from sqlalchemy.dialects.postgresql import UUID, JSONB
 from sqlalchemy.orm import relationship
 from app.core.database.database import Base
 from app.modules.governance.models.operational_states import TempleOperationalState
+
+JSONB_VARIANT = JSONB().with_variant(JSON, "sqlite")
 
 def utcnow():
     return datetime.now(timezone.utc)
@@ -174,6 +176,18 @@ class OperationalStateAudit(Base):
     created_at = Column(DateTime(timezone=True), default=utcnow)
 
     temple = relationship("Temple")
+
+
+
+
+class PlatformGlobalSetting(Base):
+    """Global configuration settings for the entire platform (Super Admin controlled)."""
+    __tablename__ = "platform_global_settings"
+
+    id = Column(UUID(as_uuid=True), primary_key=True, default=uuid.uuid4)
+    key = Column(String, unique=True, nullable=False, index=True)
+    value = Column(JSONB_VARIANT, nullable=False, default=dict)
+    updated_at = Column(DateTime(timezone=True), default=utcnow, onupdate=utcnow)
 
 
 

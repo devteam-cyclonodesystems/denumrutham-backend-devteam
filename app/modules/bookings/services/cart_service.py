@@ -187,7 +187,14 @@ class CartService:
     # ── Checkout ──────────────────────────────────────────────────────
     @staticmethod
     async def checkout(db: AsyncSession, user_id: UUID, temple_id: UUID) -> dict:
-        """Mark cart as checked out."""
+        """Mark cart as checked out and process both poojas and store products."""
+        from sqlalchemy import func
+        from app.modules.bookings.models.booking_models import ServiceBooking, ServiceBookingStatus, utcnow
+        from app.modules.inventory.models.inventory_models import StoreSalesOrder, StoreSalesOrderItem, StoreStock, InventoryStockLedger, InventoryMovementType
+        from app.models.domain import StoreProduct, Payment
+        from app.modules.billing.models.billing_models import PaymentStatus
+        import uuid
+
         result = await db.execute(
             select(Cart)
             .options(selectinload(Cart.items))
@@ -202,43 +209,140 @@ class CartService:
             raise HTTPException(status_code=400, detail="Cart is empty")
 
         total = sum(i.unit_price * i.quantity for i in cart.items)
+        
+        # Partition cart items
+        pooja_items = [i for i in cart.items if i.service_id is not None]
+        store_items = [i for i in cart.items if i.product_id is not None]
+        
+        checkout_id = uuid.uuid4()
+        booking = None
+        order = None
+        
+        # 1. Process Poojas
+        if pooja_items:
+            first_service = pooja_items[0].service_id
+            pooja_total = sum(i.unit_price * i.quantity for i in pooja_items)
+            booking = ServiceBooking(
+                id=checkout_id,
+                temple_id=temple_id,
+                devotee_user_id=user_id,
+                service_id=first_service,
+                booking_date=utcnow(),
+                amount=pooja_total,
+                status=ServiceBookingStatus.PENDING,
+                notes="Cart checkout poojas"
+            )
+            db.add(booking)
+            await db.flush()
+            
+        # 2. Process Store items (with concurrency-safe stock locking and deduction)
+        if store_items:
+            store_total = sum(i.unit_price * i.quantity for i in store_items)
+            
+            # Generate sequential order number
+            year = utcnow().year
+            count_result = await db.execute(
+                select(func.count(StoreSalesOrder.id)).filter(
+                    StoreSalesOrder.temple_id == temple_id,
+                )
+            )
+            seq = (count_result.scalar() or 0) + 1
+            order_number = f"ORD-{year}-{seq:06d}"
+            
+            order = StoreSalesOrder(
+                id=checkout_id if not booking else uuid.uuid4(),
+                temple_id=temple_id,
+                order_number=order_number,
+                customer_name="Devotee Client",
+                total_amount=store_total,
+                payment_mode="UPI",
+                status="Completed",
+                payment_status="PENDING",
+                created_by=user_id,
+                idempotency_key=str(checkout_id)
+            )
+            db.add(order)
+            await db.flush()
+            
+            # Deduct stock and log movements
+            for item in store_items:
+                # Lock stock row using with_for_update()
+                stock_stmt = select(StoreStock).filter(
+                    StoreStock.product_id == item.product_id,
+                    StoreStock.temple_id == temple_id
+                ).with_for_update()
+                stock_res = await db.execute(stock_stmt)
+                stock = stock_res.scalar_one_or_none()
+                
+                if not stock or stock.quantity < item.quantity:
+                    # Get product name
+                    prod_stmt = select(StoreProduct).filter(StoreProduct.id == item.product_id)
+                    prod_res = await db.execute(prod_stmt)
+                    prod = prod_res.scalar_one_or_none()
+                    prod_name = prod.name if prod else str(item.product_id)
+                    raise HTTPException(
+                        status_code=400,
+                        detail=f"Insufficient stock for product '{prod_name}'. Requested: {item.quantity}, Available: {stock.quantity if stock else 0.0}"
+                    )
+                    
+                before_qty = stock.quantity
+                after_qty = before_qty - item.quantity
+                stock.quantity = after_qty
+                
+                # Fetch product name for ledger
+                prod_stmt = select(StoreProduct).filter(StoreProduct.id == item.product_id)
+                prod_res = await db.execute(prod_stmt)
+                prod = prod_res.scalar_one_or_none()
+                prod_name = prod.name if prod else "Store Product"
+                
+                ledger = InventoryStockLedger(
+                    temple_id=temple_id,
+                    domain_type="STORE",
+                    store_product_id=item.product_id,
+                    item_name=prod_name,
+                    location_id=stock.location_id,
+                    movement_type=InventoryMovementType.SALE,
+                    performed_by=user_id,
+                    quantity_change=-float(item.quantity),
+                    before_stock=before_qty,
+                    after_stock=after_qty,
+                    reference_type="SALE",
+                    reference_id=str(order.id),
+                    remarks=f"Devotee checkout sale for order {order_number}"
+                )
+                db.add(ledger)
+                
+                # Create order item
+                order_item = StoreSalesOrderItem(
+                    order_id=order.id,
+                    product_id=item.product_id,
+                    quantity=float(item.quantity),
+                    unit_price=item.unit_price,
+                    total_price=item.unit_price * item.quantity
+                )
+                db.add(order_item)
+                
+        # 3. Mark cart as checked out
         cart.status = "checked_out"
         
-        from app.models.domain import Payment, ServiceBooking, ServiceBookingStatus
-        import uuid
-        
-        # Create a ServiceBooking for the entire cart checkout (this might logically need one per item, but aggregating for simplicity in the mockup)
-        # Using the first service_id if available, otherwise None
-        first_service = next((item.service_id for item in cart.items if item.service_id), None)
-        
-        booking = ServiceBooking(
-            temple_id=temple_id,
-            devotee_user_id=user_id,
-            service_id=first_service if first_service else uuid.uuid4(), # Fallback for pure store items without service
-            booking_date=utcnow(),
-            amount=total,
-            status=ServiceBookingStatus.PENDING,
-            notes="Cart checkout"
-        )
-        db.add(booking)
-        await db.flush()
-
+        # 4. Create Payment record
         payment = Payment(
             temple_id=temple_id,
-            reference_id=uuid.uuid4(),
+            reference_id=checkout_id,
             amount=total,
             provider_ref="mock_gateway_ref",
-            service_booking_id=booking.id,
-            transaction_id=str(uuid.uuid4())
+            status=PaymentStatus.PENDING,
+            service_booking_id=booking.id if booking else None
         )
         db.add(payment)
-
+        
         await db.commit()
-
+        
         return {
             "message": "Checkout successful, payment pending",
             "cart_id": str(cart.id),
-            "booking_id": str(booking.id),
+            "booking_id": str(booking.id) if booking else None,
+            "order_id": str(order.id) if order else None,
             "payment_id": str(payment.id),
             "total_amount": round(total, 2),
             "items_count": len(cart.items),

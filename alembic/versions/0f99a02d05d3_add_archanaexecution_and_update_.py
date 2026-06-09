@@ -22,9 +22,11 @@ def upgrade() -> None:
     """Upgrade schema."""
     # Check if queuestatus enum exists and add PENDING if missing
     connection = op.get_bind()
-    has_type = connection.execute(
-        sa.text("SELECT EXISTS (SELECT 1 FROM pg_type WHERE typname = 'queuestatus')")
-    ).scalar()
+    has_type = False
+    if connection.dialect.name == 'postgresql':
+        has_type = connection.execute(
+            sa.text("SELECT EXISTS (SELECT 1 FROM pg_type WHERE typname = 'queuestatus')")
+        ).scalar()
     
     if has_type:
         # Check for PENDING value

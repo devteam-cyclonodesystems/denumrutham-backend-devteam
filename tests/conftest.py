@@ -86,7 +86,7 @@ ADMIN_PASSWORD = "admin@123"
 @pytest_asyncio.fixture(scope="session", autouse=True)
 async def seed_data(setup_database):
     async with TestSessionLocal() as session:
-        temple = Temple(id=TEMPLE_ID, name="Test Temple", domain="test")
+        temple = Temple(id=TEMPLE_ID, name="Test Temple", domain="test", status="APPROVED")
         session.add(temple)
         await session.commit()
 
@@ -102,6 +102,14 @@ async def seed_data(setup_database):
             temple_id=TEMPLE_ID,
         )
         session.add(admin)
+
+        superadmin = User(
+            user_id="superadmin_test@temple",
+            password_hash=get_password_hash("superadmin@123"),
+            role="SUPERADMIN",
+            temple_id=TEMPLE_ID,
+        )
+        session.add(superadmin)
         await session.flush()
 
         from app.models.rbac import Role, UserRole
@@ -147,3 +155,18 @@ async def admin_token(client: AsyncClient):
 @pytest_asyncio.fixture
 def auth_headers(admin_token: str):
     return {"Authorization": f"Bearer {admin_token}"}
+
+
+@pytest_asyncio.fixture
+async def superadmin_token(client: AsyncClient):
+    resp = await client.post(
+        "/api/v1/auth/login",
+        data={"username": "superadmin_test@temple", "password": "superadmin@123"},
+    )
+    assert resp.status_code == 200, f"Login failed: {resp.text}"
+    return resp.json()["data"]["access_token"]
+
+
+@pytest_asyncio.fixture
+def superadmin_auth_headers(superadmin_token: str):
+    return {"Authorization": f"Bearer {superadmin_token}"}

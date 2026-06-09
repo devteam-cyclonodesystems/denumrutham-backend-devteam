@@ -406,3 +406,333 @@ async def sync_push(
         user_role=current_user.role,
     )
 
+
+# =============================================================================
+# SPRINT 4 SUPER ADMIN ADDITIONS — GLOBAL SETTINGS & ADS APPROVALS
+# =============================================================================
+
+class GlobalSettingUpdate(BaseModel):
+    value: dict | list | str | int | float | bool
+
+
+class AdApproveRequest(BaseModel):
+    priority: Optional[str] = "MEDIUM"
+    scheduling_rules: Optional[dict] = None
+    cpm_rate: Optional[float] = 0.0
+    cpc_rate: Optional[float] = 0.0
+    impression_cap: Optional[int] = None
+    click_cap: Optional[int] = None
+    billing_contact: Optional[str] = None
+    revenue_attribution: Optional[dict] = None
+
+
+class AdRejectRequest(BaseModel):
+    remarks: str
+
+
+@router.get("/global-settings/{key}")
+async def get_global_setting(
+    key: str,
+    db: AsyncSession = Depends(get_db),
+    current_user: TokenData = Depends(get_current_superadmin),
+):
+    """
+    Get a global setting. FCM credentials are automatically masked.
+    """
+    from app.modules.governance.models.governance_models import PlatformGlobalSetting
+    from sqlalchemy import select
+    
+    result = await db.execute(select(PlatformGlobalSetting).filter(PlatformGlobalSetting.key == key))
+    setting = result.scalar_one_or_none()
+    if not setting:
+        return {"key": key, "value": {}}
+        
+    value = setting.value
+    if key == "fcm_credentials" and isinstance(value, dict):
+        masked_value = dict(value)
+        if "encrypted_credentials" in masked_value:
+            masked_value["encrypted_credentials"] = "********"
+        for k in ["private_key", "private_key_id"]:
+            if k in masked_value:
+                masked_value[k] = "********"
+        return {"key": key, "value": masked_value}
+        
+    return {"key": key, "value": value}
+
+
+@router.put("/global-settings/{key}")
+async def update_global_setting(
+    key: str,
+    body: GlobalSettingUpdate,
+    db: AsyncSession = Depends(get_db),
+    current_user: TokenData = Depends(get_current_superadmin),
+):
+    """
+    Update a global setting. FCM credentials are automatically encrypted.
+    """
+    from app.modules.governance.models.governance_models import PlatformGlobalSetting
+    from app.core.security.encryption import encrypt_data
+    from app.modules.audit.services.audit_service import AuditService
+    import json
+    from sqlalchemy import select
+    
+    result = await db.execute(select(PlatformGlobalSetting).filter(PlatformGlobalSetting.key == key))
+    setting = result.scalar_one_or_none()
+    
+    old_val = setting.value if setting else None
+    new_val = body.value
+    
+    if key == "fcm_credentials":
+        if isinstance(new_val, dict):
+            private_key = new_val.get("private_key")
+            if private_key and private_key != "********":
+                encrypted_str = encrypt_data(json.dumps(new_val))
+                new_val = {"encrypted_credentials": encrypted_str}
+            else:
+                if old_val:
+                    new_val = old_val
+                else:
+                    new_val = {"encrypted_credentials": ""}
+        elif isinstance(new_val, str) and new_val != "********":
+            new_val = {"encrypted_credentials": encrypt_data(new_val)}
+        else:
+            new_val = old_val if old_val else {"encrypted_credentials": ""}
+            
+    if not setting:
+        setting = PlatformGlobalSetting(key=key, value=new_val)
+        db.add(setting)
+    else:
+        setting.value = new_val
+        
+    await db.flush()
+    
+    # Audit log governance
+    action = "FCM_CREDENTIAL_CHANGES" if key == "fcm_credentials" else "SETTINGS_CHANGES"
+    old_audit_val = old_val
+    new_audit_val = new_val
+    if key == "fcm_credentials":
+        if isinstance(old_audit_val, dict) and "encrypted_credentials" in old_audit_val:
+            old_audit_val = {"encrypted_credentials": "********"}
+        if isinstance(new_audit_val, dict) and "encrypted_credentials" in new_audit_val:
+            new_audit_val = {"encrypted_credentials": "********"}
+            
+    await AuditService.log_action(
+        db=db,
+        temple_id=None,
+        user_id=UUID(current_user.sub),
+        role=current_user.role,
+        module_name="governance",
+        action=action,
+        action_type="UPDATE",
+        entity_id=key,
+        old_value=old_audit_val,
+        new_value=new_audit_val,
+        details=f"Updated global setting for {key}"
+    )
+    
+    await db.commit()
+    return {"key": key, "value": new_val}
+
+
+@router.post("/global-settings/{key}/publish")
+async def publish_global_setting(
+    key: str,
+    db: AsyncSession = Depends(get_db),
+    current_user: TokenData = Depends(get_current_superadmin),
+):
+    """
+    Publish draft settings to live and invalidates layouts cache.
+    """
+    from app.modules.governance.models.governance_models import PlatformGlobalSetting
+    from app.modules.audit.services.audit_service import AuditService
+    from app.core.cache import GlobalConfigurationCache
+    from sqlalchemy import select
+    from datetime import datetime, timezone
+    
+    if key != "global_website_builder":
+        raise HTTPException(status_code=400, detail="Only global_website_builder can be published")
+        
+    # Fetch draft
+    draft_res = await db.execute(
+        select(PlatformGlobalSetting).filter(PlatformGlobalSetting.key == "global_website_builder_draft")
+    )
+    draft = draft_res.scalar_one_or_none()
+    if not draft or not draft.value:
+        raise HTTPException(status_code=404, detail="No draft configuration found to publish")
+        
+    # Fetch live
+    live_res = await db.execute(
+        select(PlatformGlobalSetting).filter(PlatformGlobalSetting.key == "global_website_builder_live")
+    )
+    live = live_res.scalar_one_or_none()
+    
+    new_version_num = 1
+    if live and isinstance(live.value, dict):
+        new_version_num = live.value.get("version", 0) + 1
+        
+    live_value = dict(draft.value)
+    live_value["version"] = new_version_num
+    live_value["published_at"] = datetime.now(timezone.utc).isoformat()
+    live_value["published_by"] = str(current_user.sub)
+    
+    if not live:
+        live = PlatformGlobalSetting(key="global_website_builder_live", value=live_value)
+        db.add(live)
+    else:
+        live.value = live_value
+        
+    # Save to history list
+    history_res = await db.execute(
+        select(PlatformGlobalSetting).filter(PlatformGlobalSetting.key == "global_website_builder_history")
+    )
+    history = history_res.scalar_one_or_none()
+    
+    history_list = []
+    if history and isinstance(history.value, list):
+        history_list = list(history.value)
+        
+    snapshot = {
+        "version": new_version_num,
+        "published_at": live_value["published_at"],
+        "published_by": live_value["published_by"],
+        "config": draft.value
+    }
+    history_list.append(snapshot)
+    
+    if not history:
+        history = PlatformGlobalSetting(key="global_website_builder_history", value=history_list)
+        db.add(history)
+    else:
+        history.value = history_list
+        
+    await db.flush()
+    
+    # Invalidate layouts configuration cache on publish
+    GlobalConfigurationCache.invalidate_all()
+    
+    # Audit Governance log
+    await AuditService.log_action(
+        db=db,
+        temple_id=None,
+        user_id=UUID(current_user.sub),
+        role=current_user.role,
+        module_name="governance",
+        action="GLOBAL_PUBLISH",
+        action_type="CREATE",
+        entity_id="global_website_builder",
+        new_value={"version": new_version_num},
+        details=f"Published global website layout version {new_version_num}"
+    )
+    
+    await db.commit()
+    return {"status": "success", "version": new_version_num, "live": live_value}
+
+
+@router.post("/advertisements/{ad_id}/approve")
+async def approve_advertisement(
+    ad_id: UUID,
+    body: AdApproveRequest,
+    db: AsyncSession = Depends(get_db),
+    current_user: TokenData = Depends(get_current_superadmin),
+):
+    """
+    Approve platform/temple advertisement.
+    """
+    from app.modules.temple_management.models.temple_models import PlatformAdvertisement, TempleAdvertisement
+    from app.modules.audit.services.audit_service import AuditService
+    from sqlalchemy import select
+    
+    ad = None
+    ad_type = "PLATFORM"
+    result = await db.execute(select(PlatformAdvertisement).filter(PlatformAdvertisement.id == ad_id))
+    ad = result.scalar_one_or_none()
+    
+    if not ad:
+        result = await db.execute(select(TempleAdvertisement).filter(TempleAdvertisement.id == ad_id))
+        ad = result.scalar_one_or_none()
+        ad_type = "TEMPLE"
+        
+    if not ad:
+        raise HTTPException(status_code=404, detail="Advertisement not found")
+        
+    ad.approval_status = "APPROVED"
+    ad.priority = body.priority or "MEDIUM"
+    ad.scheduling_rules = body.scheduling_rules or {}
+    ad.cpm_rate = body.cpm_rate or 0.0
+    ad.cpc_rate = body.cpc_rate or 0.0
+    ad.impression_cap = body.impression_cap
+    ad.click_cap = body.click_cap
+    ad.billing_contact = body.billing_contact
+    if body.revenue_attribution:
+        ad.revenue_attribution = body.revenue_attribution
+        
+    await db.flush()
+    
+    # Audit Governance log
+    await AuditService.log_action(
+        db=db,
+        temple_id=getattr(ad, "temple_id", None),
+        user_id=UUID(current_user.sub),
+        role=current_user.role,
+        module_name="governance",
+        action="ADVERTISEMENT_APPROVAL",
+        action_type="UPDATE",
+        entity_id=str(ad_id),
+        new_value={"approval_status": "APPROVED", "type": ad_type},
+        details=f"Approved {ad_type.lower()} advertisement {ad_id}"
+    )
+    
+    await db.commit()
+    return {"status": "success", "message": "Advertisement approved", "ad_id": str(ad_id)}
+
+
+@router.post("/advertisements/{ad_id}/reject")
+async def reject_advertisement(
+    ad_id: UUID,
+    body: AdRejectRequest,
+    db: AsyncSession = Depends(get_db),
+    current_user: TokenData = Depends(get_current_superadmin),
+):
+    """
+    Reject platform/temple advertisement.
+    """
+    from app.modules.temple_management.models.temple_models import PlatformAdvertisement, TempleAdvertisement
+    from app.modules.audit.services.audit_service import AuditService
+    from sqlalchemy import select
+    
+    ad = None
+    ad_type = "PLATFORM"
+    result = await db.execute(select(PlatformAdvertisement).filter(PlatformAdvertisement.id == ad_id))
+    ad = result.scalar_one_or_none()
+    
+    if not ad:
+        result = await db.execute(select(TempleAdvertisement).filter(TempleAdvertisement.id == ad_id))
+        ad = result.scalar_one_or_none()
+        ad_type = "TEMPLE"
+        
+    if not ad:
+        raise HTTPException(status_code=404, detail="Advertisement not found")
+        
+    ad.approval_status = "REJECTED"
+    ad.approval_remarks = body.remarks
+    
+    await db.flush()
+    
+    # Audit Governance log
+    await AuditService.log_action(
+        db=db,
+        temple_id=getattr(ad, "temple_id", None),
+        user_id=UUID(current_user.sub),
+        role=current_user.role,
+        module_name="governance",
+        action="ADVERTISEMENT_REJECTION",
+        action_type="UPDATE",
+        entity_id=str(ad_id),
+        new_value={"approval_status": "REJECTED", "remarks": body.remarks, "type": ad_type},
+        details=f"Rejected {ad_type.lower()} advertisement {ad_id}"
+    )
+    
+    await db.commit()
+    return {"status": "success", "message": "Advertisement rejected", "ad_id": str(ad_id)}
+
+

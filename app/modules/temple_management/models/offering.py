@@ -34,6 +34,8 @@ class OfferingCategory(Base):
     updated_at = Column(DateTime(timezone=True), default=utcnow, onupdate=utcnow)
 
 
+from sqlalchemy.orm import validates
+
 # ────────────────────────────────────────────────────────────────────
 # 2. Offering (master record)
 # ────────────────────────────────────────────────────────────────────
@@ -47,11 +49,16 @@ class Offering(Base):
     donor_name = Column(String, nullable=False)
     donor_phone = Column(String, nullable=True)
     donor_address = Column(Text, nullable=True)
+    donor_email = Column(String(200), nullable=True)
+    offering_type = Column(String(50), nullable=True)
+    notification_mode = Column(String(20), nullable=True)
+    notification_destination = Column(String(200), nullable=True)
+    offering_metadata = Column(JSON, nullable=True)
     category_id = Column(UUID(as_uuid=True), ForeignKey("offering_categories.id"), nullable=True)
     total_amount = Column(Float, nullable=False)
     paid_amount = Column(Float, default=0)
     balance_amount = Column(Float, default=0)
-    payment_status = Column(String, default="PENDING")       # FULLY_PAID, PARTIAL, PENDING, OVERPAID, CANCELLED, REFUNDED
+    payment_status = Column(String, default="CREATED")       # CREATED, PENDING, PAID, FAILED, CANCELLED
     payment_method = Column(String, nullable=True)            # Cash / UPI / Card / NetBanking / Split
     booking_mode = Column(String, default="Counter")
     remarks = Column(Text, nullable=True)
@@ -63,6 +70,13 @@ class Offering(Base):
     created_at = Column(DateTime(timezone=True), default=utcnow)
     updated_at = Column(DateTime(timezone=True), default=utcnow, onupdate=utcnow)
     deleted_at = Column(DateTime(timezone=True), nullable=True)
+
+    @validates("offering_type")
+    def validate_offering_type(self, key, value):
+        if value is not None and value not in ("GENERAL", "VAZHIPADU", "DONATION", "ANNADANAM"):
+            raise ValueError(f"Invalid offering_type: {value}")
+        return value
+
 
     # Offline / sync fields
     local_uuid = Column(String, nullable=True)

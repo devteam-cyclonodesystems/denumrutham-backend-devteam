@@ -41,28 +41,30 @@ def upgrade() -> None:
 
     # ── VERSION CHECK CONSTRAINTS ────────────────────────────────────
     # Enforce version >= 1 at the database level.
-    op.execute(
-        'ALTER TABLE temples ADD CONSTRAINT ck_temples_version_min CHECK (version >= 1)'
-    )
-    op.execute(
-        'ALTER TABLE employees ADD CONSTRAINT ck_employees_version_min CHECK (version >= 1)'
-    )
-    op.execute(
-        'ALTER TABLE halls ADD CONSTRAINT ck_halls_version_min CHECK (version >= 1)'
-    )
-    op.execute(
-        'ALTER TABLE inventory_items ADD CONSTRAINT ck_inventory_items_version_min CHECK (version >= 1)'
-    )
+    if op.get_bind().dialect.name == 'postgresql':
+        op.execute(
+            'ALTER TABLE temples ADD CONSTRAINT ck_temples_version_min CHECK (version >= 1)'
+        )
+        op.execute(
+            'ALTER TABLE employees ADD CONSTRAINT ck_employees_version_min CHECK (version >= 1)'
+        )
+        op.execute(
+            'ALTER TABLE halls ADD CONSTRAINT ck_halls_version_min CHECK (version >= 1)'
+        )
+        op.execute(
+            'ALTER TABLE inventory_items ADD CONSTRAINT ck_inventory_items_version_min CHECK (version >= 1)'
+        )
 
 
 def downgrade() -> None:
     """Remove partial indexes and version constraints."""
 
     # Drop CHECK constraints
-    op.execute('ALTER TABLE inventory_items DROP CONSTRAINT IF EXISTS ck_inventory_items_version_min')
-    op.execute('ALTER TABLE halls DROP CONSTRAINT IF EXISTS ck_halls_version_min')
-    op.execute('ALTER TABLE employees DROP CONSTRAINT IF EXISTS ck_employees_version_min')
-    op.execute('ALTER TABLE temples DROP CONSTRAINT IF EXISTS ck_temples_version_min')
+    if op.get_bind().dialect.name == 'postgresql':
+        op.execute('ALTER TABLE inventory_items DROP CONSTRAINT IF EXISTS ck_inventory_items_version_min')
+        op.execute('ALTER TABLE halls DROP CONSTRAINT IF EXISTS ck_halls_version_min')
+        op.execute('ALTER TABLE employees DROP CONSTRAINT IF EXISTS ck_employees_version_min')
+        op.execute('ALTER TABLE temples DROP CONSTRAINT IF EXISTS ck_temples_version_min')
 
     # Drop partial indexes
     op.execute('DROP INDEX IF EXISTS ix_addresses_active_only')

@@ -191,6 +191,20 @@ class DigitalExperienceService:
         
         await db.commit()
         await db.refresh(announcement)
+        
+        # Dispatch follower notifications in the background
+        try:
+            from app.modules.temple_management.services.notification_service import NotificationService
+            NotificationService.dispatch_follower_notifications_background(
+                temple_id=temple_id,
+                category="ANNOUNCEMENT",
+                title=f"New Announcement: {announcement.title}",
+                message=announcement.content or "",
+                payload={"announcement_id": str(announcement.id)}
+            )
+        except Exception as e:
+            logger.error("Failed to trigger follower notifications for announcement: %s", e)
+            
         return announcement
 
     @staticmethod
@@ -356,6 +370,20 @@ class DigitalExperienceService:
         
         await db.commit()
         await db.refresh(activity)
+        
+        # Dispatch follower notifications in the background
+        try:
+            from app.modules.temple_management.services.notification_service import NotificationService
+            NotificationService.dispatch_follower_notifications_background(
+                temple_id=temple_id,
+                category="EVENT",
+                title=f"New Activity: {activity.title}",
+                message=activity.description or "",
+                payload={"activity_id": str(activity.id)}
+            )
+        except Exception as e:
+            logger.error("Failed to trigger follower notifications for activity: %s", e)
+            
         return activity
 
     @staticmethod
@@ -656,12 +684,32 @@ class DigitalExperienceService:
 
             # 3. Build snapshot using explicit serialization contract
             try:
+                # Merge draft feature visibility with default fallbacks
+                default_visibility = {
+                    "enablePoojaBooking": True,
+                    "enableOfferings": True,
+                    "enableStore": True,
+                    "enableHallBooking": True,
+                    "enableFollow": True,
+                    "enableTempleAds": True,
+                    "enablePlatformAds": True,
+                    "enableGallery": True,
+                    "enableActivities": True,
+                    "enableNoticeBoard": True,
+                    "enableAnnouncements": True
+                }
+                feature_vis = dict(default_visibility)
+                if draft.feature_visibility:
+                    for k, v in draft.feature_visibility.items():
+                        feature_vis[k] = v
+
                 snapshot = {
                     "theme_name": draft.theme_name or "default",
                     "primary_color": draft.primary_color or "#ff6600",
                     "secondary_color": draft.secondary_color or "#ffcc00",
                     "logo_url": draft.logo_url,
                     "hero_layout": draft.hero_layout or "split",
+                    "featureVisibility": feature_vis,
                     "section_order": draft.section_order or ["hero", "about", "deities", "announcements", "activities", "gallery", "offerings", "location"],
                     "enable_mantras": draft.enable_mantras if draft.enable_mantras is not None else True,
                     "enable_festivals": draft.enable_festivals if draft.enable_festivals is not None else True,

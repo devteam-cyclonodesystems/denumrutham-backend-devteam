@@ -352,3 +352,81 @@ async def test_public_portal_endpoint(client, auth_headers):
     resp_unpub = await client.get("/api/v1/public/temples/test/portal")
     assert resp_unpub.status_code == 404
 
+
+@pytest.mark.asyncio
+async def test_public_bootstrap_endpoint(client, auth_headers):
+    """Verify GET /api/v1/public/temples/{slug}/bootstrap and feature visibility configurations."""
+    # 1. Update test temple status to APPROVED
+    async with AsyncSessionLocal() as db:
+        stmt = select(Temple).filter(Temple.id == TEMPLE_ID)
+        res = await db.execute(stmt)
+        t = res.scalars().first()
+        if t:
+            t.status = "APPROVED"
+            await db.commit()
+
+    # 2. Clear out feature_visibility draft settings and publish first
+    reset_payload = {
+        "feature_visibility": None
+    }
+    resp_reset = await client.put("/api/v1/manager/website-settings", json=reset_payload, headers=auth_headers)
+    assert resp_reset.status_code == 200
+
+    pub_resp = await client.post("/api/v1/manager/website-settings/publish", headers=auth_headers)
+    assert pub_resp.status_code == 200
+
+    # 3. Request bootstrap, verify safe default fallback values
+    resp = await client.get("/api/v1/public/temples/test/bootstrap")
+    assert resp.status_code == 200
+    data = resp.json()
+    assert data["version"] == "2.0"
+    assert "generatedAt" in data
+    assert "profile" in data
+    assert "settings" in data
+    assert "featureVisibility" in data
+    assert "publicActions" in data
+    
+    # Assert fallbacks are all True
+    fv = data["featureVisibility"]
+    assert fv["enablePoojaBooking"] is True
+    assert fv["enableOfferings"] is True
+    assert fv["enableStore"] is True
+    assert fv["enableAnnouncements"] is True
+
+    # 4. Save custom feature visibility configuration to draft settings
+    custom_payload = {
+        "feature_visibility": {
+            "enablePoojaBooking": False,
+            "enableOfferings": True,
+            "enableStore": False,
+            "enableGallery": False,
+            "enableAnnouncements": True
+        }
+    }
+    resp_save = await client.put("/api/v1/manager/website-settings", json=custom_payload, headers=auth_headers)
+    assert resp_save.status_code == 200
+
+    # 5. Publish to live snapshot
+    pub_resp2 = await client.post("/api/v1/manager/website-settings/publish", headers=auth_headers)
+    assert pub_resp2.status_code == 200
+
+    # 6. Request bootstrap again and verify custom values are active
+    resp2 = await client.get("/api/v1/public/temples/test/bootstrap")
+    assert resp2.status_code == 200
+    data2 = resp2.json()
+    
+    fv2 = data2["featureVisibility"]
+    assert fv2["enablePoojaBooking"] is False
+    assert fv2["enableOfferings"] is True
+    assert fv2["enableStore"] is False
+    assert fv2["enableGallery"] is False
+    assert fv2["enableAnnouncements"] is True
+
+    # 7. Check publicActions dynamic rendering based on toggles
+    actions = data2["publicActions"]
+    # enablePoojaBooking is False, so Book Pooja should not be in publicActions
+    assert not any(a["name"] == "Book Pooja" for a in actions)
+    # enableOfferings is True, so Submit Offering should be in publicActions
+    assert any(a["name"] == "Submit Offering" for a in actions)
+
+

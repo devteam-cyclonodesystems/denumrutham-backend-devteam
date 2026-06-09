@@ -1,12 +1,14 @@
 import uuid
 import enum
 from datetime import datetime, timezone
-from sqlalchemy import Column, String, Boolean, DateTime, ForeignKey, Float, Text, Enum, Integer, Time, UniqueConstraint, Date, JSON, Index, text, CheckConstraint
+from sqlalchemy import Column, String, Boolean, DateTime, ForeignKey, Float, Text, Enum, Integer, Time, UniqueConstraint, Date, JSON, Index, text, CheckConstraint, event
 from sqlalchemy.dialects.postgresql import UUID, JSONB
-from sqlalchemy.orm import relationship, backref
+from sqlalchemy.orm import relationship, backref, validates
 from app.core.database.database import Base
 from app.modules.governance.models.operational_states import TempleOperationalState
 from app.modules.bookings.models.booking_models import ServiceType
+
+JSONB_VARIANT = JSONB().with_variant(JSON, "sqlite")
 
 
 def utcnow():
@@ -96,6 +98,8 @@ class Temple(Base):
     followers = relationship("TempleFollower", back_populates="temple")
     website_settings = relationship("TempleWebsiteSettings", back_populates="temple", uselist=False, cascade="all, delete-orphan")
     website_settings_live = relationship("TempleWebsiteSettingsLive", uselist=False, cascade="all, delete-orphan")
+    advertisements = relationship("TempleAdvertisement", back_populates="temple", cascade="all, delete-orphan")
+    recommendations = relationship("ServiceRecommendation", back_populates="temple", cascade="all, delete-orphan")
 
 
 
@@ -216,6 +220,7 @@ class TempleWebsiteSettings(Base):
     secondary_color = Column(String, nullable=False, default="#ffcc00")
     logo_url = Column(String, nullable=True)
     hero_layout = Column(String, nullable=False, default="split")
+    feature_visibility = Column(JSONB_VARIANT, nullable=False, default=dict)
     section_order = Column(JSON, nullable=False, default=lambda: ["hero", "about", "deities", "announcements", "activities", "gallery", "offerings", "location"])
     enable_mantras = Column(Boolean, nullable=False, default=True)
     enable_festivals = Column(Boolean, nullable=False, default=True)
@@ -323,6 +328,7 @@ class TempleFollower(Base):
     id = Column(UUID(as_uuid=True), primary_key=True, default=uuid.uuid4)
     user_id = Column(UUID(as_uuid=True), ForeignKey("users.id", ondelete="CASCADE"), nullable=False)
     temple_id = Column(UUID(as_uuid=True), ForeignKey("temples.id", ondelete="CASCADE"), nullable=False)
+    is_active = Column(Boolean, nullable=False, default=True)
     created_at = Column(DateTime(timezone=True), default=utcnow)
 
     user = relationship("User", back_populates="followed_temples")
@@ -333,7 +339,251 @@ class TempleFollower(Base):
     )
 
 
+class TempleFollowerPreference(Base):
+    """Notification preferences for a temple follower."""
+    __tablename__ = "temple_follower_preferences"
+
+    id = Column(UUID(as_uuid=True), primary_key=True, default=uuid.uuid4)
+    follower_id = Column(UUID(as_uuid=True), ForeignKey("temple_followers.id", ondelete="CASCADE"), nullable=False, unique=True, index=True)
+    push_enabled = Column(Boolean, nullable=False, default=True)
+    festival_enabled = Column(Boolean, nullable=False, default=True)
+    announcement_enabled = Column(Boolean, nullable=False, default=True)
+    event_enabled = Column(Boolean, nullable=False, default=True)
+    pooja_reminder_enabled = Column(Boolean, nullable=False, default=True)
+    custom_categories = Column(JSONB_VARIANT, nullable=False, default=dict)
+    created_at = Column(DateTime(timezone=True), default=utcnow)
+    updated_at = Column(DateTime(timezone=True), default=utcnow, onupdate=utcnow)
+
+    follower = relationship("TempleFollower", backref=backref("preferences", uselist=False, cascade="all, delete-orphan"))
+
+
+class ServiceRecommendation(Base):
+    """Association table mapping services/products to recommended services or products."""
+    __tablename__ = "service_recommendations"
+
+    id = Column(UUID(as_uuid=True), primary_key=True, default=uuid.uuid4)
+    temple_id = Column(UUID(as_uuid=True), ForeignKey("temples.id", ondelete="CASCADE"), nullable=False, index=True)
+    source_service_id = Column(UUID(as_uuid=True), ForeignKey("temple_services.id", ondelete="CASCADE"), nullable=True)
+    source_product_id = Column(UUID(as_uuid=True), ForeignKey("store_products.id", ondelete="CASCADE"), nullable=True)
+    recommendation_source_type = Column(String(20), nullable=False, default="SERVICE")
+    recommended_service_id = Column(UUID(as_uuid=True), ForeignKey("temple_services.id", ondelete="CASCADE"), nullable=True)
+    recommended_product_id = Column(UUID(as_uuid=True), ForeignKey("store_products.id", ondelete="CASCADE"), nullable=True)
+    display_order = Column(Integer, nullable=False, default=0)
+    is_active = Column(Boolean, nullable=False, default=True)
+    created_at = Column(DateTime(timezone=True), default=utcnow)
+
+    __table_args__ = (
+        CheckConstraint(
+            "(source_service_id IS NOT NULL AND source_product_id IS NULL) OR "
+            "(source_product_id IS NOT NULL AND source_service_id IS NULL)",
+            name="chk_recommendation_source"
+        ),
+        CheckConstraint(
+            "(recommended_service_id IS NOT NULL AND recommended_product_id IS NULL) OR "
+            "(recommended_product_id IS NOT NULL AND recommended_service_id IS NULL)",
+            name="chk_recommendation_target"
+        ),
+        Index("idx_service_recommendations_lookup", "temple_id", "source_service_id", postgresql_where=text("is_active = TRUE")),
+        Index("idx_product_recommendations_lookup", "temple_id", "source_product_id", postgresql_where=text("is_active = TRUE")),
+    )
+
+    temple = relationship("Temple", back_populates="recommendations")
+    source_service = relationship("TempleService", foreign_keys=[source_service_id])
+    source_product = relationship("StoreProduct", foreign_keys=[source_product_id])
+    recommended_service = relationship("TempleService", foreign_keys=[recommended_service_id])
+    recommended_product = relationship("StoreProduct", foreign_keys=[recommended_product_id])
+
+
+class PlatformAdvertisement(Base):
+    """Advertisements managed by Super Admins shown across the platform."""
+    __tablename__ = "platform_advertisements"
+
+    id = Column(UUID(as_uuid=True), primary_key=True, default=uuid.uuid4)
+    placement = Column(String(50), nullable=False) # 'HEADER_LEADERBOARD', 'TEMPLE_LIST_INLINE', 'TEMPLE_LIST_FOOTER'
+    media_urls = Column(JSONB_VARIANT, nullable=False, default=list) # JSON array of image URLs
+    media_type = Column(String(20), nullable=False, default="IMAGE")
+    target_url = Column(String(500), nullable=False)
+    start_date = Column(DateTime(timezone=True), nullable=False)
+    end_date = Column(DateTime(timezone=True), nullable=False)
+    is_active = Column(Boolean, nullable=False, default=True)
+    approval_status = Column(String(20), nullable=False, default="APPROVED") # DRAFT, PENDING_REVIEW, APPROVED, REJECTED, PAUSED, EXPIRED
+    approval_remarks = Column(Text, nullable=True)
+    priority = Column(String(20), nullable=False, default="MEDIUM") # HIGH, MEDIUM, LOW
+    scheduling_rules = Column(JSON, nullable=True)
+    impression_cap = Column(Integer, nullable=True)
+    click_cap = Column(Integer, nullable=True)
+    cpm_rate = Column(Float, nullable=False, default=0.0)
+    cpc_rate = Column(Float, nullable=False, default=0.0)
+    billing_contact = Column(String(200), nullable=True)
+    revenue_attribution = Column(JSON, nullable=True)
+    created_at = Column(DateTime(timezone=True), default=utcnow)
+    updated_at = Column(DateTime(timezone=True), default=utcnow, onupdate=utcnow)
+
+    __table_args__ = (
+        CheckConstraint(
+            "media_type IN ('IMAGE', 'CAROUSEL')",
+            name="chk_platform_ad_media_type"
+        ),
+    )
+
+
+class TempleAdvertisement(Base):
+    """Advertisements managed by Temple Admins for their specific portal page."""
+    __tablename__ = "temple_advertisements"
+
+    id = Column(UUID(as_uuid=True), primary_key=True, default=uuid.uuid4)
+    temple_id = Column(UUID(as_uuid=True), ForeignKey("temples.id", ondelete="CASCADE"), nullable=False, index=True)
+    placement = Column(String(50), nullable=False) # 'TEMPLE_DETAILS_AFTER_ABOUT', 'TEMPLE_DETAILS_BEFORE_GALLERY', 'TEMPLE_DETAILS_INLINE'
+    media_urls = Column(JSONB_VARIANT, nullable=False, default=list) # JSON array of image URLs
+    media_type = Column(String(20), nullable=False, default="IMAGE")
+    target_url = Column(String(500), nullable=False)
+    start_date = Column(DateTime(timezone=True), nullable=False)
+    end_date = Column(DateTime(timezone=True), nullable=False)
+    display_order = Column(Integer, nullable=False, default=0)
+    is_active = Column(Boolean, nullable=False, default=True)
+    approval_status = Column(String(20), nullable=False, default="PENDING") # DRAFT, PENDING_REVIEW, APPROVED, REJECTED, PAUSED, EXPIRED
+    approval_remarks = Column(Text, nullable=True)
+    priority = Column(String(20), nullable=False, default="MEDIUM") # HIGH, MEDIUM, LOW
+    scheduling_rules = Column(JSON, nullable=True)
+    impression_cap = Column(Integer, nullable=True)
+    click_cap = Column(Integer, nullable=True)
+    cpm_rate = Column(Float, nullable=False, default=0.0)
+    cpc_rate = Column(Float, nullable=False, default=0.0)
+    billing_contact = Column(String(200), nullable=True)
+    revenue_attribution = Column(JSON, nullable=True)
+    created_at = Column(DateTime(timezone=True), default=utcnow)
+    updated_at = Column(DateTime(timezone=True), default=utcnow, onupdate=utcnow)
+
+    __table_args__ = (
+        Index("idx_temple_ads_active", "temple_id", "start_date", "end_date", postgresql_where=text("is_active = TRUE")),
+        CheckConstraint(
+            "media_type IN ('IMAGE', 'CAROUSEL')",
+            name="chk_temple_ad_media_type"
+        ),
+    )
+
+    temple = relationship("Temple", back_populates="advertisements")
+
+
+@event.listens_for(PlatformAdvertisement, "before_insert")
+@event.listens_for(PlatformAdvertisement, "before_update")
+def validate_platform_ad_media(mapper, connection, target):
+    if target.media_type is None:
+        target.media_type = "IMAGE"
+    media_type = target.media_type
+    media_urls = target.media_urls
+    if not isinstance(media_urls, list):
+        raise ValueError("media_urls must be a list of strings")
+    if media_type == "IMAGE":
+        if len(media_urls) != 1:
+            raise ValueError("IMAGE platform advertisement must contain exactly 1 media URL")
+    elif media_type == "CAROUSEL":
+        if len(media_urls) < 2:
+            raise ValueError("CAROUSEL platform advertisement must contain at least 2 media URLs")
+    else:
+        raise ValueError(f"Invalid media_type: {media_type}")
+
+
+@event.listens_for(TempleAdvertisement, "before_insert")
+@event.listens_for(TempleAdvertisement, "before_update")
+def validate_temple_ad_media(mapper, connection, target):
+    if target.media_type is None:
+        target.media_type = "IMAGE"
+    media_type = target.media_type
+    media_urls = target.media_urls
+    if not isinstance(media_urls, list):
+        raise ValueError("media_urls must be a list of strings")
+    if media_type == "IMAGE":
+        if len(media_urls) != 1:
+            raise ValueError("IMAGE temple advertisement must contain exactly 1 media URL")
+    elif media_type == "CAROUSEL":
+        if len(media_urls) < 2:
+            raise ValueError("CAROUSEL temple advertisement must contain at least 2 media URLs")
+    else:
+        raise ValueError(f"Invalid media_type: {media_type}")
+
+
+class AdvertisementAnalytics(Base):
+    """Analytics logging for platform and temple advertisements."""
+    __tablename__ = "advertisement_analytics"
+
+    id = Column(UUID(as_uuid=True), primary_key=True, default=uuid.uuid4)
+    advertisement_type = Column(String(20), nullable=False) # 'PLATFORM', 'TEMPLE'
+    platform_advertisement_id = Column(UUID(as_uuid=True), ForeignKey("platform_advertisements.id", ondelete="SET NULL"), nullable=True)
+    temple_advertisement_id = Column(UUID(as_uuid=True), ForeignKey("temple_advertisements.id", ondelete="SET NULL"), nullable=True)
+    event_type = Column(String(20), nullable=False) # 'IMPRESSION', 'CLICK'
+    visitor_hash = Column(String(64), nullable=False)
+    session_id = Column(String(100), nullable=True)
+    created_at = Column(DateTime(timezone=True), default=utcnow)
+
+    __table_args__ = (
+        CheckConstraint(
+            "(advertisement_type = 'PLATFORM' AND platform_advertisement_id IS NOT NULL AND temple_advertisement_id IS NULL) OR "
+            "(advertisement_type = 'TEMPLE' AND temple_advertisement_id IS NOT NULL AND platform_advertisement_id IS NULL)",
+            name="chk_ad_analytics_owner"
+        ),
+        Index("idx_ad_analytics_agg", "platform_advertisement_id", "temple_advertisement_id", "event_type", "created_at"),
+    )
+
+    platform_advertisement = relationship("PlatformAdvertisement", backref="analytics")
+    temple_advertisement = relationship("TempleAdvertisement", backref="analytics")
+
+
 # ====================================================================
 # CART & ADDRESS — Store / booking checkout
 # ====================================================================
+
+
+class PortalAnalyticsEventType(str, enum.Enum):
+    BOOK_POOJA_CLICK = "BOOK_POOJA_CLICK"
+    OFFERING_CLICK = "OFFERING_CLICK"
+    STORE_CLICK = "STORE_CLICK"
+    FOLLOW_CLICK = "FOLLOW_CLICK"
+    AD_CLICK = "AD_CLICK"
+    RECOMMENDATION_CLICK = "RECOMMENDATION_CLICK"
+    CHECKOUT_STARTED = "CHECKOUT_STARTED"
+    CHECKOUT_COMPLETED = "CHECKOUT_COMPLETED"
+
+
+class PortalAnalyticsEvent(Base):
+    """Devotee interaction events for portal telemetry."""
+    __tablename__ = "portal_analytics_events"
+
+    id = Column(UUID(as_uuid=True), primary_key=True, default=uuid.uuid4)
+    temple_id = Column(UUID(as_uuid=True), ForeignKey("temples.id", ondelete="SET NULL"), nullable=True)
+    event_name = Column(String(50), nullable=False)
+    visitor_hash = Column(String(64), nullable=False)
+    session_id = Column(String(100), nullable=True)
+    user_id = Column(UUID(as_uuid=True), ForeignKey("users.id", ondelete="SET NULL"), nullable=True)
+    event_metadata = Column(JSONB_VARIANT, nullable=False, default=dict)
+    created_at = Column(DateTime(timezone=True), default=utcnow)
+
+    __table_args__ = (
+        CheckConstraint(
+            "event_name IN ("
+            "'BOOK_POOJA_CLICK', 'OFFERING_CLICK', 'STORE_CLICK', "
+            "'FOLLOW_CLICK', 'AD_CLICK', 'RECOMMENDATION_CLICK', "
+            "'CHECKOUT_STARTED', 'CHECKOUT_COMPLETED'"
+            ")",
+            name="chk_portal_event_name"
+        ),
+        Index("idx_portal_analytics_lookup", "temple_id", "event_name", "created_at"),
+    )
+
+    temple = relationship("Temple")
+    user = relationship("User")
+
+
+class CampaignRevenueMetrics(Base):
+    """Immutable aggregate model capturing clicks, impressions, and calculated revenue attribution."""
+    __tablename__ = "campaign_revenue_metrics"
+
+    id = Column(UUID(as_uuid=True), primary_key=True, default=uuid.uuid4)
+    campaign_id = Column(UUID(as_uuid=True), nullable=False, index=True)
+    campaign_type = Column(String(20), nullable=False) # 'PLATFORM' or 'TEMPLE'
+    total_impressions = Column(Integer, nullable=False, default=0)
+    total_clicks = Column(Integer, nullable=False, default=0)
+    estimated_revenue = Column(Float, nullable=False, default=0.0)
+    last_calculated_at = Column(DateTime(timezone=True), default=utcnow, onupdate=utcnow)
+
 

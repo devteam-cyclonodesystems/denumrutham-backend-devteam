@@ -1,9 +1,7 @@
 from pydantic import BaseModel, ConfigDict, UUID4
 from typing import Optional, List
 from datetime import datetime
-from app.modules.bookings.models.booking_models import ServiceType, ServiceBookingStatus, PaymentMethod
-from app.modules.billing.models.billing_models import PaymentStatus
-
+from app.modules.bookings.models.booking_models import ServiceType, ServiceBookingStatus, PaymentMethod, NotificationMode, BookingSource
 
 # ---------- Devotee Auth ----------
 class DevoteeRegister(BaseModel):
@@ -106,6 +104,11 @@ class ServiceBookingCreate(BaseModel):
     devotee_name: str
     devotee_phone: str
     notes: Optional[str] = ""
+    notification_mode: NotificationMode = NotificationMode.EMAIL
+    notification_destination: Optional[str] = None
+    dakshina_amount: float = 0.0
+    booking_source: BookingSource = BookingSource.WEB_PUBLIC
+    booking_metadata: dict = {}
 
 
 class ServiceBookingResponse(BaseModel):
@@ -119,6 +122,11 @@ class ServiceBookingResponse(BaseModel):
     devotee_name: Optional[str] = ""
     devotee_phone: Optional[str] = ""
     notes: Optional[str] = ""
+    notification_mode: NotificationMode
+    notification_destination: Optional[str] = None
+    dakshina_amount: float
+    booking_source: BookingSource
+    booking_metadata: dict
     created_at: datetime
     # Enriched fields (set in the API)
     service_name: Optional[str] = None

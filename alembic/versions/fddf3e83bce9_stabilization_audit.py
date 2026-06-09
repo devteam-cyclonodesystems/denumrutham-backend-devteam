@@ -164,61 +164,75 @@ def upgrade() -> None:
     )
     op.create_index(op.f('ix_guest_bookings_temple_id'), 'guest_bookings', ['temple_id'], unique=False)
     
-    op.add_column('audit_logs', sa.Column('role', sa.String(), nullable=True))
-    op.add_column('audit_logs', sa.Column('module_name', sa.String(), nullable=True))
-    op.add_column('audit_logs', sa.Column('action_type', sa.String(), nullable=True))
-    op.add_column('audit_logs', sa.Column('entity_id', sa.String(), nullable=True))
-    op.add_column('audit_logs', sa.Column('old_value', sa.JSON(), nullable=True))
-    op.add_column('audit_logs', sa.Column('new_value', sa.JSON(), nullable=True))
-    op.add_column('audit_logs', sa.Column('ip_address', sa.String(), nullable=True))
-    op.add_column('audit_logs', sa.Column('approval_id', sa.UUID(), nullable=True))
-    op.add_column('audit_logs', sa.Column('content_hash', sa.String(), nullable=True))
-    op.create_foreign_key(None, 'audit_logs', 'approval_requests', ['approval_id'], ['id'])
+    with op.batch_alter_table('audit_logs') as batch_op:
+        batch_op.add_column(sa.Column('role', sa.String(), nullable=True))
+        batch_op.add_column(sa.Column('module_name', sa.String(), nullable=True))
+        batch_op.add_column(sa.Column('action_type', sa.String(), nullable=True))
+        batch_op.add_column(sa.Column('entity_id', sa.String(), nullable=True))
+        batch_op.add_column(sa.Column('old_value', sa.JSON(), nullable=True))
+        batch_op.add_column(sa.Column('new_value', sa.JSON(), nullable=True))
+        batch_op.add_column(sa.Column('ip_address', sa.String(), nullable=True))
+        batch_op.add_column(sa.Column('approval_id', sa.UUID(), nullable=True))
+        batch_op.add_column(sa.Column('content_hash', sa.String(), nullable=True))
+        batch_op.create_foreign_key('fk_audit_logs_approval_requests', 'approval_requests', ['approval_id'], ['id'])
     
     # SAFE ADDITION OF NON-NULLABLE 'version' COLUMNS
-    op.add_column('employees', sa.Column('version', sa.Integer(), nullable=True))
+    with op.batch_alter_table('employees') as batch_op:
+        batch_op.add_column(sa.Column('version', sa.Integer(), nullable=True))
     op.execute("UPDATE employees SET version = 1 WHERE version IS NULL")
-    op.alter_column('employees', 'version', nullable=False)
+    with op.batch_alter_table('employees') as batch_op:
+        batch_op.alter_column('version', nullable=False)
     
-    op.add_column('halls', sa.Column('version', sa.Integer(), nullable=True))
+    with op.batch_alter_table('halls') as batch_op:
+        batch_op.add_column(sa.Column('version', sa.Integer(), nullable=True))
     op.execute("UPDATE halls SET version = 1 WHERE version IS NULL")
-    op.alter_column('halls', 'version', nullable=False)
+    with op.batch_alter_table('halls') as batch_op:
+        batch_op.alter_column('version', nullable=False)
     
-    op.add_column('inventory_items', sa.Column('version', sa.Integer(), nullable=True))
+    with op.batch_alter_table('inventory_items') as batch_op:
+        batch_op.add_column(sa.Column('version', sa.Integer(), nullable=True))
     op.execute("UPDATE inventory_items SET version = 1 WHERE version IS NULL")
-    op.alter_column('inventory_items', 'version', nullable=False)
+    with op.batch_alter_table('inventory_items') as batch_op:
+        batch_op.alter_column('version', nullable=False)
     
-    op.add_column('payments', sa.Column('transaction_id', sa.String(), nullable=True))
+    with op.batch_alter_table('payments') as batch_op:
+        batch_op.add_column(sa.Column('transaction_id', sa.String(), nullable=True))
     op.create_index(op.f('ix_payments_transaction_id'), 'payments', ['transaction_id'], unique=True)
     
     # SOFT DELETE COLUMNS FOR TEMPLES
-    op.add_column('temples', sa.Column('is_active', sa.Boolean(), server_default='true', nullable=True))
-    op.add_column('temples', sa.Column('deleted_at', sa.DateTime(timezone=True), nullable=True))
-    op.add_column('temples', sa.Column('version', sa.Integer(), nullable=True))
+    with op.batch_alter_table('temples') as batch_op:
+        batch_op.add_column(sa.Column('is_active', sa.Boolean(), server_default='true', nullable=True))
+        batch_op.add_column(sa.Column('deleted_at', sa.DateTime(timezone=True), nullable=True))
+        batch_op.add_column(sa.Column('version', sa.Integer(), nullable=True))
     op.execute("UPDATE temples SET is_active = TRUE, version = 1 WHERE is_active IS NULL OR version IS NULL")
-    op.alter_column('temples', 'is_active', nullable=False)
-    op.alter_column('temples', 'version', nullable=False)
+    with op.batch_alter_table('temples') as batch_op:
+        batch_op.alter_column('is_active', nullable=False)
+        batch_op.alter_column('version', nullable=False)
     op.create_index(op.f('ix_temples_is_active'), 'temples', ['is_active'], unique=False)
     
     # SOFT DELETE COLUMNS FOR USER_TEMPLES
-    op.add_column('user_temples', sa.Column('is_active', sa.Boolean(), server_default='true', nullable=True))
-    op.add_column('user_temples', sa.Column('deleted_at', sa.DateTime(timezone=True), nullable=True))
+    with op.batch_alter_table('user_temples') as batch_op:
+        batch_op.add_column(sa.Column('is_active', sa.Boolean(), server_default='true', nullable=True))
+        batch_op.add_column(sa.Column('deleted_at', sa.DateTime(timezone=True), nullable=True))
     op.execute("UPDATE user_temples SET is_active = TRUE WHERE is_active IS NULL")
-    op.alter_column('user_temples', 'is_active', nullable=False)
+    with op.batch_alter_table('user_temples') as batch_op:
+        batch_op.alter_column('is_active', nullable=False)
     op.create_index(op.f('ix_user_temples_is_active'), 'user_temples', ['is_active'], unique=False)
     
     # USER SCHEMA HARDENING
-    op.add_column('users', sa.Column('name', sa.String(), server_default='', nullable=False))
-    op.add_column('users', sa.Column('email', sa.String(), nullable=True))
-    op.add_column('users', sa.Column('phone', sa.String(), nullable=True))
-    op.add_column('users', sa.Column('status', sa.String(), server_default='ACTIVE', nullable=True))
-    op.add_column('users', sa.Column('otp_code', sa.String(), nullable=True))
-    op.add_column('users', sa.Column('otp_expires_at', sa.DateTime(timezone=True), nullable=True))
-    op.add_column('users', sa.Column('is_active', sa.Boolean(), server_default='true', nullable=True))
-    op.add_column('users', sa.Column('deleted_at', sa.DateTime(timezone=True), nullable=True))
-    op.add_column('users', sa.Column('updated_at', sa.DateTime(timezone=True), nullable=True))
+    with op.batch_alter_table('users') as batch_op:
+        batch_op.add_column(sa.Column('name', sa.String(), server_default='', nullable=False))
+        batch_op.add_column(sa.Column('email', sa.String(), nullable=True))
+        batch_op.add_column(sa.Column('phone', sa.String(), nullable=True))
+        batch_op.add_column(sa.Column('status', sa.String(), server_default='ACTIVE', nullable=True))
+        batch_op.add_column(sa.Column('otp_code', sa.String(), nullable=True))
+        batch_op.add_column(sa.Column('otp_expires_at', sa.DateTime(timezone=True), nullable=True))
+        batch_op.add_column(sa.Column('is_active', sa.Boolean(), server_default='true', nullable=True))
+        batch_op.add_column(sa.Column('deleted_at', sa.DateTime(timezone=True), nullable=True))
+        batch_op.add_column(sa.Column('updated_at', sa.DateTime(timezone=True), nullable=True))
     op.execute("UPDATE users SET is_active = TRUE WHERE is_active IS NULL")
-    op.alter_column('users', 'is_active', nullable=False)
+    with op.batch_alter_table('users') as batch_op:
+        batch_op.alter_column('is_active', nullable=False)
     op.create_index(op.f('ix_users_email'), 'users', ['email'], unique=True)
     op.create_index(op.f('ix_users_is_active'), 'users', ['is_active'], unique=False)
     op.create_index(op.f('ix_users_phone'), 'users', ['phone'], unique=True)
@@ -231,37 +245,54 @@ def downgrade() -> None:
     op.drop_index(op.f('ix_users_phone'), table_name='users')
     op.drop_index(op.f('ix_users_is_active'), table_name='users')
     op.drop_index(op.f('ix_users_email'), table_name='users')
-    op.drop_column('users', 'updated_at')
-    op.drop_column('users', 'deleted_at')
-    op.drop_column('users', 'is_active')
-    op.drop_column('users', 'otp_expires_at')
-    op.drop_column('users', 'otp_code')
-    op.drop_column('users', 'status')
-    op.drop_column('users', 'phone')
-    op.drop_column('users', 'email')
-    op.drop_column('users', 'name')
+    
+    with op.batch_alter_table('users') as batch_op:
+        batch_op.drop_column('updated_at')
+        batch_op.drop_column('deleted_at')
+        batch_op.drop_column('is_active')
+        batch_op.drop_column('otp_expires_at')
+        batch_op.drop_column('otp_code')
+        batch_op.drop_column('status')
+        batch_op.drop_column('phone')
+        batch_op.drop_column('email')
+        batch_op.drop_column('name')
+        
     op.drop_index(op.f('ix_user_temples_is_active'), table_name='user_temples')
-    op.drop_column('user_temples', 'deleted_at')
-    op.drop_column('user_temples', 'is_active')
+    with op.batch_alter_table('user_temples') as batch_op:
+        batch_op.drop_column('deleted_at')
+        batch_op.drop_column('is_active')
+        
     op.drop_index(op.f('ix_temples_is_active'), table_name='temples')
-    op.drop_column('temples', 'version')
-    op.drop_column('temples', 'deleted_at')
-    op.drop_column('temples', 'is_active')
+    with op.batch_alter_table('temples') as batch_op:
+        batch_op.drop_column('version')
+        batch_op.drop_column('deleted_at')
+        batch_op.drop_column('is_active')
+        
     op.drop_index(op.f('ix_payments_transaction_id'), table_name='payments')
-    op.drop_column('payments', 'transaction_id')
-    op.drop_column('inventory_items', 'version')
-    op.drop_column('halls', 'version')
-    op.drop_column('employees', 'version')
-    op.drop_constraint(None, 'audit_logs', type_='foreignkey')
-    op.drop_column('audit_logs', 'content_hash')
-    op.drop_column('audit_logs', 'approval_id')
-    op.drop_column('audit_logs', 'ip_address')
-    op.drop_column('audit_logs', 'new_value')
-    op.drop_column('audit_logs', 'old_value')
-    op.drop_column('audit_logs', 'entity_id')
-    op.drop_column('audit_logs', 'action_type')
-    op.drop_column('audit_logs', 'module_name')
-    op.drop_column('audit_logs', 'role')
+    with op.batch_alter_table('payments') as batch_op:
+        batch_op.drop_column('transaction_id')
+        
+    with op.batch_alter_table('inventory_items') as batch_op:
+        batch_op.drop_column('version')
+        
+    with op.batch_alter_table('halls') as batch_op:
+        batch_op.drop_column('version')
+        
+    with op.batch_alter_table('employees') as batch_op:
+        batch_op.drop_column('version')
+        
+    with op.batch_alter_table('audit_logs') as batch_op:
+        batch_op.drop_constraint('fk_audit_logs_approval_requests', type_='foreignkey')
+        batch_op.drop_column('content_hash')
+        batch_op.drop_column('approval_id')
+        batch_op.drop_column('ip_address')
+        batch_op.drop_column('new_value')
+        batch_op.drop_column('old_value')
+        batch_op.drop_column('entity_id')
+        batch_op.drop_column('action_type')
+        batch_op.drop_column('module_name')
+        batch_op.drop_column('role')
+        
     op.drop_index(op.f('ix_guest_bookings_temple_id'), table_name='guest_bookings')
     op.drop_table('guest_bookings')
     op.drop_table('cart_items')
