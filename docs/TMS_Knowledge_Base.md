@@ -22,6 +22,7 @@
 | INC-011 | Website Builder updates blocked & store/hall sections missing | P1 – Critical | ✅ Resolved | 2026-06-10 |
 | INC-012 | Omitted sprint entity tables causing bootstrap/follow crash | P1 – Critical | ✅ Resolved | 2026-06-10 |
 | FEAT-001 | Phase 1 – Sidebar Spotlight Ad Area & Layout Alignment | Feature Delivery | ✅ Shipped | 2026-06-10 |
+| FEAT-002 | Phase 2 – Layout Responsiveness & Spotlight Ad Rails | Feature Delivery | ✅ Shipped | 2026-06-10 |
 
 ---
 
@@ -735,3 +736,30 @@ The following ad formats were intentionally deferred to a separate sprint:
 - `COLLECTION` — requires per-item URL support and CTA design
 
 Phase 1 supports: `IMAGE` and `CAROUSEL` only.
+
+---
+
+## FEAT-002: Phase 2 — Layout Responsiveness & Spotlight Ad Rails
+
+| Field | Value |
+|-------|-------|
+| **Feature ID** | FEAT-002 |
+| **Feature Title** | Phase 2 — Layout Responsiveness & Spotlight Ad Rails |
+| **Date and Time** | 2026-06-10T16:00:00Z |
+| **Status** | ✅ Shipped |
+
+### Description
+
+Implemented global layout standardisation, responsive explorer grids, desktop ad spotlight rails, and website builder controls to optimize large viewport styling and introduce ad monetization options.
+
+### Changes Completed
+
+1. **Global Layout Standardization**: Defined `PAGE_CONTAINER` in `src/constants/layout.ts` and locked all public headers, pages, and components to a maximum width of `1600px` with fluid responsive horizontal padding (`px-4 sm:px-6 lg:px-8`).
+2. **Header Alignment**: Applied `PAGE_CONTAINER` to `MainLayout.tsx` and `DenumruthamShell.tsx` inner topbars, resolving elements floating to the absolute edges on wide displays.
+3. **Explore Temples Page Responsive Grid**: Replaced rigid 3-column layouts with `grid-cols-1 sm:grid-cols-2 lg:grid-cols-3 2xl:grid-cols-4` and set min height to `320px` for temple cards, preventing squeezed presentation.
+4. **Spotlight Ad Rails**:
+   - Left Spotlight Rail (Platform advertisements only).
+   - Right Spotlight Rail (Temple advertisements only).
+   - Responsive visibility: visible side-by-side on desktop (xl+), stacked below grid on tablet, hidden completely on mobile.
+5. **Website Builder Controls**: Added `showLeftSpotlight`, `showRightSpotlight`, and `showSidebarRail` toggles to website settings and builder preview engines.
+
