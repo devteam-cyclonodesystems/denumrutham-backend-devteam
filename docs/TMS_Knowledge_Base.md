@@ -18,6 +18,7 @@
 | INC-007 | Malottu temple operational state suspended blocking dashboard | P1 – Critical | ✅ Resolved | 2026-06-07 |
 | INC-008 | Missing feature_visibility column on website settings table | P1 – Critical | ✅ Resolved | 2026-06-10 |
 | INC-009 | Unused variable setGothram causes frontend build failure | P2 – High | ✅ Resolved | 2026-06-10 |
+| INC-010 | Missing PaymentStatus import in devotee_portal schemas | P2 – High | ✅ Resolved | 2026-06-09 |
 
 ---
 
@@ -429,6 +430,45 @@ Replaced the unused `useState` hook with a static constant declaration (`const g
 
 - Commit: `61544cf` (frontend)
 - Submodule Update Commit: `9288dff` (root)
+
+---
+
+## INC-010: Missing `PaymentStatus` Import in Devotee Portal Bookings Schemas
+
+| Field | Value |
+|-------|-------|
+| **Incident ID** | INC-010 |
+| **Incident Title** | Missing `PaymentStatus` import in `bookings/schemas/devotee_portal.py` |
+| **Date and Time** | 2026-06-09T22:20:00Z |
+| **Severity/Priority** | P2 – High |
+| **Current Status** | ✅ Resolved |
+
+### Description
+
+During the devotee portal integration, the backend failed to register or execute bookings schemas properly. The schema module threw a `NameError: name 'PaymentStatus' is not defined` when attempting to load the Pydantic definition for `PaymentResponse`.
+
+### Root Cause
+
+The `PaymentResponse` schema in `app/modules/bookings/schemas/devotee_portal.py` references the `PaymentStatus` enum. Although the enum was defined in the billing models, it was not imported in the schema file, leading to a compilation/runtime NameError upon route router registration.
+
+### Affected Services, Components, or Features
+
+- Devotee Portal Bookings API endpoints.
+- Devotee Checkout flow.
+- Schema verification pipelines.
+
+### Resolution Implemented
+
+Imported `PaymentStatus` from `app.modules.billing.models.billing_models` inside the `devotee_portal.py` schema file.
+
+### Preventive Actions Taken
+
+1. Leverage strict static type checkers (`mypy` or `pyright`) on the codebase to identify unresolved dependencies and names.
+2. Added mock endpoint tests to fully cover devotee public portal endpoints and dependencies.
+
+### Related Tickets, PRs, Commits
+
+- Commit: `01acbc6` (backend)
 
 ---
 
