@@ -459,7 +459,12 @@ class TempleAdvertisement(Base):
 
     id = Column(UUID(as_uuid=True), primary_key=True, default=uuid.uuid4)
     temple_id = Column(UUID(as_uuid=True), ForeignKey("temples.id", ondelete="CASCADE"), nullable=False, index=True)
-    placement = Column(String(50), nullable=False) # 'TEMPLE_DETAILS_AFTER_ABOUT', 'TEMPLE_DETAILS_BEFORE_GALLERY', 'TEMPLE_DETAILS_INLINE'
+    placement = Column(String(50), nullable=False)
+    # Canonical placement registry (keep in sync with frontend AdvertisementPlacementResolver):
+    #   'TEMPLE_DETAILS_AFTER_ABOUT'    — banner between About and Activities sections
+    #   'TEMPLE_DETAILS_BEFORE_GALLERY' — banner immediately before Gallery section
+    #   'TEMPLE_DETAILS_INLINE'         — header leaderboard / top-of-page banner
+    #   'SIDEBAR_SPOTLIGHT'             — Phase 1 right-rail sidebar (beside About + Activities)
     media_urls = Column(JSONB_VARIANT, nullable=False, default=list) # JSON array of image URLs
     media_type = Column(String(20), nullable=False, default="IMAGE")
     target_url = Column(String(500), nullable=False)
