@@ -19,6 +19,7 @@
 | INC-008 | Missing feature_visibility column on website settings table | P1 – Critical | ✅ Resolved | 2026-06-10 |
 | INC-009 | Unused variable setGothram causes frontend build failure | P2 – High | ✅ Resolved | 2026-06-10 |
 | INC-010 | Missing PaymentStatus import in devotee_portal schemas | P2 – High | ✅ Resolved | 2026-06-09 |
+| INC-011 | Website Builder updates blocked & store/hall sections missing | P1 – Critical | ✅ Resolved | 2026-06-10 |
 
 ---
 
@@ -469,6 +470,48 @@ Imported `PaymentStatus` from `app.modules.billing.models.billing_models` inside
 ### Related Tickets, PRs, Commits
 
 - Commit: `01acbc6` (backend)
+
+---
+
+## INC-011: Website Builder Updates Blocked & Store/Hall Sections Missing
+
+| Field | Value |
+|-------|-------|
+| **Incident ID** | INC-011 |
+| **Incident Title** | Website Builder updates blocked on already published sites, and store/hall booking sections missing |
+| **Date and Time** | 2026-06-10T11:41:00Z |
+| **Severity/Priority** | P1 – Critical |
+| **Current Status** | ✅ Resolved |
+
+### Description
+
+Temple managers noticed that updates saved in the manager website builder (such as darshan timings and daily activities) were not reflecting on the devotee portal. Additionally, the Temple Store and Hall Booking buttons in the hero header did not scroll or navigate to any section on the devotee portal.
+
+### Root Cause
+
+1. **Blocked Republishing UI**: The manager dashboard website builder layout hid the "Publish Live" button when the site was already live, displaying only an "Unpublish" button. This prevented managers from pushing new draft changes to live without first completely taking the site down.
+2. **Missing Layout Sections**: The `store` and `hall_booking` sections were missing from the default `section_order` list in both the database fallbacks and the devotee public portal code. As a result, even if the features were enabled, their sections were never rendered on the homepage, causing the hero CTA buttons (which scroll to `#store` and `#hall_booking`) to fail silently.
+
+### Affected Services, Components, or Features
+
+- Website Builder Module.
+- Devotee Portal homepage layouts.
+- Temple Store and Hall Booking integration.
+
+### Resolution Implemented
+
+1. Modified `WebsiteModuleLayout.tsx` to render the "Publish Changes" button alongside the "Unpublish" button when the site is already published, allowing updates to be published cleanly.
+2. Modified `TemplePublicPortal.tsx` and `PortalWebsitePreview.tsx` to dynamically inject the `store` and `hall_booking` sections into `sectionOrder` if they are enabled in settings, ensuring their components are always rendered in the layout flow.
+3. Modified `WebsiteSettings.tsx` to dynamically sync `store` and `hall_booking` in the draft `section_order` array when their toggles are updated.
+
+### Preventive Actions Taken
+
+1. Ensure features that require layout rendering dynamically register themselves or fall back gracefully, rather than relying on a static array in the database.
+2. Allow continuous publishing of draft settings without blocking the publisher button based on live status.
+
+### Related Tickets, PRs, Commits
+
+- Commit: `dbe0020` (frontend)
 
 ---
 
