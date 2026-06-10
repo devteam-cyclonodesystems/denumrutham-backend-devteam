@@ -17,6 +17,7 @@
 | INC-006 | Pydantic ValidationError on public portal image mapping | P1 – Critical | ✅ Resolved | 2026-06-07 |
 | INC-007 | Malottu temple operational state suspended blocking dashboard | P1 – Critical | ✅ Resolved | 2026-06-07 |
 | INC-008 | Missing feature_visibility column on website settings table | P1 – Critical | ✅ Resolved | 2026-06-10 |
+| INC-009 | Unused variable setGothram causes frontend build failure | P2 – High | ✅ Resolved | 2026-06-10 |
 
 ---
 
@@ -390,6 +391,44 @@ Executed a database schema patch directly altering the `temple_website_settings`
 
 - Fix script: `scratch/fix_prod_columns.py` (archived)
 - Migration reference: `hardening_pass_007_live_temple_experience`
+
+---
+
+## INC-009: Unused Variable `setGothram` Causes Frontend Build Failure
+
+| Field | Value |
+|-------|-------|
+| **Incident ID** | INC-009 |
+| **Incident Title** | Unused state hook setter variable `setGothram` causes frontend compilation build failure |
+| **Date and Time** | 2026-06-10T05:56:05Z |
+| **Severity/Priority** | P2 – High |
+| **Current Status** | ✅ Resolved |
+
+### Description
+
+Vercel frontend deployment failed during the build phase (`npm run build`), which executes `tsc -b && vite build`. The compiler crashed with error: `src/components/checkout/OfferingsModal.tsx(28,19): error TS6133: 'setGothram' is declared but its value is never read.`
+
+### Root Cause
+
+The Gothram input field was removed from the offerings form layout as requested, but the state setter `setGothram` was left declared in `useState` on line 28. In strict build mode (`tsc -b`), the `noUnusedLocals` configuration is enabled by default, raising a compilation error when any local variable is declared but never read.
+
+### Affected Services, Components, or Features
+
+- Vercel frontend deployments / CI CD pipeline.
+- Offerings Checkout Modal module.
+
+### Resolution Implemented
+
+Replaced the unused `useState` hook with a static constant declaration (`const gothram = '';`) since the value is now static and no longer mutated by any input fields.
+
+### Preventive Actions Taken
+
+- Always verify changes locally using strict build commands (`npm run build` or `tsc -b`) rather than basic compilation checks (`tsc --noEmit`).
+
+### Related Tickets, PRs, Commits
+
+- Commit: `61544cf` (frontend)
+- Submodule Update Commit: `9288dff` (root)
 
 ---
 
