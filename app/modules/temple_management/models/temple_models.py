@@ -205,9 +205,15 @@ class TempleImage(Base):
     image_url = Column(String, nullable=False)
     caption = Column(String, default="")
     category = Column(Enum(ImageCategory, name="image_category_enum"), nullable=False, default=ImageCategory.GALLERY)
+    is_visible = Column(Boolean, nullable=False, default=True, server_default=text("true"))
     created_at = Column(DateTime(timezone=True), default=utcnow)
 
     temple = relationship("Temple", back_populates="images")
+
+    @classmethod
+    def filter_visible(cls, images):
+        """Filter out hidden images from public display."""
+        return [img for img in images if getattr(img, 'is_visible', True) is not False]
 
 
 class TempleWebsiteSettings(Base):

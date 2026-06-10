@@ -104,7 +104,7 @@ class TempleService:
             "twitter_url": profile.twitter_url if profile else "",
             "website_url": profile.website_url if profile else "",
             "festivals_description": profile.festivals_description if profile else "",
-            "images": [{"id": img.id, "image_url": img.image_url, "caption": img.caption or "", "category": img.category} for img in images],
+            "images": [{"id": img.id, "image_url": img.image_url, "caption": img.caption or "", "category": img.category, "is_visible": getattr(img, 'is_visible', True)} for img in TempleImage.filter_visible(images)],
         }
 
     @staticmethod

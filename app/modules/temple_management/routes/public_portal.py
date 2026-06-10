@@ -10,6 +10,7 @@ from datetime import datetime, timezone
 
 from app.api.deps import get_db
 from app.models.domain import Temple, TempleWebsiteSettingsLive, TempleAdvertisement, PlatformAdvertisement
+from app.modules.temple_management.models.temple_models import TempleImage
 from app.core.limiter import limiter
 from app.modules.temple_management.services.recommendation_service import RecommendationService
 from app.modules.temple_management.schemas.recommendation import PublicResolverPayload, PublicRecommendationResponse
@@ -88,7 +89,8 @@ async def get_public_temple_portal(
     profile_db = temple.profile
     images = []
     if temple.images:
-        for img in temple.images:
+        visible_images = TempleImage.filter_visible(temple.images)
+        for img in visible_images:
             images.append(
                 TempleImageResponse(
                     id=img.id,
@@ -96,6 +98,7 @@ async def get_public_temple_portal(
                     image_url=img.image_url,
                     caption=img.caption or "",
                     category=img.category or "GALLERY",
+                    is_visible=getattr(img, 'is_visible', True),
                     created_at=img.created_at
                 )
             )
@@ -348,13 +351,15 @@ async def get_public_temple_bootstrap(
     profile_db = temple.profile
     images = []
     if temple.images:
-        for img in temple.images:
+        visible_images = TempleImage.filter_visible(temple.images)
+        for img in visible_images:
             images.append({
                 "id": str(img.id),
                 "temple_id": str(img.temple_id),
                 "image_url": img.image_url,
                 "caption": img.caption or "",
                 "category": img.category or "GALLERY",
+                "is_visible": getattr(img, 'is_visible', True),
                 "created_at": img.created_at.isoformat() if img.created_at else None
             })
 

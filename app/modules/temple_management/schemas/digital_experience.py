@@ -206,6 +206,7 @@ class TempleImageBase(BaseModel):
     image_url: str
     caption: Optional[str] = ""
     category: Optional[ImageCategory] = ImageCategory.GALLERY
+    is_visible: Optional[bool] = True
 
 
 class TempleImageCreate(TempleImageBase):
@@ -216,6 +217,7 @@ class TempleImageUpdate(BaseModel):
     image_url: Optional[str] = None
     caption: Optional[str] = None
     category: Optional[ImageCategory] = None
+    is_visible: Optional[bool] = None
 
 
 class TempleImageResponse(TempleImageBase):

@@ -16,6 +16,7 @@
 | INC-005 | Missing live website settings database table on production | P1 – Critical | ✅ Resolved | 2026-06-07 |
 | INC-006 | Pydantic ValidationError on public portal image mapping | P1 – Critical | ✅ Resolved | 2026-06-07 |
 | INC-007 | Malottu temple operational state suspended blocking dashboard | P1 – Critical | ✅ Resolved | 2026-06-07 |
+| INC-008 | Missing feature_visibility column on website settings table | P1 – Critical | ✅ Resolved | 2026-06-10 |
 
 ---
 
@@ -349,6 +350,46 @@ Updated the database record for Malottu temple (`id = f96f45a1-d3a3-422f-9260-ab
 
 ### Related Tickets, PRs, Commits
 - Database Update: `UPDATE temples SET operational_state = 'ACTIVE' ...`
+
+---
+
+## INC-008: Missing `feature_visibility` Column on Production PostgreSQL Database
+
+| Field | Value |
+|-------|-------|
+| **Incident ID** | INC-008 |
+| **Incident Title** | Missing `feature_visibility` column on website settings table on production PostgreSQL database |
+| **Date and Time** | 2026-06-10T05:14:36Z |
+| **Severity/Priority** | P1 – Critical |
+| **Current Status** | ✅ Resolved |
+
+### Description
+
+Temple managers attempting to load or update timings/settings in the Website Builder module encountered an internal server database error (HTTP 500). The frontend console log showed `Failed to load portal configuration: DATABASE_ERROR`.
+
+### Root Cause
+
+The production Neon PostgreSQL database was missing the `feature_visibility` column on the `temple_website_settings` table. This column was introduced in a local hardening pass migration but had not been executed on the production instance, leading to `UndefinedColumnError: column "feature_visibility" of relation "temple_website_settings" does not exist` when accessing the website builder configuration.
+
+### Affected Services, Components, or Features
+
+- Website Builder module in the Manager Dashboard
+- Portal settings retrieval and update API endpoints
+- Dynamic feature toggling on the devotee preview pages
+
+### Resolution Implemented
+
+Executed a database schema patch directly altering the `temple_website_settings` table on the production Neon PostgreSQL database to append the missing `feature_visibility` column. Also updated the local SQLite database instances to ensure environments were aligned.
+
+### Preventive Actions Taken
+
+- Ensure schema alignment is fully validated against production environments.
+- Re-run/verify Alembic head migrations on production database to apply any pending changes before running application code.
+
+### Related Tickets, PRs, Commits
+
+- Fix script: `scratch/fix_prod_columns.py` (archived)
+- Migration reference: `hardening_pass_007_live_temple_experience`
 
 ---
 

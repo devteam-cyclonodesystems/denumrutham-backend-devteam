@@ -734,18 +734,33 @@ class DigitalExperienceService:
             if c.name not in ["id", "temple_id", "created_at"]
         }
         
+        # Determine specific action/details based on is_visible updates
+        action = "UPDATE_IMAGE"
+        details = "Updated temple image"
+        if "is_visible" in data:
+            new_vis = data["is_visible"]
+            if new_vis is True:
+                action = "GALLERY_IMAGE_PUBLISHED"
+                details = "Gallery Image Published"
+            elif new_vis is False:
+                action = "GALLERY_IMAGE_HIDDEN"
+                details = "Gallery Image Hidden"
+            else:
+                action = "GALLERY_IMAGE_VISIBILITY_UPDATED"
+                details = "Gallery Image Visibility Updated"
+
         await AuditService.log_action(
             db=db,
             temple_id=temple_id,
             user_id=current_user_id,
             role=role,
             module_name="digital_experience",
-            action="UPDATE_IMAGE",
+            action=action,
             action_type="UPDATE",
             entity_id=str(image.id),
             old_value=_serialize_for_audit(old_val),
             new_value=_serialize_for_audit(new_val),
-            details=f"Updated temple image"
+            details=details
         )
         
         await db.commit()
