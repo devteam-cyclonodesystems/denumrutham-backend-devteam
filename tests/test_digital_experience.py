@@ -542,3 +542,66 @@ async def test_status_engine_timings_and_activities(client, auth_headers):
     assert len(boot_settings["daily_activities_settings"]) == 2
 
 
+@pytest.mark.asyncio
+async def test_public_directory_and_catalog(client, auth_headers):
+    """Verify state/district public directories, location filters, and public store catalogues."""
+    # 1. Seed temple profile directly in DB
+    async with AsyncSessionLocal() as db:
+        from app.modules.temple_management.models.temple_models import TempleProfile
+        profile = TempleProfile(
+            temple_id=TEMPLE_ID,
+            description="A beautiful temple",
+            history="Ancient history",
+            location="Thalayal, Balaramapuram",
+            district="Thiruvananthapuram",
+            state="Kerala",
+            country="India",
+            opening_time="06:00",
+            closing_time="20:00",
+            main_deity="Bhadrakali",
+            deities=["Bhadrakali", "Shiva"]
+        )
+        db.add(profile)
+        await db.commit()
+
+    # 2. Verify state directory
+    state_resp = await client.get("/api/v1/public/directory/states")
+    assert state_resp.status_code == 200
+    states = state_resp.json()
+    assert any(s["state"] == "Kerala" for s in states)
+
+    # 3. Verify district directory
+    dist_resp = await client.get("/api/v1/public/directory/states/Kerala/districts")
+    assert dist_resp.status_code == 200
+    districts = dist_resp.json()
+    assert any(d["district"] == "Thiruvananthapuram" for d in districts)
+
+    # 4. Verify filtered temples list
+    list_filtered = await client.get("/api/v1/public/temples?state=Kerala&district=Thiruvananthapuram")
+    assert list_filtered.status_code == 200
+    assert any(t["slug"] == "test" for t in list_filtered.json())
+
+    # 5. Create a store product
+    prod_payload = {
+        "name": "Sacred Prasadam",
+        "category": "Prasadam",
+        "unit": "packet",
+        "unit_price": 50.0,
+        "supplier_id": None,
+        "barcode": None,
+        "sku": "PRASAD-01",
+        "qr_code": None,
+        "media": []
+    }
+    prod_resp = await client.post("/api/v1/store/products", json=prod_payload, headers=auth_headers)
+    assert prod_resp.status_code == 200
+
+    # 6. Verify public store products catalogue
+    public_products_resp = await client.get("/api/v1/public/temples/test/store/products")
+    assert public_products_resp.status_code == 200
+    products = public_products_resp.json()
+    assert any(p["name"] == "Sacred Prasadam" for p in products)
+
+
+
+

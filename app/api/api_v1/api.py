@@ -24,6 +24,7 @@ api_router = APIRouter()
 
 # ── Public Temple Portal & Telemetry ─────────────────────────────────
 api_router.include_router(public_portal.router, prefix="/public/temples", tags=["Public Temple Portal"])
+api_router.include_router(public_portal.directory_router, prefix="/public/directory", tags=["Public Directory"])
 api_router.include_router(telemetry_public_router, prefix="/public", tags=["Public Telemetry"])
 
 # ── Core Infrastructure ───────────────────────────────────────────────

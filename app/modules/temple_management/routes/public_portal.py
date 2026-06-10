@@ -10,7 +10,8 @@ from datetime import datetime, timezone
 
 from app.api.deps import get_db
 from app.models.domain import Temple, TempleWebsiteSettingsLive, TempleAdvertisement, PlatformAdvertisement
-from app.modules.temple_management.models.temple_models import TempleImage
+from app.modules.temple_management.models.temple_models import TempleImage, TempleProfile, TempleFestival
+from app.modules.inventory.schemas.store import StoreProductResponse
 from app.core.limiter import limiter
 from app.modules.temple_management.services.recommendation_service import RecommendationService
 from app.modules.temple_management.schemas.recommendation import PublicResolverPayload, PublicRecommendationResponse
@@ -35,6 +36,7 @@ from app.modules.temple_management.services.status_engine import (
 logger = logging.getLogger("tms.security")
 
 router = APIRouter()
+directory_router = APIRouter()
 
 
 class PublicPortalResponse(BaseModel):
@@ -192,15 +194,20 @@ async def get_public_temple_portal(
 )
 async def list_public_temples(
     search: Optional[str] = None,
+    state: Optional[str] = None,
+    district: Optional[str] = None,
+    page: int = 1,
+    limit: int = 10,
     db: AsyncSession = Depends(get_db)
 ):
     """
     Retrieve a list of all published temples.
-    Uses JOIN with TempleWebsiteSettingsLive and preloads profiles/snapshots to prevent N+1 queries.
+    Supports state, district, search filters, alphabetical ordering, and pagination.
     """
     stmt = (
         select(Temple)
         .join(TempleWebsiteSettingsLive, Temple.id == TempleWebsiteSettingsLive.temple_id)
+        .outerjoin(TempleProfile, Temple.id == TempleProfile.temple_id)
         .options(
             selectinload(Temple.profile),
             selectinload(Temple.website_settings_live),
@@ -211,7 +218,28 @@ async def list_public_temples(
         .filter(Temple.is_active == True, Temple.status == "APPROVED")
     )
     if search:
-        stmt = stmt.filter(Temple.name.ilike(f"%{search}%"))
+        from sqlalchemy import or_
+        search_filter = or_(
+            Temple.name.ilike(f"%{search}%"),
+            TempleProfile.main_deity.ilike(f"%{search}%"),
+            TempleProfile.district.ilike(f"%{search}%"),
+            TempleProfile.state.ilike(f"%{search}%"),
+            Temple.festivals.any(TempleFestival.name.ilike(f"%{search}%")),
+            Temple.festivals.any(TempleFestival.description.ilike(f"%{search}%"))
+        )
+        stmt = stmt.filter(search_filter)
+
+    if state:
+        stmt = stmt.filter(TempleProfile.state.ilike(state))
+    if district:
+        stmt = stmt.filter(TempleProfile.district.ilike(district))
+
+    # Order alphabetically by name
+    stmt = stmt.order_by(Temple.name.asc())
+
+    # Pagination
+    offset = (page - 1) * limit
+    stmt = stmt.limit(limit).offset(offset)
 
     result = await db.execute(stmt)
     temples = result.scalars().all()
@@ -220,7 +248,7 @@ async def list_public_temples(
     for temple in temples:
         profile = temple.profile
         
-        # 1. Resolve hero image: HERO_DESKTOP image -> profile.image_url -> snapshot og_image -> None
+        # 1. Resolve hero image: HERO_DESKTOP -> profile.image_url -> GALLERY -> None
         hero_image_url = None
         if temple.images:
             hero_desktop = next((img for img in temple.images if img.category == 'HERO_DESKTOP'), None)
@@ -230,9 +258,10 @@ async def list_public_temples(
         if not hero_image_url and profile and profile.image_url:
             hero_image_url = profile.image_url
 
-        if not hero_image_url and temple.website_settings_live and temple.website_settings_live.settings_snapshot:
-            snap = temple.website_settings_live.settings_snapshot
-            hero_image_url = snap.get("og_image_url") or snap.get("logo_url")
+        if not hero_image_url and temple.images:
+            gallery_img = next((img for img in temple.images if img.category == 'GALLERY'), None)
+            if gallery_img:
+                hero_image_url = gallery_img.image_url
 
         # Fallback image resolution for backward compatibility
         image_url = hero_image_url
@@ -304,6 +333,96 @@ async def list_public_temples(
             "activities": activities_list
         })
     return items
+
+
+@directory_router.get(
+    "/states",
+    response_model=List[dict],
+    tags=["public-directory"]
+)
+async def get_public_states_directory(
+    db: AsyncSession = Depends(get_db)
+):
+    """
+    Retrieve a list of active states and the count of published temples in each state.
+    """
+    from sqlalchemy import func
+    
+    stmt = (
+        select(TempleProfile.state, func.count(Temple.id).label("temple_count"))
+        .join(Temple, Temple.id == TempleProfile.temple_id)
+        .join(TempleWebsiteSettingsLive, Temple.id == TempleWebsiteSettingsLive.temple_id)
+        .filter(Temple.is_active == True, Temple.status == "APPROVED")
+        .filter(TempleProfile.state != None, TempleProfile.state != "")
+        .group_by(TempleProfile.state)
+        .order_by(TempleProfile.state.asc())
+    )
+    result = await db.execute(stmt)
+    rows = result.all()
+    return [{"state": r.state, "temple_count": r.temple_count} for r in rows]
+
+
+@directory_router.get(
+    "/states/{state}/districts",
+    response_model=List[dict],
+    tags=["public-directory"]
+)
+async def get_public_districts_directory(
+    state: str,
+    db: AsyncSession = Depends(get_db)
+):
+    """
+    Retrieve a list of districts and temple counts for a specific state.
+    """
+    from sqlalchemy import func
+    
+    stmt = (
+        select(TempleProfile.district, func.count(Temple.id).label("temple_count"))
+        .join(Temple, Temple.id == TempleProfile.temple_id)
+        .join(TempleWebsiteSettingsLive, Temple.id == TempleWebsiteSettingsLive.temple_id)
+        .filter(Temple.is_active == True, Temple.status == "APPROVED")
+        .filter(TempleProfile.state.ilike(state))
+        .filter(TempleProfile.district != None, TempleProfile.district != "")
+        .group_by(TempleProfile.district)
+        .order_by(TempleProfile.district.asc())
+    )
+    result = await db.execute(stmt)
+    rows = result.all()
+    return [{"district": r.district, "temple_count": r.temple_count} for r in rows]
+
+
+@router.get(
+    "/{slug}/store/products",
+    response_model=List[StoreProductResponse],
+    tags=["public-store"]
+)
+async def list_public_store_products(
+    slug: str,
+    db: AsyncSession = Depends(get_db)
+):
+    """
+    Retrieve list of active, unarchived products for a temple by its slug (domain).
+    Does NOT require authentication.
+    """
+    if not re.match(r"^[a-z0-9-]+$", slug):
+        raise HTTPException(status_code=400, detail="Invalid temple slug format")
+        
+    result = await db.execute(
+        select(Temple).filter(Temple.domain == slug, Temple.is_active == True, Temple.status == "APPROVED")
+    )
+    temple = result.scalars().first()
+    if not temple:
+        raise HTTPException(status_code=404, detail="Temple not found")
+        
+    from app.models.domain import StoreProduct
+    prod_stmt = select(StoreProduct).filter(
+        StoreProduct.temple_id == temple.id,
+        StoreProduct.is_active == True,
+        StoreProduct.is_archived == False
+    ).order_by(StoreProduct.name)
+    
+    prod_res = await db.execute(prod_stmt)
+    return prod_res.scalars().all()
 
 
 @router.get(
