@@ -392,6 +392,9 @@ async def test_public_bootstrap_endpoint(client, auth_headers):
     assert fv["enableOfferings"] is True
     assert fv["enableStore"] is True
     assert fv["enableAnnouncements"] is True
+    assert fv["showLeftSpotlight"] is True
+    assert fv["showRightSpotlight"] is True
+    assert fv["showSidebarRail"] is True
 
     # 4. Save custom feature visibility configuration to draft settings
     custom_payload = {

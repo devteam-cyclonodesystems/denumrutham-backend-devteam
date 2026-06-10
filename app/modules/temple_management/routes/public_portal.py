@@ -409,7 +409,10 @@ async def get_public_temple_bootstrap(
         "enableGallery": True,
         "enableActivities": True,
         "enableNoticeBoard": True,
-        "enableAnnouncements": True
+        "enableAnnouncements": True,
+        "showLeftSpotlight": True,
+        "showRightSpotlight": True,
+        "showSidebarRail": True
     }
     
     feature_visibility = dict(default_visibility)
@@ -940,3 +943,69 @@ async def guest_checkout(
         "total_amount": round(store_total, 2),
         "items_count": len(body.items)
     }
+
+
+@router.get(
+    "/advertisements/active",
+    response_model=List[dict],
+    tags=["public-temple-portal"]
+)
+async def list_active_public_advertisements(
+    db: AsyncSession = Depends(get_db)
+):
+    """
+    Retrieve all active platform and temple advertisements.
+    """
+    from datetime import datetime, timezone
+    from app.modules.temple_management.models.temple_models import TempleAdvertisement, PlatformAdvertisement
+    from sqlalchemy import select
+
+    now = datetime.now(timezone.utc)
+    advertisements = []
+
+    # active platform ads
+    platform_ads_stmt = select(PlatformAdvertisement).filter(
+        PlatformAdvertisement.is_active == True,
+        PlatformAdvertisement.start_date <= now,
+        PlatformAdvertisement.end_date >= now
+    ).order_by(PlatformAdvertisement.created_at.desc())
+    platform_ads_res = await db.execute(platform_ads_stmt)
+    platform_ads = platform_ads_res.scalars().all()
+
+    # active temple ads
+    temple_ads_stmt = select(TempleAdvertisement).filter(
+        TempleAdvertisement.is_active == True,
+        TempleAdvertisement.start_date <= now,
+        TempleAdvertisement.end_date >= now
+    ).order_by(TempleAdvertisement.display_order.asc(), TempleAdvertisement.created_at.desc())
+    temple_ads_res = await db.execute(temple_ads_stmt)
+    temple_ads = temple_ads_res.scalars().all()
+
+    for ad in platform_ads:
+        advertisements.append({
+            "id": str(ad.id),
+            "advertisement_type": "PLATFORM",
+            "placement": ad.placement,
+            "media_urls": ad.media_urls,
+            "media_type": ad.media_type,
+            "target_url": ad.target_url,
+            "start_date": ad.start_date.isoformat() if ad.start_date else None,
+            "end_date": ad.end_date.isoformat() if ad.end_date else None,
+            "display_order": 0
+        })
+
+    for ad in temple_ads:
+        advertisements.append({
+            "id": str(ad.id),
+            "advertisement_type": "TEMPLE",
+            "placement": ad.placement,
+            "media_urls": ad.media_urls,
+            "media_type": ad.media_type,
+            "target_url": ad.target_url,
+            "start_date": ad.start_date.isoformat() if ad.start_date else None,
+            "end_date": ad.end_date.isoformat() if ad.end_date else None,
+            "display_order": ad.display_order
+        })
+
+    return advertisements
+

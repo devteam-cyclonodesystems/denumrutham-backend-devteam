@@ -874,7 +874,10 @@ class DigitalExperienceService:
                     "enableGallery": True,
                     "enableActivities": True,
                     "enableNoticeBoard": True,
-                    "enableAnnouncements": True
+                    "enableAnnouncements": True,
+                    "showLeftSpotlight": True,
+                    "showRightSpotlight": True,
+                    "showSidebarRail": True
                 }
                 feature_vis = dict(default_visibility)
                 if draft.feature_visibility:
