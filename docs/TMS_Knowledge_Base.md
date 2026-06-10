@@ -21,6 +21,7 @@
 | INC-010 | Missing PaymentStatus import in devotee_portal schemas | P2 – High | ✅ Resolved | 2026-06-09 |
 | INC-011 | Website Builder updates blocked & store/hall sections missing | P1 – Critical | ✅ Resolved | 2026-06-10 |
 | INC-012 | Omitted sprint entity tables causing bootstrap/follow crash | P1 – Critical | ✅ Resolved | 2026-06-10 |
+| FEAT-001 | Phase 1 – Sidebar Spotlight Ad Area & Layout Alignment | Feature Delivery | ✅ Shipped | 2026-06-10 |
 
 ---
 
@@ -646,3 +647,91 @@ Although the production database recorded its `alembic_version` as the latest he
 **Root Issue**: The frontend has no timeout or error state for critical API calls like permission loading. When the backend is down, the UI shows infinite loading instead of an actionable error message.
 
 **Recommended Fix**: Add timeout handling and error states to all critical frontend API calls (permissions, auth, config).
+
+---
+
+## FEAT-001: Phase 1 – Sidebar Spotlight Ad Area & Layout Alignment
+
+| Field | Value |
+|-------|-------|
+| **Feature ID** | FEAT-001 |
+| **Type** | Feature Delivery – Phase 1 |
+| **Status** | ✅ Shipped |
+| **Date** | 2026-06-10 |
+| **Commit (frontend)** | `84e69b5` |
+| **Commit (backend)** | `a7bb114` |
+
+### Problem
+
+The devotee public portal had two issues:
+1. **Layout misalignment**: `PortalActivitiesPreview` and `PortalGalleryPreview` lacked `max-w-6xl mx-auto` constraints, causing their left edges to float relative to sections that did have the constraint.
+2. **No right-rail space**: There was no mechanism to place sponsored advertisements beside content sections.
+
+### Solution
+
+**Phase 1 delivers three things:**
+
+#### 1. Shared Layout Token (`SECTION_WRAP`)
+
+```ts
+const SECTION_WRAP = 'max-w-6xl mx-auto w-full px-8';
+```
+
+Applied to all inline sections in `TemplePublicPortal.tsx` and corrected in `PortalActivitiesPreview.tsx` and `PortalGalleryPreview.tsx`. This ensures all portal sections have a consistent left margin.
+
+#### 2. Two-Column Layout Architecture
+
+New component `TwoColumnContentLayout` wraps the "About the Temple" and "Upcoming Activities & Rituals" sections in a flex layout:
+- **Left column** (`flex-1`): existing content sections
+- **Right column** (`w-[300px]`, `lg:sticky`): sidebar widget
+
+The set of sections that get the sidebar is controlled by the `SIDEBAR_SECTIONS` config array — not by hardcoded string checks. Adding a new section to the sidebar requires only a single array change.
+
+Responsive behaviour:
+- `≥ 1024px (lg)`: side-by-side, sidebar is sticky
+- `< 1024px`: content stacks vertically, sidebar appears below Activities
+
+#### 3. SidebarWidgetResolver
+
+New future-proof right-rail component. Currently renders `SIDEBAR_SPOTLIGHT` placement ads in IMAGE and CAROUSEL formats. Architected to accept additional widget types (Announcements, Notices, Countdowns) in future sprints.
+
+**Analytics Integration** (Sprint 3 reuse):
+- `AD_IMPRESSION`: tracked via `IntersectionObserver` when widget enters 50% viewport
+- `AD_CLICK`: tracked on target URL click
+
+### Files Changed
+
+| File | Change |
+|------|--------|
+| `src/components/layout/TwoColumnContentLayout.tsx` | **NEW** — Flex layout wrapper |
+| `src/components/ads/SidebarWidgetResolver.tsx` | **NEW** — Sidebar right-rail widget |
+| `src/pages/devotee/TemplePublicPortal.tsx` | SECTION_WRAP applied, TwoColumnContentLayout + SidebarWidgetResolver integrated |
+| `src/pages/manager/website/preview/PortalActivitiesPreview.tsx` | Added `max-w-6xl mx-auto w-full px-8` |
+| `src/pages/manager/website/preview/PortalGalleryPreview.tsx` | Added `max-w-6xl mx-auto w-full px-8` |
+| `src/pages/manager/TempleAdsDashboard.tsx` | Added `SIDEBAR_SPOTLIGHT` placement; removed phantom options |
+| `src/pages/manager/website/WebsiteSettings.tsx` | Added `enableSidebarSpotlight` toggle |
+| `backend/app/modules/temple_management/models/temple_models.py` | Updated placement registry comment |
+
+### New Feature Flag
+
+| Flag | Default | Description |
+|------|---------|-------------|
+| `featureVisibility.enableSidebarSpotlight` | `true` (opt-out) | Temple managers can disable the sidebar from Website Builder |
+
+### Ad Placement Registry (Canonical)
+
+| Placement Value | Location |
+|----------------|----------|
+| `TEMPLE_DETAILS_AFTER_ABOUT` | Banner between About and Activities |
+| `TEMPLE_DETAILS_BEFORE_GALLERY` | Banner immediately before Gallery |
+| `TEMPLE_DETAILS_INLINE` | Header leaderboard / top-of-page |
+| `SIDEBAR_SPOTLIGHT` | Right-rail sidebar beside About + Activities |
+
+### Deferred to Phase 2
+
+The following ad formats were intentionally deferred to a separate sprint:
+- `VIDEO` — requires video hosting strategy and bandwidth decisions
+- `VIDEO_CAROUSEL` — requires mixed media rendering + storage
+- `COLLECTION` — requires per-item URL support and CTA design
+
+Phase 1 supports: `IMAGE` and `CAROUSEL` only.
