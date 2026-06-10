@@ -20,6 +20,7 @@
 | INC-009 | Unused variable setGothram causes frontend build failure | P2 – High | ✅ Resolved | 2026-06-10 |
 | INC-010 | Missing PaymentStatus import in devotee_portal schemas | P2 – High | ✅ Resolved | 2026-06-09 |
 | INC-011 | Website Builder updates blocked & store/hall sections missing | P1 – Critical | ✅ Resolved | 2026-06-10 |
+| INC-012 | Omitted sprint entity tables causing bootstrap/follow crash | P1 – Critical | ✅ Resolved | 2026-06-10 |
 
 ---
 
@@ -512,6 +513,60 @@ Temple managers noticed that updates saved in the manager website builder (such 
 ### Related Tickets, PRs, Commits
 
 - Commit: `dbe0020` (frontend)
+
+---
+
+## INC-012: Omitted Sprint Entity Tables causing Bootstrap & Follow Crashes
+
+| Field | Value |
+|-------|-------|
+| **Incident ID** | INC-012 |
+| **Incident Title** | Omission of sprint entities tables (advertisements, recommendations, preferences) on production database causing bootstrap and follow crashes |
+| **Date and Time** | 2026-06-10T12:00:00Z |
+| **Severity/Priority** | P1 – Critical |
+| **Current Status** | ✅ Resolved |
+
+### Description
+
+When devotees accessed the public temple portal landing page, the app failed to load layout sections, returning an HTTP 500 error on the `/api/v1/public/temples/{slug}/bootstrap` configuration endpoint. In addition, authenticated devotees trying to interact with the page (such as checking follow status) received an HTTP 500 error on `/api/v1/follow/check/{id}`.
+
+Because the configuration failed to load, the devotee portal frontend fell back to its stale offline cache. Crucially, because the cache lacked the dynamically computed features (`enableStore`, `enableHallBooking`), the Temple Store and Hall Booking layout sections were not rendered on the page, rendering their hero buttons non-functional (clicking them did nothing).
+
+### Root Cause
+
+The production Neon PostgreSQL database was missing multiple tables introduced in early sprints, namely:
+- `temple_advertisements`
+- `platform_advertisements`
+- `advertisement_analytics`
+- `campaign_revenue_metrics`
+- `portal_analytics_events`
+- `service_recommendations`
+- `temple_follower_preferences`
+- `platform_global_settings`
+
+Although the production database recorded its `alembic_version` as the latest head `48bd9fc73314`, these tables had either been dropped or omitted during past database restores/resets. Consequently, SQL queries attempting to access these models raised `UndefinedTableError` exceptions, causing the API router to crash and return 500 database errors.
+
+### Affected Services, Components, or Features
+
+- **Devotee Portal Homepage** (entire page layout configuration and announcements block).
+- **Temple Store & Hall Booking sections** (completely missing from devotee portal layout).
+- **Devotee Follow Service** (follow status check endpoint crashed).
+
+### Resolution Implemented
+
+1. Created and executed a schema recovery script `scratch/recreate_missing_tables.py` utilizing SQLAlchemy's metadata `create_all` engine to automatically inspect the target database and safely recreate all missing table definitions.
+2. Verified the `/bootstrap` endpoint successfully responds with `200 OK` and returns correct configuration payloads containing layout sections and feature visibility toggles.
+3. Confirmed that both the Temple Store and Hall Booking sections are now correctly injected and scrollable from their hero buttons.
+
+### Preventive Actions Taken
+
+1. Avoid manual database operations or resets that desynchronize the database schema from Alembic's tracking states.
+2. Introduce a metadata checker script in the startup diagnostics to alert on any mismatches between defined models and physical database tables.
+
+### Related Tickets, PRs, Commits
+
+- Recovery script: `scratch/recreate_missing_tables.py`
+- Alembic Head: `48bd9fc73314`
 
 ---
 
