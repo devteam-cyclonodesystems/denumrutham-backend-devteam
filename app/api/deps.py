@@ -11,6 +11,8 @@ from app.core.deps import (
     require_permission,
     require_system_permission,
     apply_tenant_filter,
+    enforce_active_subscription,
+    enforce_management_mode,
 )
 
 # Alias for tenant enforcement — extracts temple_id from JWT token

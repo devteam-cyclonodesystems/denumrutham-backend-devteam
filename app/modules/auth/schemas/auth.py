@@ -125,6 +125,8 @@ class UserResponse(BaseModel):
     role: str
     status: str
     temple_id: Optional[str] = None
+    temple_management_mode: Optional[str] = None
+    subscription_plan: Optional[str] = None
     created_at: datetime
 
 

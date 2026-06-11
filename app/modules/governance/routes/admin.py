@@ -13,6 +13,8 @@ from app.models.onboarding import TempleRequest
 from app.schemas.admin import AdminDashboardSummary, TempleListResponse, TempleListItem
 from app.services.temple_profile_service import TempleProfileService
 from app.core.response import api_response
+from app.modules.governance.schemas.leads import LeadCreate, LeadUpdate, LeadResponse, LeadListResponse, LeadConvert
+from app.modules.governance.services.leads_service import LeadsService
 
 logger = logging.getLogger("tms.api.admin")
 
@@ -178,3 +180,91 @@ async def log_telemetry(
     """
     logger.info(f"Frontend Telemetry Received: {payload}")
     return {"status": "logged"}
+
+
+# ── Lead Management CRM Module ───────────────────────────────────────
+
+@router.post("/leads", response_model=LeadResponse, status_code=201)
+async def create_crm_lead(
+    payload: LeadCreate,
+    db: AsyncSession = Depends(get_db),
+    current_user = Depends(require_system_permission("MANAGE_LEADS")),
+):
+    """Create a new lead in the CRM pipeline."""
+    lead = await LeadsService.create_lead(db, payload)
+    await db.commit()
+    return lead
+
+@router.get("/leads", response_model=LeadListResponse)
+async def list_crm_leads(
+    page: int = Query(1, ge=1),
+    limit: int = Query(20, ge=1, le=100),
+    status: Optional[str] = Query(None, description="Filter leads by status (NEW, CONTACTED, etc.)"),
+    db: AsyncSession = Depends(get_db),
+    current_user = Depends(require_system_permission("MANAGE_LEADS")),
+):
+    """List all leads with pagination and filtering by status."""
+    skip = (page - 1) * limit
+    leads, total = await LeadsService.get_leads(db, skip=skip, limit=limit, status=status)
+    return {
+        "leads": leads,
+        "total": total
+    }
+
+@router.get("/leads/{lead_id}", response_model=LeadResponse)
+async def get_crm_lead(
+    lead_id: UUID,
+    db: AsyncSession = Depends(get_db),
+    current_user = Depends(require_system_permission("MANAGE_LEADS")),
+):
+    """Fetch details of a single lead."""
+    lead = await LeadsService.get_lead(db, lead_id)
+    if not lead:
+        raise HTTPException(status_code=404, detail="Lead not found")
+    return lead
+
+@router.put("/leads/{lead_id}", response_model=LeadResponse)
+async def update_crm_lead(
+    lead_id: UUID,
+    payload: LeadUpdate,
+    db: AsyncSession = Depends(get_db),
+    current_user = Depends(require_system_permission("MANAGE_LEADS")),
+):
+    """Update fields of an existing lead."""
+    lead = await LeadsService.update_lead(db, lead_id, payload)
+    if not lead:
+        raise HTTPException(status_code=404, detail="Lead not found")
+    await db.commit()
+    return lead
+
+@router.delete("/leads/{lead_id}", status_code=204)
+async def delete_crm_lead(
+    lead_id: UUID,
+    db: AsyncSession = Depends(get_db),
+    current_user = Depends(require_system_permission("MANAGE_LEADS")),
+):
+    """Delete a lead from the CRM pipeline."""
+    success = await LeadsService.delete_lead(db, lead_id)
+    if not success:
+        raise HTTPException(status_code=404, detail="Lead not found")
+    await db.commit()
+    return None
+
+
+@router.post("/leads/{lead_id}/convert")
+async def convert_crm_lead(
+    lead_id: UUID,
+    payload: LeadConvert,
+    db: AsyncSession = Depends(get_db),
+    current_user = Depends(require_system_permission("MANAGE_LEADS")),
+):
+    """Convert a lead record into a live registered Temple and manager account."""
+    result = await LeadsService.convert_lead_to_temple(
+        db=db,
+        lead_id=lead_id,
+        domain=payload.domain,
+        manager_password=payload.manager_password,
+        actor_id=UUID(current_user.sub)
+    )
+    await db.commit()
+    return api_response(data=result, message="Lead successfully converted to registered temple")

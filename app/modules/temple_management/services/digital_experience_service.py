@@ -832,6 +832,13 @@ class DigitalExperienceService:
                     detail="Cannot publish website for an inactive or unapproved temple"
                 )
                 
+            # Governance checks
+            if temple.management_mode != "SELF_MANAGED":
+                raise HTTPException(
+                    status_code=400, 
+                    detail=f"Direct website publishing is disabled for {temple.management_mode} temples. Changes must be submitted for approval."
+                )
+                
             # Slug validation
             slug = temple.domain
             import re
@@ -1013,3 +1020,211 @@ class DigitalExperienceService:
                 "publishedAt": None,
                 "publishedBy": None
             }
+
+    @staticmethod
+    async def submit_settings_for_review(
+        db: AsyncSession,
+        temple_id: UUID,
+        current_user_id: UUID
+    ) -> TempleWebsiteSettings:
+        # Wrap in a nested transaction
+        async with db.begin_nested():
+            # 1. Fetch Temple
+            temple_stmt = select(Temple).filter(Temple.id == temple_id)
+            temple_res = await db.execute(temple_stmt)
+            temple = temple_res.scalars().first()
+            if not temple:
+                raise HTTPException(status_code=404, detail="Temple not found")
+
+            if temple.management_mode not in ("GOVERNED", "DENUMRUTHAM_MANAGED"):
+                raise HTTPException(
+                    status_code=400,
+                    detail=f"Submitting website changes for review is only supported for GOVERNED or DENUMRUTHAM_MANAGED temples. Current mode: {temple.management_mode}"
+                )
+
+            # 2. Fetch draft settings
+            draft_stmt = select(TempleWebsiteSettings).filter(TempleWebsiteSettings.temple_id == temple_id)
+            draft_res = await db.execute(draft_stmt)
+            draft = draft_res.scalars().first()
+            if not draft:
+                raise HTTPException(status_code=404, detail="Website settings draft not found")
+
+            # 3. Transition status
+            draft.approval_status = "PENDING_REVIEW"
+            draft.submitted_by = current_user_id
+            draft.submitted_at = datetime.now(timezone.utc)
+
+            # Audit
+            await AuditService.log_action(
+                db=db,
+                temple_id=temple_id,
+                user_id=current_user_id,
+                role="TEMPLE_MANAGER",
+                module_name="digital_experience",
+                action="SUBMIT_WEBSITE_REVIEW",
+                action_type="UPDATE",
+                entity_id=str(draft.id),
+                details=f"Submitted website changes for review (temple: {temple_id})"
+            )
+
+        await db.commit()
+        await db.refresh(draft)
+        return draft
+
+    @staticmethod
+    async def approve_settings_submission(
+        db: AsyncSession,
+        temple_id: UUID,
+        reviewer_id: UUID
+    ) -> TempleWebsiteSettingsLive:
+        # Wrap in a nested transaction
+        async with db.begin_nested():
+            # 1. Fetch draft settings
+            draft_stmt = select(TempleWebsiteSettings).filter(TempleWebsiteSettings.temple_id == temple_id)
+            draft_res = await db.execute(draft_stmt)
+            draft = draft_res.scalars().first()
+            if not draft:
+                raise HTTPException(status_code=404, detail="Website settings draft not found")
+
+            if draft.approval_status != "PENDING_REVIEW":
+                raise HTTPException(status_code=400, detail=f"No pending review found. Current status: {draft.approval_status}")
+
+            # 2. Build snapshot
+            try:
+                default_visibility = {
+                    "enablePoojaBooking": True,
+                    "enableOfferings": True,
+                    "enableStore": True,
+                    "enableHallBooking": True,
+                    "enableFollow": True,
+                    "enableTempleAds": True,
+                    "enablePlatformAds": True,
+                    "enableGallery": True,
+                    "enableActivities": True,
+                    "enableNoticeBoard": True,
+                    "enableAnnouncements": True,
+                    "showLeftSpotlight": True,
+                    "showRightSpotlight": True,
+                    "showSidebarRail": True
+                }
+                feature_vis = dict(default_visibility)
+                if draft.feature_visibility:
+                    for k, v in draft.feature_visibility.items():
+                        feature_vis[k] = v
+
+                snapshot = {
+                    "theme_name": draft.theme_name or "default",
+                    "primary_color": draft.primary_color or "#ff6600",
+                    "secondary_color": draft.secondary_color or "#ffcc00",
+                    "logo_url": draft.logo_url,
+                    "hero_layout": draft.hero_layout or "split",
+                    "featureVisibility": feature_vis,
+                    "section_order": draft.section_order or ["hero", "about", "deities", "announcements", "activities", "gallery", "offerings", "location"],
+                    "enable_mantras": draft.enable_mantras if draft.enable_mantras is not None else True,
+                    "enable_festivals": draft.enable_festivals if draft.enable_festivals is not None else True,
+                    "enable_donations": draft.enable_donations if draft.enable_donations is not None else True,
+                    "enable_hall_booking": draft.enable_hall_booking if draft.enable_hall_booking is not None else True,
+                    "enable_store": draft.enable_store if draft.enable_store is not None else True,
+                    "seo_keywords": draft.seo_keywords,
+                    "og_image_url": draft.og_image_url,
+                    "hero_title": draft.hero_title,
+                    "hero_subtitle": draft.hero_subtitle,
+                    "seo_description": draft.seo_description,
+                    "notice_board_content": draft.notice_board_content,
+                    "location_settings": draft.location_settings,
+                    "timings_settings": draft.timings_settings,
+                    "daily_activities_settings": draft.daily_activities_settings,
+                }
+            except Exception as e:
+                raise HTTPException(status_code=400, detail=f"Failed to serialize settings snapshot: {str(e)}")
+
+            # 3. Upsert Live Snapshot
+            live_stmt = select(TempleWebsiteSettingsLive).filter(TempleWebsiteSettingsLive.temple_id == temple_id)
+            live_res = await db.execute(live_stmt)
+            live = live_res.scalars().first()
+
+            if live:
+                old_version = live.version
+                live.settings_snapshot = snapshot
+                live.version = old_version + 1
+                live.published_at = datetime.now(timezone.utc)
+                live.published_by = reviewer_id
+                live.status = "PUBLISHED"
+            else:
+                live = TempleWebsiteSettingsLive(
+                    temple_id=temple_id,
+                    settings_snapshot=snapshot,
+                    version=1,
+                    schema_version=1,
+                    status="PUBLISHED",
+                    published_at=datetime.now(timezone.utc),
+                    published_by=reviewer_id
+                )
+                db.add(live)
+
+            # 4. Update draft status
+            draft.approval_status = "APPROVED"
+            draft.reviewed_by = reviewer_id
+            draft.reviewed_at = datetime.now(timezone.utc)
+            draft.rejection_reason = None
+
+            # 5. Audit
+            await AuditService.log_action(
+                db=db,
+                temple_id=temple_id,
+                user_id=reviewer_id,
+                role="SUPER_ADMIN",
+                module_name="digital_experience",
+                action="APPROVE_WEBSITE_REVIEW",
+                action_type="UPDATE",
+                entity_id=str(draft.id),
+                details=f"Approved and published website review request (temple: {temple_id})"
+            )
+
+        await db.commit()
+        if live.id:
+            await db.refresh(live)
+        return live
+
+    @staticmethod
+    async def reject_settings_submission(
+        db: AsyncSession,
+        temple_id: UUID,
+        reviewer_id: UUID,
+        reason: str
+    ) -> TempleWebsiteSettings:
+        # Wrap in a nested transaction
+        async with db.begin_nested():
+            # 1. Fetch draft settings
+            draft_stmt = select(TempleWebsiteSettings).filter(TempleWebsiteSettings.temple_id == temple_id)
+            draft_res = await db.execute(draft_stmt)
+            draft = draft_res.scalars().first()
+            if not draft:
+                raise HTTPException(status_code=404, detail="Website settings draft not found")
+
+            if draft.approval_status != "PENDING_REVIEW":
+                raise HTTPException(status_code=400, detail=f"No pending review found. Current status: {draft.approval_status}")
+
+            # 2. Update status
+            draft.approval_status = "REJECTED"
+            draft.reviewed_by = reviewer_id
+            draft.reviewed_at = datetime.now(timezone.utc)
+            draft.rejection_reason = reason
+
+            # 3. Audit
+            await AuditService.log_action(
+                db=db,
+                temple_id=temple_id,
+                user_id=reviewer_id,
+                role="SUPER_ADMIN",
+                module_name="digital_experience",
+                action="REJECT_WEBSITE_REVIEW",
+                action_type="UPDATE",
+                entity_id=str(draft.id),
+                details=f"Rejected website review request (temple: {temple_id}), reason: {reason}"
+            )
+
+        await db.commit()
+        await db.refresh(draft)
+        return draft
+

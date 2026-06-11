@@ -3,7 +3,7 @@ from sqlalchemy.ext.asyncio import AsyncSession
 from typing import List, Optional
 from uuid import UUID
 
-from app.api.deps import get_db, get_current_user, get_current_temple_id, require_permission
+from app.api.deps import get_db, get_current_user, get_current_temple_id, require_permission, require_system_permission, enforce_active_subscription
 from app.schemas.domain import TokenData
 from app.modules.temple_management.services.digital_experience_service import DigitalExperienceService
 from app.modules.temple_management.schemas.digital_experience import (
@@ -37,6 +37,7 @@ async def get_settings(
 @router.put(
     "/website-settings",
     response_model=TempleWebsiteSettingsResponse,
+    dependencies=[Depends(enforce_active_subscription)],
     tags=["digital-experience-settings"]
 )
 async def update_settings(
@@ -73,6 +74,7 @@ async def get_publication_status(
 
 @router.post(
     "/website-settings/publish",
+    dependencies=[Depends(enforce_active_subscription)],
     tags=["digital-experience-settings"]
 )
 async def publish_website(
@@ -97,6 +99,7 @@ async def publish_website(
 
 @router.post(
     "/website-settings/unpublish",
+    dependencies=[Depends(enforce_active_subscription)],
     tags=["digital-experience-settings"]
 )
 async def unpublish_website(
@@ -115,6 +118,146 @@ async def unpublish_website(
         "status": "success",
         "message": "Website unpublished successfully"
     }
+
+
+@router.post(
+    "/website-settings/submit-review",
+    dependencies=[Depends(enforce_active_subscription)],
+    tags=["digital-experience-settings"]
+)
+async def submit_website_review(
+    db: AsyncSession = Depends(get_db),
+    current_user: TokenData = Depends(require_permission("website", "edit")),
+    temple_id: str = Depends(get_current_temple_id),
+):
+    """Submit website draft changes for review (GOVERNED temples)."""
+    draft = await DigitalExperienceService.submit_settings_for_review(
+        db=db,
+        temple_id=UUID(temple_id),
+        current_user_id=UUID(current_user.sub)
+    )
+    return {
+        "status": "success",
+        "message": "Website changes submitted for review",
+        "approval_status": draft.approval_status
+    }
+
+
+@router.get(
+    "/website-settings/pending",
+    tags=["digital-experience-admin"]
+)
+async def list_pending_website_reviews(
+    db: AsyncSession = Depends(get_db),
+    current_user: TokenData = Depends(require_system_permission("APPROVE_WEBSITE_CHANGES")),
+):
+    """List all website settings drafts waiting for review. (Admin only)."""
+    from app.models.domain import TempleWebsiteSettings, Temple
+    from sqlalchemy.orm import selectinload
+    from sqlalchemy import select
+    
+    stmt = (
+        select(TempleWebsiteSettings)
+        .options(selectinload(TempleWebsiteSettings.temple))
+        .filter(TempleWebsiteSettings.approval_status == "PENDING_REVIEW")
+    )
+    res = await db.execute(stmt)
+    drafts = res.scalars().all()
+    
+    results = []
+    for d in drafts:
+        results.append({
+            "temple_id": str(d.temple_id),
+            "temple_name": d.temple.name if d.temple else "",
+            "theme_name": d.theme_name,
+            "primary_color": d.primary_color,
+            "submitted_by": str(d.submitted_by) if d.submitted_by else None,
+            "submitted_at": d.submitted_at.isoformat() if d.submitted_at else None,
+        })
+    return results
+
+
+@router.get(
+    "/website-settings/{target_temple_id}",
+    response_model=TempleWebsiteSettingsResponse,
+    tags=["digital-experience-admin"]
+)
+async def get_target_website_settings(
+    target_temple_id: UUID,
+    db: AsyncSession = Depends(get_db),
+    current_user: TokenData = Depends(require_system_permission("APPROVE_WEBSITE_CHANGES")),
+):
+    """Retrieve website settings for a specific target temple. (Admin only)."""
+    return await DigitalExperienceService.get_or_create_settings(db, target_temple_id)
+
+
+@router.get(
+    "/website-settings/{target_temple_id}/live",
+    tags=["digital-experience-admin"]
+)
+async def get_target_live_website_settings(
+    target_temple_id: UUID,
+    db: AsyncSession = Depends(get_db),
+    current_user: TokenData = Depends(require_system_permission("APPROVE_WEBSITE_CHANGES")),
+):
+    """Retrieve live published website settings for a specific target temple. (Admin only)."""
+    from app.models.domain import TempleWebsiteSettingsLive
+    from sqlalchemy.future import select
+    
+    stmt = select(TempleWebsiteSettingsLive).filter(TempleWebsiteSettingsLive.temple_id == target_temple_id)
+    res = await db.execute(stmt)
+    live = res.scalars().first()
+    if not live:
+        return {"settings_snapshot": None}
+    return live
+
+
+from pydantic import BaseModel as RouteBaseModel
+
+class WebsiteReviewPayload(RouteBaseModel):
+    status: str
+    rejection_reason: Optional[str] = None
+
+
+
+@router.post(
+    "/website-settings/{target_temple_id}/review",
+    tags=["digital-experience-admin"]
+)
+async def review_website_submission(
+    target_temple_id: UUID,
+    payload: WebsiteReviewPayload,
+    db: AsyncSession = Depends(get_db),
+    current_user: TokenData = Depends(require_system_permission("APPROVE_WEBSITE_CHANGES")),
+):
+    """Approve or reject a pending website builder submission. (Admin only)."""
+    if payload.status.upper() == "APPROVED":
+        live = await DigitalExperienceService.approve_settings_submission(
+            db=db,
+            temple_id=target_temple_id,
+            reviewer_id=UUID(current_user.sub)
+        )
+        return {
+            "status": "success",
+            "message": "Website changes approved and published live",
+            "version": live.version
+        }
+    elif payload.status.upper() == "REJECTED":
+        if not payload.rejection_reason or not payload.rejection_reason.strip():
+            raise HTTPException(status_code=400, detail="Rejection reason is required")
+        draft = await DigitalExperienceService.reject_settings_submission(
+            db=db,
+            temple_id=target_temple_id,
+            reviewer_id=UUID(current_user.sub),
+            reason=payload.rejection_reason
+        )
+        return {
+            "status": "success",
+            "message": "Website changes rejected",
+            "rejection_reason": draft.rejection_reason
+        }
+    else:
+        raise HTTPException(status_code=400, detail="Invalid review status. Must be APPROVED or REJECTED.")
 
 
 # =============================================================================

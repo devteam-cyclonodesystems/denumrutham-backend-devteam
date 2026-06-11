@@ -3,7 +3,7 @@ from fastapi import APIRouter, Depends, HTTPException
 from sqlalchemy.ext.asyncio import AsyncSession
 from typing import List
 from uuid import UUID
-from app.api.deps import get_db, get_current_user, get_current_temple_id
+from app.api.deps import get_db, get_current_user, get_current_temple_id, enforce_management_mode
 from app.schemas.domain import TokenData
 from app.schemas.employee import (
     EmployeeCreate, EmployeeResponse, EmployeeUpdate,
@@ -11,7 +11,7 @@ from app.schemas.employee import (
 )
 from app.services.employee_service import EmployeeService
 
-router = APIRouter()
+router = APIRouter(dependencies=[Depends(enforce_management_mode("hr-payroll"))])
 
 
 # --- Employees ---

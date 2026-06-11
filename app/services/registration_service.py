@@ -402,12 +402,17 @@ class RegistrationService:
         if user.status == "SUSPENDED":
             raise HTTPException(status_code=403, detail="Your account has been suspended")
 
+        temple_management_mode = None
+        subscription_plan = None
         # Check temple approval status — block login if temple not approved
         if user.temple_id:
             temple_result = await db.execute(
                 select(Temple).filter(Temple.id == user.temple_id)
             )
             temple = temple_result.scalars().first()
+            if temple:
+                temple_management_mode = temple.management_mode
+                subscription_plan = temple.subscription_plan
             if temple and temple.status != "APPROVED":
                 if temple.status == "PENDING":
                     raise HTTPException(
@@ -432,7 +437,9 @@ class RegistrationService:
             username=user.user_id,
             user_status=user.status,
             security_version=getattr(user, 'security_version', None),
-            force_password_change=getattr(user, 'force_password_change', False)
+            force_password_change=getattr(user, 'force_password_change', False),
+            temple_management_mode=temple_management_mode,
+            subscription_plan=subscription_plan
         )
 
         # ── Role-based Redirect Logic (Refined) ───────────────────────
@@ -513,12 +520,25 @@ class RegistrationService:
         user.otp_expires_at = None
         await db.commit()
 
+        temple_management_mode = None
+        subscription_plan = None
+        if user.temple_id:
+            temple_result = await db.execute(
+                select(Temple).filter(Temple.id == user.temple_id)
+            )
+            temple = temple_result.scalars().first()
+            if temple:
+                temple_management_mode = temple.management_mode
+                subscription_plan = temple.subscription_plan
+
         # Generate access token
         access_token = create_access_token(
             subject=user.id,
             temple_id=str(user.temple_id) if user.temple_id else None,
             role=user.role,
             username=user.user_id,
+            temple_management_mode=temple_management_mode,
+            subscription_plan=subscription_plan
         )
 
         return {

@@ -21,6 +21,9 @@ class TokenData(BaseModel):
     security_version: int | None = None
     iat: int | None = None
     force_password_change: bool | None = False
+    temple_management_mode: str | None = None
+    subscription_plan: str | None = None
+    past_due_warning: bool | None = False
 
 
 # ---------- Temple ----------
@@ -48,6 +51,9 @@ class TempleCreateFull(BaseModel):
     email: Optional[str] = ""
     description: Optional[str] = ""
     status: Optional[TempleApprovalStatus] = TempleApprovalStatus.PENDING
+    management_mode: Optional[str] = "SELF_MANAGED"
+    directory_status: Optional[str] = "ACTIVE"
+    subscription_plan: Optional[str] = "SELF_MANAGED_PRO"
 
     @field_validator("email")
     @classmethod
@@ -90,6 +96,9 @@ class TempleUpdateFull(BaseModel):
     email: Optional[str] = None
     description: Optional[str] = None
     status: Optional[TempleApprovalStatus] = None
+    management_mode: Optional[str] = None
+    directory_status: Optional[str] = None
+    subscription_plan: Optional[str] = None
 
     @field_validator("email")
     @classmethod

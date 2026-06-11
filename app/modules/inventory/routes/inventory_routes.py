@@ -3,7 +3,7 @@ from fastapi import APIRouter, Depends
 from sqlalchemy.ext.asyncio import AsyncSession
 from typing import List, Optional
 from uuid import UUID
-from app.api.deps import get_db, get_current_user, get_current_temple_id, require_permission
+from app.api.deps import get_db, get_current_user, get_current_temple_id, require_permission, enforce_management_mode
 from app.schemas.domain import TokenData
 from app.schemas.inventory import (
     InventoryItemCreate, InventoryItemResponse, InventoryItemUpdate,
@@ -18,7 +18,7 @@ from app.schemas.inventory import (
 )
 from app.services.inventory_service import InventoryService
 
-router = APIRouter()
+router = APIRouter(dependencies=[Depends(enforce_management_mode("inventory"))])
 
 
 # --- Items ---

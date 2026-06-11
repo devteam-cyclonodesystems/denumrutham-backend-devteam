@@ -5,12 +5,12 @@ from sqlalchemy import select
 from typing import List, Optional
 from uuid import UUID
 from pydantic import BaseModel
-from app.api.deps import get_db, get_current_user, get_current_temple_id
+from app.api.deps import get_db, get_current_user, get_current_temple_id, enforce_management_mode
 from app.schemas.domain import TokenData
 from app.schemas.hall import HallCreate, HallUpdate, HallResponse, HallBookingCreate, HallBookingResponse, HallBookingUpdate, HallRefundRequest
 from app.services.hall_service import HallService
 
-router = APIRouter()
+router = APIRouter(dependencies=[Depends(enforce_management_mode("hall-booking"))])
 
 
 # --- Halls ---

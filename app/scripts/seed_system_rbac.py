@@ -53,6 +53,9 @@ SYSTEM_PERMISSIONS = [
     {"key": "MARK_ATTENDANCE", "description": "Mark employee attendance", "is_sensitive": False},
     {"key": "APPLY_LEAVE", "description": "Apply for leave", "is_sensitive": False},
     {"key": "VIEW_ATTENDANCE", "description": "View attendance records", "is_sensitive": False},
+    {"key": "APPROVE_WEBSITE_CHANGES", "description": "Approve or reject temple website changes", "is_sensitive": True},
+    {"key": "MANAGE_DIRECTORY_ONLY_TEMPLE", "description": "Create or manage directory-only temples", "is_sensitive": True},
+    {"key": "MANAGE_LEADS", "description": "Manage CRM leads pipeline", "is_sensitive": True},
 ]
 
 ROLE_PERMISSIONS_MAPPING = {

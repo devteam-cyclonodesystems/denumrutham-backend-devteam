@@ -2,10 +2,12 @@ from app.modules.auth.models.auth_models import User, UserTemple, PasswordResetT
 from app.modules.temple_management.models.temple_models import (
     Temple, TempleProfile, TempleProfileDraft, TempleImage,
     TempleWebsiteSettings, TempleAnnouncement, TempleActivity,
-    ImageCategory, ActivityStatus
+    ImageCategory, ActivityStatus, StateMaster, DistrictMaster,
+    TempleSearchIndex
 )
 from app.modules.bookings.models.booking_models import DevoteeProfile, RefundHistory
-from app.modules.governance.models.governance_models import AuditLog
+from app.modules.governance.models.governance_models import AuditLog, TempleOwnershipHistory, TempleLead, TempleClaimRequest
+from app.modules.billing.models.subscription_model import Subscription, SubscriptionEvent
 from app.modules.audit.models.audit_models import (
     ImmutableActivityLog, ActivityOutbox, AuditGovernanceConfig,
     AuditChainIncident, AuditChainVersion, AuditChainIndexRegistry
@@ -58,6 +60,12 @@ __all__ = [
     "TempleProfile",
     "DevoteeProfile",
     "AuditLog",
+    "TempleOwnershipHistory",
+    "TempleLead",
+    "TempleClaimRequest",
+    "Subscription",
+    "SubscriptionEvent",
+
     "PasswordResetToken",
     "TempleRequest",
     "UserRequest",
@@ -108,4 +116,7 @@ __all__ = [
     "TempleImage",
     "ImageCategory",
     "ActivityStatus",
+    "StateMaster",
+    "DistrictMaster",
+    "TempleSearchIndex",
 ]

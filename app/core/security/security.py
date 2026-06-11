@@ -29,7 +29,9 @@ def create_access_token(
     username: str = "",
     security_version: int | None = None,
     user_status: str | None = None,
-    force_password_change: bool = False
+    force_password_change: bool = False,
+    temple_management_mode: str | None = None,
+    subscription_plan: str | None = None
 ) -> str:
     now = datetime.now(timezone.utc)
     expire = now + timedelta(minutes=settings.ACCESS_TOKEN_EXPIRE_MINUTES)
@@ -45,5 +47,9 @@ def create_access_token(
     }
     if temple_id:
         to_encode["temple_id"] = str(temple_id)
+    if temple_management_mode:
+        to_encode["temple_management_mode"] = str(temple_management_mode)
+    if subscription_plan:
+        to_encode["subscription_plan"] = str(subscription_plan)
     return jwt.encode(to_encode, settings.jwt_secret_key, algorithm=settings.ALGORITHM)
 

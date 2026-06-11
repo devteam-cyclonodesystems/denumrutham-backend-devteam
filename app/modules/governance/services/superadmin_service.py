@@ -1,13 +1,13 @@
 import re
 import unicodedata
-from uuid import UUID
+from uuid import UUID, uuid4
 from typing import List, Tuple, Optional
 from sqlalchemy.ext.asyncio import AsyncSession
 from sqlalchemy.future import select
 from fastapi import HTTPException
 
 from sqlalchemy import func
-from app.models.domain import User, Temple, TempleProfile, TempleStatusAudit
+from app.models.domain import User, Temple, TempleProfile, TempleStatusAudit, TempleOwnershipHistory, Subscription, SubscriptionEvent, TempleClaimRequest, OperationalStateAudit, AuditLog
 from app.schemas.domain import TempleCreateFull, TempleUpdateFull
 from app.core.security import create_access_token
 from app.services.temple_rbac import can_modify_temple, can_change_status, can_delete_temple
@@ -82,6 +82,8 @@ class SuperAdminService:
             role="SUPERADMIN",
             username=username or "",
             security_version=temple.security_version,
+            temple_management_mode=temple.management_mode,
+            subscription_plan=temple.subscription_plan,
         )
         return new_token
 
@@ -129,9 +131,25 @@ class SuperAdminService:
             description=body.description or "",
             status=body.status or "APPROVED",
             created_by=created_by,
+            management_mode=body.management_mode or "SELF_MANAGED",
+            directory_status=body.directory_status or "ACTIVE",
+            subscription_plan=body.subscription_plan or "SELF_MANAGED_PRO",
         )
         db.add(temple)
         await db.flush()
+
+        # Audit: log initial ownership history
+        history = TempleOwnershipHistory(
+            id=uuid4(),
+            temple_id=temple.id,
+            previous_management_mode=None,
+            new_management_mode=temple.management_mode,
+            previous_subscription_plan=None,
+            new_subscription_plan=temple.subscription_plan,
+            changed_by=created_by,
+            reason="Initial temple registration",
+        )
+        db.add(history)
 
         # Audit: record initial status assignment
         initial_status = body.status or "APPROVED"
@@ -269,6 +287,36 @@ class SuperAdminService:
         for field, value in field_map.items():
             if value is not None:
                 setattr(temple, field, value)
+
+        # Check for management mode or subscription plan updates to log to TempleOwnershipHistory
+        mode_changed = body.management_mode is not None and body.management_mode != temple.management_mode
+        plan_changed = body.subscription_plan is not None and body.subscription_plan != temple.subscription_plan
+        status_changed = body.directory_status is not None and body.directory_status != temple.directory_status
+
+        if mode_changed or plan_changed or status_changed:
+            prev_mode = temple.management_mode
+            prev_plan = temple.subscription_plan
+            
+            # Apply changes
+            if body.management_mode is not None:
+                temple.management_mode = body.management_mode
+            if body.subscription_plan is not None:
+                temple.subscription_plan = body.subscription_plan
+            if body.directory_status is not None:
+                temple.directory_status = body.directory_status
+                
+            # Log audit entry to TempleOwnershipHistory
+            history = TempleOwnershipHistory(
+                id=uuid4(),
+                temple_id=temple.id,
+                previous_management_mode=prev_mode,
+                new_management_mode=temple.management_mode,
+                previous_subscription_plan=prev_plan,
+                new_subscription_plan=temple.subscription_plan,
+                changed_by=updated_by_uuid,
+                reason=f"Administrative updates: mode_changed={mode_changed}, plan_changed={plan_changed}, status_changed={status_changed}",
+            )
+            db.add(history)
 
         # Phase 3: Hybrid preparation — increment version on every update
         from app.models.domain import utcnow as _utcnow
@@ -541,3 +589,283 @@ class SuperAdminService:
             "suspended_staff": staff_stats.get("SUSPENDED", 0),
             "pending_approval_staff": staff_stats.get("PENDING_APPROVAL", 0)
         }
+
+    @staticmethod
+    async def get_governance_timeline(
+        db: AsyncSession,
+        temple_id: UUID,
+        page: int = 1,
+        page_size: int = 50,
+        event_type: Optional[str] = None
+    ) -> Tuple[List[dict], int]:
+        """
+        Aggregates chronological governance timeline events for a temple.
+        Revisions implemented:
+          1. Separates OWNERSHIP category.
+          2. Adds source_table and source_id reference metadata.
+          3. Implements INFO, WARNING, CRITICAL severity levels.
+          4. Supports paginated chunks to avoid unbounded returns.
+        """
+        # 1. Verify Temple existence
+        result = await db.execute(select(Temple).filter(Temple.id == temple_id))
+        temple = result.scalars().first()
+        if not temple:
+            raise HTTPException(status_code=404, detail="Temple not found")
+
+        events = []
+
+        # 2. Fetch TempleOwnershipHistory
+        ownership_stmt = select(TempleOwnershipHistory).filter(TempleOwnershipHistory.temple_id == temple_id)
+        ownership_res = await db.execute(ownership_stmt)
+        for row in ownership_res.scalars().all():
+            events.append({
+                "id": str(row.id),
+                "event_type": "OWNERSHIP",
+                "timestamp": row.changed_at.isoformat() if row.changed_at else None,
+                "title": "Management Mode / Plan Changed",
+                "description": f"Mode: {row.previous_management_mode or 'None'} → {row.new_management_mode}. Plan: {row.previous_subscription_plan or 'None'} → {row.new_subscription_plan}.",
+                "severity": "INFO",
+                "changed_by": str(row.changed_by) if row.changed_by else None,
+                "reason": row.reason,
+                "source_table": "temple_ownership_history",
+                "source_id": str(row.id),
+                "metadata": {
+                    "previous_management_mode": row.previous_management_mode,
+                    "new_management_mode": row.new_management_mode,
+                    "previous_subscription_plan": row.previous_subscription_plan,
+                    "new_subscription_plan": row.new_subscription_plan
+                }
+            })
+
+        # 3. Fetch Subscription & Events
+        sub_stmt = select(Subscription).filter(Subscription.temple_id == temple_id)
+        sub_res = await db.execute(sub_stmt)
+        sub = sub_res.scalars().first()
+        if sub:
+            sub_events_stmt = select(SubscriptionEvent).filter(SubscriptionEvent.subscription_id == sub.id)
+            sub_events_res = await db.execute(sub_events_stmt)
+            for row in sub_events_res.scalars().all():
+                status_transition = f" ({row.previous_status} → {row.new_status})" if row.previous_status or row.new_status else ""
+                
+                # Determine Severity
+                severity = "INFO"
+                if row.new_status in ("CANCELLED", "EXPIRED"):
+                    severity = "CRITICAL"
+                elif row.new_status == "PAST_DUE" or "warning" in (row.event_name or "").lower():
+                    severity = "WARNING"
+                
+                events.append({
+                    "id": str(row.id),
+                    "event_type": "BILLING",
+                    "timestamp": row.received_at.isoformat() if row.received_at else None,
+                    "title": f"Billing: {row.event_name}",
+                    "description": f"Subscription status updated{status_transition}.",
+                    "severity": severity,
+                    "changed_by": "SYSTEM / Webhook",
+                    "reason": None,
+                    "source_table": "subscription_events",
+                    "source_id": str(row.id),
+                    "metadata": {
+                        "event_name": row.event_name,
+                        "previous_status": row.previous_status,
+                        "new_status": row.new_status,
+                        "payload_snapshot": row.payload_snapshot
+                    }
+                })
+
+        # 4. Fetch Claim Requests & Reviews
+        claim_stmt = select(TempleClaimRequest).filter(TempleClaimRequest.temple_id == temple_id)
+        claim_res = await db.execute(claim_stmt)
+        for row in claim_res.scalars().all():
+            # Submission Event
+            events.append({
+                "id": f"{row.id}-submitted",
+                "event_type": "CLAIMS",
+                "timestamp": row.created_at.isoformat() if row.created_at else None,
+                "title": "Temple Claim Requested",
+                "description": f"Claim requested for target mode {row.target_management_mode} and plan {row.target_subscription_plan}.",
+                "severity": "INFO",
+                "changed_by": str(row.claimant_id),
+                "reason": row.claimant_notes,
+                "source_table": "temple_claim_requests",
+                "source_id": str(row.id),
+                "metadata": {
+                    "target_management_mode": row.target_management_mode,
+                    "target_subscription_plan": row.target_subscription_plan,
+                    "claimant_notes": row.claimant_notes
+                }
+            })
+            
+            # Review Event (if status APPROVED/REJECTED)
+            if row.status in ("APPROVED", "REJECTED"):
+                severity = "INFO" if row.status == "APPROVED" else "WARNING"
+                desc = (
+                    f"Claim approved by administrator." if row.status == "APPROVED"
+                    else f"Claim rejected. Reason: {row.rejection_reason or 'No reason provided'}."
+                )
+                events.append({
+                    "id": f"{row.id}-reviewed",
+                    "event_type": "CLAIMS",
+                    "timestamp": row.reviewed_at.isoformat() if row.reviewed_at else (row.updated_at.isoformat() if row.updated_at else None),
+                    "title": f"Temple Claim {row.status.capitalize()}",
+                    "description": desc,
+                    "severity": severity,
+                    "changed_by": str(row.reviewed_by) if row.reviewed_by else None,
+                    "reason": row.rejection_reason,
+                    "source_table": "temple_claim_requests",
+                    "source_id": str(row.id),
+                    "metadata": {
+                        "status": row.status,
+                        "rejection_reason": row.rejection_reason,
+                        "target_management_mode": row.target_management_mode,
+                        "target_subscription_plan": row.target_subscription_plan
+                    }
+                })
+
+        # 5. Fetch Website Review cycles from AuditLog
+        website_audit_stmt = select(AuditLog).filter(
+            AuditLog.temple_id == temple_id,
+            AuditLog.module_name == "digital_experience",
+            AuditLog.action.in_(["SUBMIT_WEBSITE_REVIEW", "APPROVE_WEBSITE_REVIEW", "REJECT_WEBSITE_REVIEW"])
+        )
+        website_audit_res = await db.execute(website_audit_stmt)
+        for row in website_audit_res.scalars().all():
+            title = "Website Draft Submitted"
+            severity = "INFO"
+            if row.action == "APPROVE_WEBSITE_REVIEW":
+                title = "Website Draft Approved"
+            elif row.action == "REJECT_WEBSITE_REVIEW":
+                title = "Website Draft Rejected"
+                severity = "WARNING"
+                
+            events.append({
+                "id": str(row.id),
+                "event_type": "WEBSITE",
+                "timestamp": row.created_at.isoformat() if row.created_at else None,
+                "title": title,
+                "description": row.details or f"Website action {row.action} executed.",
+                "severity": severity,
+                "changed_by": str(row.user_id) if row.user_id else None,
+                "reason": row.details,
+                "source_table": "audit_logs",
+                "source_id": str(row.id),
+                "metadata": {
+                    "action": row.action,
+                    "role": row.role
+                }
+            })
+
+        # 6. Fetch Operational State Audits
+        state_stmt = select(OperationalStateAudit).filter(OperationalStateAudit.temple_id == temple_id)
+        state_res = await db.execute(state_stmt)
+        for row in state_res.scalars().all():
+            old_val = row.old_state.value if row.old_state else "None"
+            new_val = row.new_state.value if row.new_state else "None"
+            
+            # Severity
+            severity = "INFO"
+            if new_val == "SUSPENDED":
+                severity = "CRITICAL"
+            elif new_val == "DEACTIVATED":
+                severity = "CRITICAL"
+            elif new_val == "READ_ONLY":
+                severity = "WARNING"
+                
+            events.append({
+                "id": str(row.id),
+                "event_type": "GOVERNANCE",
+                "timestamp": row.created_at.isoformat() if row.created_at else None,
+                "title": "Operational State Transitioned",
+                "description": f"Operational state changed from {old_val} to {new_val}.",
+                "severity": severity,
+                "changed_by": str(row.changed_by) if row.changed_by else None,
+                "reason": row.reason,
+                "source_table": "operational_state_audits",
+                "source_id": str(row.id),
+                "metadata": {
+                    "old_state": old_val,
+                    "new_state": new_val
+                }
+            })
+
+        # 7. Fetch direct Administrative actions from AuditLog
+        gov_audit_stmt = select(AuditLog).filter(
+            AuditLog.temple_id == temple_id,
+            AuditLog.module_name == "Governance",
+            AuditLog.action.in_(["TEMPLE_SUSPENDED", "TEMPLE_REACTIVATED", "FORCE_LOGOUT_ALL_USERS", "TEMPLE_DEACTIVATED", "TEMPLE_UPDATED"])
+        )
+        gov_audit_res = await db.execute(gov_audit_stmt)
+        for row in gov_audit_res.scalars().all():
+            title = f"Governance: {row.action}"
+            severity = "INFO"
+            if row.action == "TEMPLE_SUSPENDED":
+                title = "Temple Suspended"
+                severity = "CRITICAL"
+            elif row.action == "TEMPLE_DEACTIVATED":
+                title = "Temple Deactivated"
+                severity = "CRITICAL"
+            elif row.action == "FORCE_LOGOUT_ALL_USERS":
+                title = "Sessions Terminated"
+                severity = "CRITICAL"
+            elif row.action == "TEMPLE_REACTIVATED":
+                title = "Temple Reactivated"
+                severity = "INFO"
+            elif row.action == "TEMPLE_UPDATED":
+                title = "Temple Details Updated"
+                severity = "INFO"
+                
+            events.append({
+                "id": str(row.id),
+                "event_type": "GOVERNANCE",
+                "timestamp": row.created_at.isoformat() if row.created_at else None,
+                "title": title,
+                "description": row.details or f"Governance action {row.action} executed.",
+                "severity": severity,
+                "changed_by": str(row.user_id) if row.user_id else None,
+                "reason": row.details,
+                "source_table": "audit_logs",
+                "source_id": str(row.id),
+                "metadata": {
+                    "action": row.action,
+                    "role": row.role
+                }
+            })
+
+        # 8. Resolve Actor UUIDs
+        user_ids = set()
+        for e in events:
+            if e["changed_by"]:
+                try:
+                    user_ids.add(UUID(e["changed_by"]))
+                except ValueError:
+                    pass
+
+        user_map = {}
+        if user_ids:
+            user_stmt = select(User).filter(User.id.in_(user_ids))
+            user_res = await db.execute(user_stmt)
+            for u in user_res.scalars().all():
+                user_map[str(u.id)] = u.name or u.email or u.user_id
+
+        # Replace changed_by UUID with resolved name
+        for e in events:
+            cb = e["changed_by"]
+            if cb in user_map:
+                e["changed_by_name"] = user_map[cb]
+            else:
+                e["changed_by_name"] = cb or "SYSTEM"
+
+        # 8.5 Filter by event type if requested
+        if event_type and event_type.upper() != "ALL":
+            events = [e for e in events if e["event_type"] == event_type.upper()]
+
+        # 9. Sort descending by timestamp
+        events.sort(key=lambda x: x["timestamp"] or "", reverse=True)
+
+        # 10. Paginate
+        total = len(events)
+        start = (page - 1) * page_size
+        end = start + page_size
+        paginated_events = events[start:end]
+
+        return paginated_events, total

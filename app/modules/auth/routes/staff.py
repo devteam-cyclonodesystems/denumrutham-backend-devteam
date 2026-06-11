@@ -3,12 +3,12 @@ from sqlalchemy.ext.asyncio import AsyncSession
 from typing import List
 from uuid import UUID
 
-from app.api.deps import get_db, get_current_user, get_current_temple_id, require_permission
+from app.api.deps import get_db, get_current_user, get_current_temple_id, require_permission, enforce_management_mode
 from app.schemas.domain import TokenData
 from app.schemas.staff import StaffCreate, StaffResponse, StaffUpdate, StaffCounts
 from app.services.staff_service import StaffService
 
-router = APIRouter()
+router = APIRouter(dependencies=[Depends(enforce_management_mode("staff"))])
 
 @router.post("", response_model=StaffResponse)
 async def create_staff(

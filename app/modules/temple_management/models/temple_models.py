@@ -47,6 +47,42 @@ class ServiceType(str, enum.Enum):
 
 
 
+class StateMaster(Base):
+    __tablename__ = "state_master"
+    id = Column(UUID(as_uuid=True), primary_key=True, default=uuid.uuid4)
+    name = Column(String, nullable=False, unique=True, index=True)
+    slug = Column(String, nullable=False, unique=True, index=True)
+    code = Column(String, nullable=False, unique=True, index=True)
+    created_at = Column(DateTime(timezone=True), default=utcnow)
+
+
+class DistrictMaster(Base):
+    __tablename__ = "district_master"
+    id = Column(UUID(as_uuid=True), primary_key=True, default=uuid.uuid4)
+    state_id = Column(UUID(as_uuid=True), ForeignKey("state_master.id", ondelete="CASCADE"), nullable=False, index=True)
+    name = Column(String, nullable=False, index=True)
+    slug = Column(String, nullable=False, index=True)
+    code = Column(String, nullable=True, index=True)
+    created_at = Column(DateTime(timezone=True), default=utcnow)
+
+    __table_args__ = (
+        UniqueConstraint("state_id", "name", name="uq_state_district_name"),
+        UniqueConstraint("state_id", "slug", name="uq_state_district_slug"),
+    )
+
+
+class TempleSearchIndex(Base):
+    __tablename__ = "temple_search_index"
+    id = Column(UUID(as_uuid=True), primary_key=True, default=uuid.uuid4)
+    temple_id = Column(UUID(as_uuid=True), ForeignKey("temples.id", ondelete="CASCADE"), unique=True, nullable=False, index=True)
+    alternative_names = Column(Text, default="", server_default="")
+    keywords = Column(Text, default="", server_default="")
+    village = Column(String, default="", server_default="")
+    searchable_text = Column(Text, default="", server_default="")
+    created_at = Column(DateTime(timezone=True), default=utcnow)
+    updated_at = Column(DateTime(timezone=True), default=utcnow, onupdate=utcnow)
+
+
 class Temple(Base):
     __tablename__ = "temples"
     id = Column(UUID(as_uuid=True), primary_key=True, default=uuid.uuid4)
@@ -86,9 +122,21 @@ class Temple(Base):
     # Phase 5: Tenant Operational Governance
     operational_state = Column(Enum(TempleOperationalState), nullable=False, default=TempleOperationalState.ACTIVE)
 
+    # Multi-Tier Operating & Subscription Model
+    management_mode = Column(String(30), nullable=False, default="SELF_MANAGED")
+    directory_status = Column(String(30), nullable=False, default="ACTIVE")
+    subscription_plan = Column(String(40), nullable=False, default="SELF_MANAGED_PRO")
+
+    # Phase 6 Additions
+    state_id = Column(UUID(as_uuid=True), ForeignKey("state_master.id", ondelete="SET NULL"), nullable=True)
+    district_id = Column(UUID(as_uuid=True), ForeignKey("district_master.id", ondelete="SET NULL"), nullable=True)
+    verification_level = Column(Integer, default=0, nullable=False, server_default=text("0"))
+    is_featured = Column(Boolean, default=False, nullable=False, server_default=text("false"))
+
     __table_args__ = (
         Index("unique_active_domain", "domain", unique=True, postgresql_where=text("deleted_at IS NULL")),
         Index("idx_temples_visible", "id", postgresql_where=text("status = 'APPROVED' AND is_active = TRUE")),
+        Index("idx_temples_directory_status", "directory_status"),
     )
 
     # Relationships
@@ -100,6 +148,11 @@ class Temple(Base):
     website_settings_live = relationship("TempleWebsiteSettingsLive", uselist=False, cascade="all, delete-orphan")
     advertisements = relationship("TempleAdvertisement", back_populates="temple", cascade="all, delete-orphan")
     recommendations = relationship("ServiceRecommendation", back_populates="temple", cascade="all, delete-orphan")
+    
+    # Phase 6 relationships
+    state_ref = relationship("StateMaster", foreign_keys=[state_id])
+    district_ref = relationship("DistrictMaster", foreign_keys=[district_id])
+    search_index = relationship("TempleSearchIndex", backref="temple", uselist=False, cascade="all, delete-orphan")
 
 
 
@@ -244,6 +297,14 @@ class TempleWebsiteSettings(Base):
     daily_activities_settings = Column(JSONB_VARIANT, nullable=True, default=list)
     created_at = Column(DateTime(timezone=True), default=utcnow)
     updated_at = Column(DateTime(timezone=True), default=utcnow, onupdate=utcnow)
+
+    # Website Builder Approval Workflow Tracking
+    approval_status = Column(String(30), nullable=False, default="DRAFT")
+    submitted_by = Column(UUID(as_uuid=True), ForeignKey("users.id"), nullable=True)
+    submitted_at = Column(DateTime(timezone=True), nullable=True)
+    reviewed_by = Column(UUID(as_uuid=True), ForeignKey("users.id"), nullable=True)
+    reviewed_at = Column(DateTime(timezone=True), nullable=True)
+    rejection_reason = Column(Text, nullable=True)
 
     temple = relationship("Temple", back_populates="website_settings")
 

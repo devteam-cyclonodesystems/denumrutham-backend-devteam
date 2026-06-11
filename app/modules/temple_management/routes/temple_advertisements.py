@@ -7,6 +7,7 @@ from typing import List
 from uuid import UUID
 
 from app.core.database.deps import get_db, get_current_temple_id, get_current_temple_manager
+from app.core.deps import enforce_active_subscription
 from app.schemas.domain import TokenData
 from app.modules.temple_management.schemas.advertisement import (
     TempleAdvertisementCreate,
@@ -18,7 +19,7 @@ from app.modules.temple_management.services.advertisement_service import Adverti
 router = APIRouter(prefix="/temple-advertisements")
 
 
-@router.post("", response_model=TempleAdvertisementResponse, status_code=201)
+@router.post("", response_model=TempleAdvertisementResponse, status_code=201, dependencies=[Depends(enforce_active_subscription)])
 async def create_temple_ad(
     *,
     db: AsyncSession = Depends(get_db),
@@ -53,7 +54,7 @@ async def get_temple_ad(
     return await AdvertisementService.get_temple_ad(db=db, temple_id=temple_id, ad_id=ad_id)
 
 
-@router.put("/{ad_id}", response_model=TempleAdvertisementResponse)
+@router.put("/{ad_id}", response_model=TempleAdvertisementResponse, dependencies=[Depends(enforce_active_subscription)])
 async def update_temple_ad(
     ad_id: UUID,
     *,
@@ -68,7 +69,7 @@ async def update_temple_ad(
     )
 
 
-@router.delete("/{ad_id}")
+@router.delete("/{ad_id}", dependencies=[Depends(enforce_active_subscription)])
 async def delete_temple_ad(
     ad_id: UUID,
     *,

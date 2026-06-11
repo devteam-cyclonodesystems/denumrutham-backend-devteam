@@ -190,5 +190,79 @@ class PlatformGlobalSetting(Base):
     updated_at = Column(DateTime(timezone=True), default=utcnow, onupdate=utcnow)
 
 
+class TempleOwnershipHistory(Base):
+    """Auditable history of management_mode and subscription_plan changes for a temple."""
+    __tablename__ = "temple_ownership_history"
+
+    id = Column(UUID(as_uuid=True), primary_key=True, default=uuid.uuid4)
+    temple_id = Column(UUID(as_uuid=True), ForeignKey("temples.id", ondelete="CASCADE"), nullable=False, index=True)
+    previous_management_mode = Column(String(30), nullable=True)
+    new_management_mode = Column(String(30), nullable=False)
+    previous_subscription_plan = Column(String(40), nullable=True)
+    new_subscription_plan = Column(String(40), nullable=False)
+    changed_by = Column(UUID(as_uuid=True), ForeignKey("users.id", ondelete="SET NULL"), nullable=True)
+    reason = Column(Text, nullable=True)
+    changed_at = Column(DateTime(timezone=True), default=utcnow)
+
+    __table_args__ = (
+        Index("idx_ownership_history_lookup", "temple_id", "changed_at"),
+    )
+
+
+class TempleLead(Base):
+    """Pipeline capture of potential temple signups for sales & platform growth."""
+    __tablename__ = "temple_leads"
+
+    id = Column(UUID(as_uuid=True), primary_key=True, default=uuid.uuid4)
+    temple_name = Column(String, nullable=False)
+    contact_person = Column(String, nullable=False)
+    phone = Column(String, nullable=False)
+    email = Column(String, nullable=False)
+    state = Column(String, nullable=False)
+    district = Column(String, nullable=False)
+    interested_plan = Column(String, nullable=True)
+    lead_source = Column(String, nullable=True)
+    follow_up_date = Column(Date, nullable=True)
+    status = Column(String(20), nullable=False, default="NEW")  # NEW, CONTACTED, INTERESTED, NEGOTIATION, CONVERTED, LOST
+    notes = Column(Text, nullable=True)
+    created_at = Column(DateTime(timezone=True), default=utcnow)
+    updated_at = Column(DateTime(timezone=True), default=utcnow, onupdate=utcnow)
+
+    __table_args__ = (
+        Index("idx_temple_leads_status_date", "status", "follow_up_date"),
+    )
+
+
+class TempleClaimRequest(Base):
+    """Lifecycle of devotee/manager claim requests over directory-only temples."""
+    __tablename__ = "temple_claim_requests"
+
+    id = Column(UUID(as_uuid=True), primary_key=True, default=uuid.uuid4)
+    temple_id = Column(UUID(as_uuid=True), ForeignKey("temples.id", ondelete="CASCADE"), nullable=False, index=True)
+    claimant_id = Column(UUID(as_uuid=True), ForeignKey("users.id", ondelete="CASCADE"), nullable=False, index=True)
+    status = Column(String(30), nullable=False, default="PENDING")  # PENDING, APPROVED, REJECTED
+    proof_urls = Column(JSON, nullable=True)  # List of URLs/paths to proofs
+    target_management_mode = Column(String(30), nullable=False, default="GOVERNED")
+    target_subscription_plan = Column(String(40), nullable=False, default="GOVERNED_STANDARD")
+    trial_duration_days = Column(Integer, nullable=False, default=30)
+    claimant_notes = Column(Text, nullable=True)
+    reviewed_by = Column(UUID(as_uuid=True), ForeignKey("users.id", ondelete="SET NULL"), nullable=True)
+    reviewed_at = Column(DateTime(timezone=True), nullable=True)
+    rejection_reason = Column(Text, nullable=True)
+    created_at = Column(DateTime(timezone=True), default=utcnow)
+    updated_at = Column(DateTime(timezone=True), default=utcnow, onupdate=utcnow)
+
+    # Relationships
+    temple = relationship("Temple")
+    claimant = relationship("User", foreign_keys=[claimant_id])
+    reviewer = relationship("User", foreign_keys=[reviewed_by])
+
+    __table_args__ = (
+        Index("idx_claims_temple_status", "temple_id", "status"),
+        Index("idx_claims_claimant", "claimant_id"),
+    )
+
+
+
 
 

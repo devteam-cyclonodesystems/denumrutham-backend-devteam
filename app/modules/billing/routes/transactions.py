@@ -2,12 +2,12 @@
 from fastapi import APIRouter, Depends
 from sqlalchemy.ext.asyncio import AsyncSession
 from typing import List
-from app.api.deps import get_db, get_current_user, get_current_temple_id
+from app.api.deps import get_db, get_current_user, get_current_temple_id, enforce_management_mode
 from app.schemas.domain import TokenData
 from app.schemas.transaction import TransactionCreate, TransactionResponse
 from app.services.transaction_service import TransactionService
 
-router = APIRouter()
+router = APIRouter(dependencies=[Depends(enforce_management_mode("accounting"))])
 
 
 @router.post("", response_model=TransactionResponse)

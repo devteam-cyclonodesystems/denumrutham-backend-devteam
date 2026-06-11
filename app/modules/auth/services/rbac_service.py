@@ -62,6 +62,19 @@ class RBACService:
         if user and user.role.upper().replace("_", "") in ("SUPERADMIN", "TEMPLEMANAGER", "ADMIN"):
             return True
 
+        # Check temple-scoped role override via UserTemple
+        from app.models.domain import UserTemple
+        ut_stmt = select(UserTemple).filter(
+            UserTemple.user_id == user_id,
+            UserTemple.temple_id == temple_id,
+            UserTemple.is_active == True
+        )
+        ut_res = await db.execute(ut_stmt)
+        user_temple = ut_res.scalars().first()
+        if user_temple and user_temple.role.upper().replace("_", "") in ("SUPERADMIN", "TEMPLEMANAGER", "ADMIN", "TEMPLEADMIN"):
+            return True
+
+
         user_perms = await RBACService.get_user_permissions(db, user_id, temple_id)
         
         target_keys = []

@@ -2,7 +2,7 @@
 from fastapi import APIRouter, Depends, HTTPException, Query
 from sqlalchemy.ext.asyncio import AsyncSession
 from typing import List, Optional
-from app.api.deps import get_db, get_current_user, get_current_temple_id
+from app.api.deps import get_db, get_current_user, get_current_temple_id, enforce_active_subscription, enforce_management_mode
 from app.schemas.domain import TokenData
 from app.services.offering_service import OfferingService
 from app.schemas.offering import (
@@ -17,7 +17,7 @@ from app.schemas.offering import (
     OfferingInventoryLinkResponse,
 )
 
-router = APIRouter()
+router = APIRouter(dependencies=[Depends(enforce_management_mode("offerings"))])
 
 
 # ================================================================
@@ -33,7 +33,7 @@ async def list_categories(
     return await OfferingService.get_categories(db=db, temple_id=temple_id, include_inactive=include_inactive)
 
 
-@router.post("/offering-categories", response_model=OfferingCategoryResponse, status_code=201, tags=["offering-categories"])
+@router.post("/offering-categories", response_model=OfferingCategoryResponse, status_code=201, dependencies=[Depends(enforce_active_subscription)], tags=["offering-categories"])
 async def create_category(
     data: OfferingCategoryCreate,
     db: AsyncSession = Depends(get_db),
@@ -43,7 +43,7 @@ async def create_category(
     return await OfferingService.create_category(db=db, data=data, temple_id=temple_id)
 
 
-@router.put("/offering-categories/{category_id}", response_model=OfferingCategoryResponse, tags=["offering-categories"])
+@router.put("/offering-categories/{category_id}", response_model=OfferingCategoryResponse, dependencies=[Depends(enforce_active_subscription)], tags=["offering-categories"])
 async def update_category(
     category_id: str,
     data: OfferingCategoryUpdate,
@@ -60,7 +60,7 @@ async def update_category(
 # ================================================================
 #  OFFERINGS — CORE CRUD
 # ================================================================
-@router.post("/offerings", response_model=OfferingResponse, status_code=201, tags=["offerings"])
+@router.post("/offerings", response_model=OfferingResponse, status_code=201, dependencies=[Depends(enforce_active_subscription)], tags=["offerings"])
 async def create_offering(
     data: OfferingCreate,
     db: AsyncSession = Depends(get_db),
@@ -132,7 +132,7 @@ async def get_offering_detail(
     return result
 
 
-@router.put("/offerings/{offering_id}", response_model=OfferingResponse, tags=["offerings"])
+@router.put("/offerings/{offering_id}", response_model=OfferingResponse, dependencies=[Depends(enforce_active_subscription)], tags=["offerings"])
 async def update_offering(
     offering_id: str,
     data: OfferingUpdate,
@@ -152,7 +152,7 @@ async def update_offering(
     return result
 
 
-@router.delete("/offerings/{offering_id}", tags=["offerings"])
+@router.delete("/offerings/{offering_id}", dependencies=[Depends(enforce_active_subscription)], tags=["offerings"])
 async def delete_offering(
     offering_id: str,
     db: AsyncSession = Depends(get_db),
@@ -173,7 +173,7 @@ async def delete_offering(
 # ================================================================
 #  PAYMENTS
 # ================================================================
-@router.post("/offerings/{offering_id}/payments", response_model=OfferingPaymentResponse, status_code=201, tags=["offering-payments"])
+@router.post("/offerings/{offering_id}/payments", response_model=OfferingPaymentResponse, status_code=201, dependencies=[Depends(enforce_active_subscription)], tags=["offering-payments"])
 async def add_payment(
     offering_id: str,
     data: OfferingPaymentCreate,
@@ -231,7 +231,7 @@ async def get_today_reconciliation(
     return await OfferingService.get_today_reconciliation(db=db, temple_id=temple_id)
 
 
-@router.post("/offerings-reconciliation/close", response_model=OfferingReconciliationResponse, status_code=201, tags=["offering-reconciliation"])
+@router.post("/offerings-reconciliation/close", response_model=OfferingReconciliationResponse, status_code=201, dependencies=[Depends(enforce_active_subscription)], tags=["offering-reconciliation"])
 async def close_reconciliation(
     actual_collected: float = Query(..., description="Actual collected amount"),
     notes: Optional[str] = Query(None, description="Closing notes"),

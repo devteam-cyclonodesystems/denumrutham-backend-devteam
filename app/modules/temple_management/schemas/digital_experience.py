@@ -125,6 +125,14 @@ class TempleWebsiteSettingsResponse(TempleWebsiteSettingsBase):
     temple_id: UUID
     created_at: datetime
     updated_at: datetime
+    
+    # Workflow tracking fields
+    approval_status: Optional[str] = "DRAFT"
+    submitted_by: Optional[UUID] = None
+    submitted_at: Optional[datetime] = None
+    reviewed_by: Optional[UUID] = None
+    reviewed_at: Optional[datetime] = None
+    rejection_reason: Optional[str] = None
 
 
 # ---------- Announcements ----------

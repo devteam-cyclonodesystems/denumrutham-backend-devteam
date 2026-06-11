@@ -109,17 +109,25 @@ class AuthService:
             raise HTTPException(status_code=400, detail="Incorrect username or password")
 
         security_version = None
+        temple_management_mode = None
+        subscription_plan = None
         if user.temple_id:
             from app.models.domain import Temple
-            t_res = await db.execute(select(Temple.security_version).filter(Temple.id == user.temple_id))
-            security_version = t_res.scalar()
+            t_res = await db.execute(select(Temple).filter(Temple.id == user.temple_id))
+            temple = t_res.scalars().first()
+            if temple:
+                security_version = temple.security_version
+                temple_management_mode = temple.management_mode
+                subscription_plan = temple.subscription_plan
 
         access_token = create_access_token(
             subject=user.id,
             temple_id=str(user.temple_id) if user.temple_id else None,
             role=user.role,
             username=user.user_id,
-            security_version=security_version
+            security_version=security_version,
+            temple_management_mode=temple_management_mode,
+            subscription_plan=subscription_plan
         )
         return {"access_token": access_token, "token_type": "bearer"}
 

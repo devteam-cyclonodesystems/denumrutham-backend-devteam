@@ -51,7 +51,31 @@ async def get_current_user(request: Request, token: str = Depends(oauth2_scheme)
             if not temple:
                 raise HTTPException(status_code=404, detail="Temple context invalid")
 
+            # Resolve live governance and subscription values to prevent stale token data
+            token_data.temple_management_mode = temple.management_mode
+            token_data.subscription_plan = temple.subscription_plan
+
+            # Resolve subscription warning state
+            from app.modules.billing.services.subscription_service import SubscriptionService
+            status_info = await SubscriptionService.get_subscription_status(db, temple_uuid)
+            token_data.past_due_warning = status_info.get("past_due_warning", False)
+
+            # Resolve temple-scoped role override if it exists
+            if token_data.sub:
+                from app.models.domain import UserTemple
+                user_uuid = UUID(token_data.sub)
+                ut_stmt = select(UserTemple).filter(
+                    UserTemple.user_id == user_uuid,
+                    UserTemple.temple_id == temple_uuid,
+                    UserTemple.is_active == True
+                )
+                ut_res = await db.execute(ut_stmt)
+                user_temple = ut_res.scalars().first()
+                if user_temple:
+                    token_data.role = user_temple.role
+
             # 1. Security Version Check
+
             if token_data.security_version is not None:
                 if temple.security_version > token_data.security_version:
                     raise HTTPException(
@@ -298,3 +322,80 @@ def apply_soft_delete_filter(query, model):
     if hasattr(model, "is_active"):
         return query.filter(model.is_active == True)
     return query
+
+
+async def enforce_active_subscription(
+    current_user: TokenData = Depends(get_current_user),
+    db: AsyncSession = Depends(get_db)
+) -> TokenData:
+    """
+    Enforces active subscription for write/modifying endpoints.
+    Allows SUPERADMIN and ADMIN to bypass this check.
+    For manager/staff, queries the Subscription table:
+    Raises HTTP 402 Payment Required if subscription status is CANCELLED, HALTED, EXPIRED,
+    or PAST_DUE and grace period has expired.
+    """
+    if current_user.role and current_user.role.upper().replace("_", "") == "SUPERADMIN":
+        return current_user
+
+    if current_user.temple_id:
+        from app.modules.billing.services.subscription_service import SubscriptionService
+        try:
+            temple_uuid = UUID(current_user.temple_id)
+        except ValueError:
+            return current_user
+
+        status_info = await SubscriptionService.get_subscription_status(db, temple_uuid)
+        if status_info.get("write_locked"):
+            raise HTTPException(
+                status_code=status.HTTP_402_PAYMENT_REQUIRED,
+                detail="Access to write operations is locked due to unpaid or expired subscription. Please update your payment details."
+            )
+    return current_user
+
+
+def enforce_management_mode(module: str):
+    """
+    Guards routes based on temple management mode.
+    
+    DIRECTORY_ONLY / DENUMRUTHAM_MANAGED:
+      - Block: 'inventory', 'store', 'offerings', 'hall-booking', 'transactions', 'transactional_config'
+    GOVERNED:
+      - Block: 'accounting', 'finance', 'hr-payroll', 'payroll', 'staff'
+    SUPERADMIN:
+      - Always bypass
+    """
+    async def checker(
+        current_user: TokenData = Depends(get_current_user),
+    ) -> TokenData:
+        if current_user.role and current_user.role.upper().replace("_", "") == "SUPERADMIN":
+            return current_user
+
+        # Retrieve the mode resolved live by get_current_user dependency
+        mode = current_user.temple_management_mode
+        if mode:
+            # Normalise module names
+            norm_module = module.lower().strip()
+            
+            # DIRECTORY_ONLY & DENUMRUTHAM_MANAGED restrictions
+            if mode in ("DIRECTORY_ONLY", "DENUMRUTHAM_MANAGED"):
+                blocked_modules = {"inventory", "store", "offerings", "hall-booking", "transactional_config", "transactions"}
+                if norm_module in blocked_modules:
+                    raise HTTPException(
+                        status_code=status.HTTP_403_FORBIDDEN,
+                        detail=f"Access denied: Operational module '{module}' is restricted under {mode} management mode."
+                    )
+            
+            # GOVERNED restrictions
+            elif mode == "GOVERNED":
+                blocked_modules = {"accounting", "finance", "hr-payroll", "payroll", "staff"}
+                if norm_module in blocked_modules:
+                    raise HTTPException(
+                        status_code=status.HTTP_403_FORBIDDEN,
+                        detail=f"Access denied: Operational module '{module}' is restricted under GOVERNED management mode."
+                    )
+                    
+        return current_user
+    return checker
+
+

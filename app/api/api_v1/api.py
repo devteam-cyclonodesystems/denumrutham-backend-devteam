@@ -14,6 +14,8 @@ from app.api.routes import (
 from app.modules.temple_management.routes import digital_experience, public_portal, recommendations
 from app.modules.governance.routes.platform_advertisements import router as platform_ads_router
 from app.modules.temple_management.routes.temple_advertisements import router as temple_ads_router
+from app.modules.governance.routes.claims import router as claims_router
+from app.modules.billing.routes.subscriptions import router as subscriptions_router
 from app.modules.analytics.routes.telemetry import (
     public_router as telemetry_public_router,
     manager_router as telemetry_manager_router,
@@ -25,6 +27,7 @@ api_router = APIRouter()
 # ── Public Temple Portal & Telemetry ─────────────────────────────────
 api_router.include_router(public_portal.router, prefix="/public/temples", tags=["Public Temple Portal"])
 api_router.include_router(public_portal.directory_router, prefix="/public/directory", tags=["Public Directory"])
+api_router.include_router(public_portal.public_router, prefix="/public", tags=["Public Platform Directory"])
 api_router.include_router(telemetry_public_router, prefix="/public", tags=["Public Telemetry"])
 
 # ── Core Infrastructure ───────────────────────────────────────────────
@@ -42,13 +45,16 @@ api_router.include_router(notifications.router, prefix="/notifications", tags=["
 api_router.include_router(temples.router, prefix="/temples", tags=["Temples"])
 api_router.include_router(upload.router, prefix="/upload", tags=["Media Uploads"])
 api_router.include_router(payments.router, prefix="/payments", tags=["Payment Processing"])
+api_router.include_router(subscriptions_router, prefix="/subscriptions", tags=["Subscriptions"])
 
 # ── Governance & RBAC ────────────────────────────────────────────────
 api_router.include_router(rbac.router, prefix="/rbac", tags=["Access Control (RBAC)"])
+api_router.include_router(claims_router, prefix="/claims", tags=["Temple Claims"])
 api_router.include_router(audit.router, prefix="/audit-logs", tags=["Audit Trails"])
 api_router.include_router(activity_logs.router, prefix="/manager/activity-logs", tags=["Activity Logs"])
 api_router.include_router(approvals.router, prefix="/approvals", tags=["Legacy Approvals"])
 api_router.include_router(change_requests.router, prefix="/change-requests", tags=["Change Requests"])
+
 
 # ── Admin & Management ───────────────────────────────────────────────
 api_router.include_router(superadmin.router, prefix="/superadmin", tags=["Super Admin"])

@@ -348,6 +348,34 @@ async def get_temple_audit_history(
     )
 
 
+@router.get("/temples/{temple_id}/governance-timeline")
+async def get_temple_governance_timeline(
+    temple_id: str,
+    page: int = Query(1, ge=1, description="Page number"),
+    page_size: int = Query(50, ge=1, le=100, description="Page size"),
+    event_type: Optional[str] = Query(None, description="Filter by event type"),
+    db: AsyncSession = Depends(get_db),
+    current_user: TokenData = Depends(get_current_superadmin),
+):
+    """
+    Get the Unified Governance Timeline for a temple, paginated.
+    """
+    try:
+        t_id = UUID(temple_id)
+    except ValueError:
+        raise HTTPException(status_code=400, detail="Invalid temple_id format")
+
+    events, total = await SuperAdminService.get_governance_timeline(
+        db=db,
+        temple_id=t_id,
+        page=page,
+        page_size=page_size,
+        event_type=event_type
+    )
+    return {"events": events, "total": total}
+
+
+
 # ---------------------------------------------------------------------------
 # Endpoints — HYBRID SYNC (Phase 4)
 # ---------------------------------------------------------------------------

@@ -2,7 +2,7 @@
 Authentication & Registration Routes — Unified registration, OTP, and login with redirect.
 """
 from uuid import UUID
-from fastapi import APIRouter, Depends, Request
+from fastapi import APIRouter, Depends, Request, HTTPException
 from fastapi.security import OAuth2PasswordRequestForm
 from sqlalchemy.ext.asyncio import AsyncSession
 from app.core.limiter import limiter
@@ -14,6 +14,7 @@ from app.schemas.auth import (
     OTPRequest, OTPVerify, LoginResponse,
     RegistrationResponse,
     ForgotPasswordRequest, ResetPasswordRequest, ForceResetPasswordRequest,
+    UserResponse,
 )
 from app.schemas.devotee_portal import DevoteeRegister
 from app.services.auth_service import AuthService
@@ -249,3 +250,44 @@ async def reset_password_force(
         new_password=data.new_password
     )
     return api_response(data=result, message="Password updated successfully")
+
+
+@router.get("/me")
+async def get_me(
+    db: AsyncSession = Depends(get_db),
+    current_user: TokenData = Depends(get_current_user),
+):
+    """Retrieve current user's profile with live management mode & subscription plan."""
+    from sqlalchemy.future import select
+    from app.models import Temple
+    from app.modules.auth.models.auth_models import User
+    
+    stmt = select(User).filter(User.id == UUID(current_user.sub))
+    res = await db.execute(stmt)
+    user = res.scalars().first()
+    if not user:
+        raise HTTPException(status_code=404, detail="User not found")
+        
+    response_data = {
+        "id": str(user.id),
+        "name": user.name,
+        "email": user.email,
+        "phone": user.phone,
+        "role": user.role,
+        "status": user.status,
+        "temple_id": str(user.temple_id) if user.temple_id else None,
+        "created_at": user.created_at.isoformat() if user.created_at else None,
+        "temple_management_mode": None,
+        "subscription_plan": None,
+    }
+    
+    if user.temple_id:
+        temple_stmt = select(Temple).filter(Temple.id == user.temple_id)
+        temple_res = await db.execute(temple_stmt)
+        temple = temple_res.scalars().first()
+        if temple:
+            response_data["temple_management_mode"] = temple.management_mode
+            response_data["subscription_plan"] = temple.subscription_plan
+            
+    return api_response(data=response_data, message="Profile retrieved successfully")
+

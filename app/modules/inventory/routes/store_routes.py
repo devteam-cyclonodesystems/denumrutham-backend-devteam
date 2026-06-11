@@ -8,7 +8,7 @@ from sqlalchemy.future import select
 from sqlalchemy import func
 from sqlalchemy.orm import selectinload
 
-from app.api.deps import get_db, get_current_user, get_current_temple_id
+from app.api.deps import get_db, get_current_user, get_current_temple_id, enforce_management_mode
 from app.schemas.domain import TokenData
 from app.schemas.store import (
     StoreProductCreate, StoreProductResponse, StoreProductUpdate,
@@ -25,7 +25,7 @@ from app.services.inventory_service import InventoryService
 from app.services.transaction_service import TransactionService
 from app.utils.number_generator import generate_document_number
 
-router = APIRouter()
+router = APIRouter(dependencies=[Depends(enforce_management_mode("store"))])
 logger = logging.getLogger("tms.api.store_routes")
 
 def utcnow():

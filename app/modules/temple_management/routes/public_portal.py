@@ -1,15 +1,23 @@
 import re
+import os
 import logging
-from fastapi import APIRouter, Depends, HTTPException, Request
+import sqlalchemy as sa
+from pathlib import Path
+from fastapi import APIRouter, Depends, HTTPException, Request, Query
+from fastapi.responses import FileResponse
 from sqlalchemy.ext.asyncio import AsyncSession
 from sqlalchemy.future import select
 from sqlalchemy.orm import selectinload
 from uuid import UUID
 from typing import List, Optional
 from datetime import datetime, timezone
+from PIL import Image, ImageOps
 
 from app.api.deps import get_db
-from app.models.domain import Temple, TempleWebsiteSettingsLive, TempleAdvertisement, PlatformAdvertisement
+from app.models.domain import (
+    Temple, TempleWebsiteSettingsLive, TempleAdvertisement, PlatformAdvertisement,
+    StateMaster, DistrictMaster, TempleSearchIndex
+)
 from app.modules.temple_management.models.temple_models import TempleImage, TempleProfile, TempleFestival
 from app.modules.inventory.schemas.store import StoreProductResponse
 from app.core.limiter import limiter
@@ -37,6 +45,150 @@ logger = logging.getLogger("tms.security")
 
 router = APIRouter()
 directory_router = APIRouter()
+public_router = APIRouter()
+
+
+def resolve_temple_image(temple: Temple) -> str:
+    """
+    Resolves the hero/primary image for a temple based on the priority:
+    1. Published Hero Image (from live website settings snapshot)
+    2. Hero Category Image (HERO_DESKTOP in temple.images)
+    3. Directory Image (profile.image_url)
+    4. Platform Default Image (/static/default-temple.jpg)
+    """
+    if temple.website_settings_live and temple.website_settings_live.settings_snapshot:
+        logo_url = temple.website_settings_live.settings_snapshot.get("logo_url")
+        if logo_url:
+            return logo_url
+            
+    if temple.images:
+        hero_desktop = next((img for img in temple.images if img.category == 'HERO_DESKTOP' and getattr(img, 'is_visible', True) is not False), None)
+        if hero_desktop:
+            return hero_desktop.image_url
+
+    if temple.profile and temple.profile.image_url:
+        return temple.profile.image_url
+
+    return "/static/default-temple.jpg"
+
+
+def get_image_variants(image_url: str) -> dict:
+    if not image_url:
+        image_url = "/static/default-temple.jpg"
+        
+    if image_url.startswith("http://") or image_url.startswith("https://"):
+        return {
+            "thumbnail": image_url,
+            "card": image_url,
+            "hero": image_url
+        }
+    return {
+        "thumbnail": f"/api/v1/public/images/transform?path={image_url}&variant=thumbnail",
+        "card": f"/api/v1/public/images/transform?path={image_url}&variant=card",
+        "hero": f"/api/v1/public/images/transform?path={image_url}&variant=hero"
+    }
+
+
+async def resolve_claim_status(db: AsyncSession, temple: Temple) -> str:
+    """
+    Resolves claim status based on verification levels:
+    - Level 0: UNCLAIMED (if no PENDING claim request)
+    - Level 1: CLAIM_PENDING (if PENDING claim request exists)
+    - Level 2: CLAIMED
+    - Level 3: OFFICIAL
+    """
+    if temple.verification_level == 3:
+        return "OFFICIAL"
+    elif temple.verification_level == 2:
+        return "CLAIMED"
+        
+    from app.modules.governance.models.governance_models import TempleClaimRequest
+    stmt = select(TempleClaimRequest).filter(
+        TempleClaimRequest.temple_id == temple.id,
+        TempleClaimRequest.status == "PENDING"
+    )
+    res = await db.execute(stmt)
+    pending_claim = res.scalars().first()
+    if pending_claim:
+        if temple.verification_level < 1:
+            temple.verification_level = 1
+        return "CLAIM_PENDING"
+        
+    if temple.verification_level == 1:
+        return "CLAIM_PENDING"
+        
+    return "UNCLAIMED"
+
+
+@public_router.get("/images/transform", tags=["public-images"])
+async def transform_image(
+    path: str,
+    variant: str = "card"
+):
+    """
+    Transforms and resizes an image on the fly based on the variant requested,
+    caching the result in the static/cache folder.
+    Variants:
+      - thumbnail: 150x150
+      - card: 400x250
+      - hero: 1200x500
+    """
+    sanitized_path = path.lstrip("/")
+    if ".." in sanitized_path or sanitized_path.startswith("/"):
+        raise HTTPException(status_code=400, detail="Invalid image path")
+
+    if sanitized_path.startswith("http://") or sanitized_path.startswith("https://"):
+        raise HTTPException(status_code=400, detail="Cannot transform external URLs")
+
+    source_file = Path(sanitized_path)
+    if not source_file.exists():
+        source_file = Path("static/default-temple.jpg")
+        if not source_file.exists():
+            # Create a simple placeholder image dynamically
+            try:
+                sizes = {
+                    "thumbnail": (150, 150),
+                    "card": (400, 250),
+                    "hero": (1200, 500)
+                }
+                target_size = sizes.get(variant, (400, 250))
+                # Create directories
+                os.makedirs("static", exist_ok=True)
+                img = Image.new("RGB", target_size, color=(24, 18, 6))
+                img.save("static/default-temple.jpg", format="JPEG")
+                source_file = Path("static/default-temple.jpg")
+            except Exception:
+                raise HTTPException(status_code=404, detail="Image not found")
+
+    sizes = {
+        "thumbnail": (150, 150),
+        "card": (400, 250),
+        "hero": (1200, 500)
+    }
+    
+    if variant not in sizes:
+        variant = "card"
+        
+    target_size = sizes[variant]
+    
+    cache_dir = Path("static/cache") / variant
+    cache_dir.mkdir(parents=True, exist_ok=True)
+    
+    cached_file = cache_dir / source_file.name
+    
+    if cached_file.exists() and cached_file.stat().st_mtime >= source_file.stat().st_mtime:
+        return FileResponse(str(cached_file))
+        
+    try:
+        with Image.open(source_file) as img:
+            resized_img = ImageOps.fit(img, target_size, Image.Resampling.LANCZOS)
+            img_format = img.format if img.format else "JPEG"
+            resized_img.save(cached_file, format=img_format, quality=85)
+            
+        return FileResponse(str(cached_file))
+    except Exception as e:
+        logger.error(f"Image transformation failed for {path} ({variant}): {str(e)}")
+        return FileResponse(str(source_file))
 
 
 class PublicPortalResponse(BaseModel):
@@ -83,11 +235,7 @@ async def get_public_temple_portal(
     if not temple:
         raise HTTPException(status_code=404, detail="Temple not found")
 
-    # 3. Raise 404 if website is not published
-    if not temple.website_settings_live:
-        raise HTTPException(status_code=404, detail="Temple website is not published")
-
-    # 4. Direct Mapping of Profile & Images
+    # 3. Direct Mapping of Profile & Images
     profile_db = temple.profile
     images = []
     if temple.images:
@@ -135,12 +283,46 @@ async def get_public_temple_portal(
         images=images
     )
 
-    # 5. Load settings from the live snapshot contract
+    # 4. Load settings from the live snapshot contract or construct default
     live = temple.website_settings_live
-    settings_snapshot = live.settings_snapshot
+    if live:
+        settings_snapshot = live.settings_snapshot
+        published_at = live.published_at
+        settings_id = live.id
+    else:
+        settings_snapshot = {
+            "theme_name": "default",
+            "primary_color": "#ff6600",
+            "secondary_color": "#ffcc00",
+            "logo_url": None,
+            "hero_layout": "split",
+            "section_order": ["hero", "about", "timings", "announcements", "activities", "gallery", "offerings", "location"],
+            "enable_mantras": True,
+            "enable_festivals": True,
+            "enable_donations": True,
+            "enable_hall_booking": True,
+            "enable_store": True,
+            "seo_keywords": None,
+            "og_image_url": None,
+            "hero_title": temple.name,
+            "hero_subtitle": temple.location,
+            "seo_description": temple.description,
+            "notice_board_content": None,
+            "location_settings": {
+                "google_maps_url": getattr(profile_db, 'google_maps_url', None) if profile_db else None,
+                "latitude": profile_db.latitude if profile_db else None,
+                "longitude": profile_db.longitude if profile_db else None,
+                "location_label": getattr(profile_db, 'map_display_label', None) if profile_db else "📍 Temple Location"
+            } if profile_db else {},
+            "timings_settings": [],
+            "daily_activities_settings": []
+        }
+        published_at = temple.created_at
+        settings_id = temple.id
+
     try:
         settings = TempleWebsiteSettingsResponse(
-            id=live.id,
+            id=settings_id,
             temple_id=temple.id,
             theme_name=settings_snapshot.get("theme_name") or "default",
             primary_color=settings_snapshot.get("primary_color") or "#ff6600",
@@ -162,8 +344,8 @@ async def get_public_temple_portal(
             location_settings=settings_snapshot.get("location_settings"),
             timings_settings=settings_snapshot.get("timings_settings"),
             daily_activities_settings=settings_snapshot.get("daily_activities_settings"),
-            created_at=live.published_at,
-            updated_at=live.published_at
+            created_at=published_at,
+            updated_at=published_at
         )
     except Exception as e:
         logger.error(f"Failed to validate live snapshot for temple {temple.id}: {str(e)}")
@@ -206,7 +388,7 @@ async def list_public_temples(
     """
     stmt = (
         select(Temple)
-        .join(TempleWebsiteSettingsLive, Temple.id == TempleWebsiteSettingsLive.temple_id)
+        .outerjoin(TempleWebsiteSettingsLive, Temple.id == TempleWebsiteSettingsLive.temple_id)
         .outerjoin(TempleProfile, Temple.id == TempleProfile.temple_id)
         .options(
             selectinload(Temple.profile),
@@ -215,7 +397,7 @@ async def list_public_temples(
             selectinload(Temple.activities),
             selectinload(Temple.festivals)
         )
-        .filter(Temple.is_active == True, Temple.status == "APPROVED")
+        .filter(Temple.is_active == True, Temple.status == "APPROVED", Temple.directory_status == "ACTIVE")
     )
     if search:
         from sqlalchemy import or_
@@ -248,25 +430,11 @@ async def list_public_temples(
     for temple in temples:
         profile = temple.profile
         
-        # 1. Resolve hero image: HERO_DESKTOP -> profile.image_url -> GALLERY -> None
-        hero_image_url = None
-        if temple.images:
-            hero_desktop = next((img for img in temple.images if img.category == 'HERO_DESKTOP'), None)
-            if hero_desktop:
-                hero_image_url = hero_desktop.image_url
+        # 1. Resolve image and Pillow variants using helpers
+        resolved_img = resolve_temple_image(temple)
+        variants = get_image_variants(resolved_img)
 
-        if not hero_image_url and profile and profile.image_url:
-            hero_image_url = profile.image_url
-
-        if not hero_image_url and temple.images:
-            gallery_img = next((img for img in temple.images if img.category == 'GALLERY'), None)
-            if gallery_img:
-                hero_image_url = gallery_img.image_url
-
-        # Fallback image resolution for backward compatibility
-        image_url = hero_image_url
-
-        # 2. Resolve timings, activities, and festivals using the new status engine
+        # 2. Resolve timings, activities, and festivals using the status engine
         timings_settings = None
         activities_settings = None
         if temple.website_settings_live and temple.website_settings_live.settings_snapshot:
@@ -301,6 +469,9 @@ async def list_public_temples(
             temple.festivals, today_date
         )
 
+        # 4. Resolve claim status badge
+        claim_badge = await resolve_claim_status(db, temple)
+
         # Build list of active activities
         activities_list = []
         if temple.activities:
@@ -322,14 +493,19 @@ async def list_public_temples(
             "location": profile.location if profile else "",
             "district": profile.district if profile else "",
             "state": profile.state if profile else "",
-            "image_url": image_url or "",
-            "hero_image_url": hero_image_url or "",
+            "image_url": resolved_img,
+            "hero_image_url": resolved_img,
+            "image_variants": variants,
             "slug": temple.domain,
             "opening_time": legacy_op,
             "closing_time": legacy_cl,
             "temple_status": temple_status,
             "current_activity": current_activity,
             "upcoming_festival": upcoming_festival,
+            "claim_status": claim_badge,
+            "management_mode": temple.management_mode,
+            "verification_level": temple.verification_level,
+            "is_featured": temple.is_featured,
             "activities": activities_list
         })
     return items
@@ -352,7 +528,7 @@ async def get_public_states_directory(
         select(TempleProfile.state, func.count(Temple.id).label("temple_count"))
         .join(Temple, Temple.id == TempleProfile.temple_id)
         .join(TempleWebsiteSettingsLive, Temple.id == TempleWebsiteSettingsLive.temple_id)
-        .filter(Temple.is_active == True, Temple.status == "APPROVED")
+        .filter(Temple.is_active == True, Temple.status == "APPROVED", Temple.directory_status == "ACTIVE")
         .filter(TempleProfile.state != None, TempleProfile.state != "")
         .group_by(TempleProfile.state)
         .order_by(TempleProfile.state.asc())
@@ -380,7 +556,7 @@ async def get_public_districts_directory(
         select(TempleProfile.district, func.count(Temple.id).label("temple_count"))
         .join(Temple, Temple.id == TempleProfile.temple_id)
         .join(TempleWebsiteSettingsLive, Temple.id == TempleWebsiteSettingsLive.temple_id)
-        .filter(Temple.is_active == True, Temple.status == "APPROVED")
+        .filter(Temple.is_active == True, Temple.status == "APPROVED", Temple.directory_status == "ACTIVE")
         .filter(TempleProfile.state.ilike(state))
         .filter(TempleProfile.district != None, TempleProfile.district != "")
         .group_by(TempleProfile.district)
@@ -462,11 +638,7 @@ async def get_public_temple_bootstrap(
     if not temple:
         raise HTTPException(status_code=404, detail="Temple not found")
 
-    # 3. Raise 404 if website is not published
-    if not temple.website_settings_live:
-        raise HTTPException(status_code=404, detail="Temple website is not published")
-
-    # 4. Direct Mapping of Profile & Images
+    # 3. Direct Mapping of Profile & Images
     profile_db = temple.profile
     images = []
     if temple.images:
@@ -486,6 +658,9 @@ async def get_public_temple_bootstrap(
         "id": str(temple.id),
         "name": temple.name,
         "domain": temple.domain,
+        "management_mode": temple.management_mode,
+        "verification_level": temple.verification_level,
+        "claim_status": await resolve_claim_status(db, temple),
         "description": profile_db.description if profile_db else "",
         "history": profile_db.history if profile_db else "",
         "location": profile_db.location if profile_db else "",
@@ -512,10 +687,43 @@ async def get_public_temple_bootstrap(
         "images": images
     }
 
-    # 5. Extract settings and featureVisibility from the live snapshot
+    # 4. Extract settings and featureVisibility from the live snapshot or use defaults
     live = temple.website_settings_live
-    settings_snapshot = live.settings_snapshot
-    
+    if live:
+        settings_snapshot = live.settings_snapshot
+        published_at = live.published_at.isoformat() if live.published_at else None
+        settings_id = str(live.id)
+    else:
+        settings_snapshot = {
+            "theme_name": "default",
+            "primary_color": "#ff6600",
+            "secondary_color": "#ffcc00",
+            "logo_url": None,
+            "hero_layout": "split",
+            "section_order": ["hero", "about", "timings", "announcements", "activities", "gallery", "offerings", "location"],
+            "enable_mantras": True,
+            "enable_festivals": True,
+            "enable_donations": True,
+            "enable_hall_booking": True,
+            "enable_store": True,
+            "seo_keywords": None,
+            "og_image_url": None,
+            "hero_title": temple.name,
+            "hero_subtitle": temple.location,
+            "seo_description": temple.description,
+            "notice_board_content": None,
+            "location_settings": {
+                "google_maps_url": getattr(profile_db, 'google_maps_url', None) if profile_db else None,
+                "latitude": profile_db.latitude if profile_db else None,
+                "longitude": profile_db.longitude if profile_db else None,
+                "location_label": getattr(profile_db, 'map_display_label', None) if profile_db else "📍 Temple Location"
+            } if profile_db else {},
+            "timings_settings": [],
+            "daily_activities_settings": []
+        }
+        published_at = temple.created_at.isoformat() if temple.created_at else None
+        settings_id = str(temple.id)
+
     # Feature toggle fallback strategy
     default_visibility = {
         "enablePoojaBooking": True,
@@ -541,7 +749,7 @@ async def get_public_temple_bootstrap(
             feature_visibility[k] = v
 
     settings = {
-        "id": str(live.id),
+        "id": settings_id,
         "temple_id": str(temple.id),
         "theme_name": settings_snapshot.get("theme_name") or "default",
         "primary_color": settings_snapshot.get("primary_color") or "#ff6600",
@@ -563,8 +771,8 @@ async def get_public_temple_bootstrap(
         "location_settings": settings_snapshot.get("location_settings"),
         "timings_settings": settings_snapshot.get("timings_settings"),
         "daily_activities_settings": settings_snapshot.get("daily_activities_settings"),
-        "created_at": live.published_at.isoformat() if live.published_at else None,
-        "updated_at": live.published_at.isoformat() if live.published_at else None
+        "created_at": published_at,
+        "updated_at": published_at
     }
 
     # Serialize active festivals
@@ -1127,4 +1335,358 @@ async def list_active_public_advertisements(
         })
 
     return advertisements
+
+
+@public_router.get("/states", response_model=List[dict])
+async def get_public_states(
+    db: AsyncSession = Depends(get_db)
+):
+    """
+    Retrieve active states from StateMaster and temple counts.
+    """
+    from sqlalchemy import func
+    stmt = (
+        select(StateMaster.name, StateMaster.slug, StateMaster.code, func.count(Temple.id).label("temple_count"))
+        .outerjoin(Temple, (Temple.state_id == StateMaster.id) & 
+                            (Temple.is_active == True) & 
+                            (Temple.status == "APPROVED") & 
+                            (Temple.directory_status == "ACTIVE"))
+        .group_by(StateMaster.id, StateMaster.name, StateMaster.slug, StateMaster.code)
+        .order_by(StateMaster.name.asc())
+    )
+    result = await db.execute(stmt)
+    rows = result.all()
+    return [
+        {
+            "state": r.name,
+            "slug": r.slug,
+            "code": r.code,
+            "temple_count": r.temple_count
+        }
+        for r in rows
+    ]
+
+
+@public_router.get("/states/{state_slug}/districts", response_model=List[dict])
+async def get_public_districts(
+    state_slug: str,
+    db: AsyncSession = Depends(get_db)
+):
+    """
+    Retrieve districts and temple counts for a specific state slug.
+    """
+    from sqlalchemy import func
+    state_stmt = select(StateMaster).filter(StateMaster.slug == state_slug.lower())
+    state_res = await db.execute(state_stmt)
+    state_obj = state_res.scalars().first()
+    if not state_obj:
+        raise HTTPException(status_code=404, detail="State not found")
+
+    stmt = (
+        select(DistrictMaster.name, DistrictMaster.slug, DistrictMaster.code, func.count(Temple.id).label("temple_count"))
+        .filter(DistrictMaster.state_id == state_obj.id)
+        .outerjoin(Temple, (Temple.district_id == DistrictMaster.id) & 
+                            (Temple.is_active == True) & 
+                            (Temple.status == "APPROVED") & 
+                            (Temple.directory_status == "ACTIVE"))
+        .group_by(DistrictMaster.id, DistrictMaster.name, DistrictMaster.slug, DistrictMaster.code)
+        .order_by(DistrictMaster.name.asc())
+    )
+    result = await db.execute(stmt)
+    rows = result.all()
+    return [
+        {
+            "district": r.name,
+            "slug": r.slug,
+            "code": r.code,
+            "temple_count": r.temple_count
+        }
+        for r in rows
+    ]
+
+
+@public_router.get("/states/{state_slug}/districts/{district_slug}/temples", response_model=List[dict])
+async def get_public_district_temples(
+    state_slug: str,
+    district_slug: str,
+    page: int = Query(1, ge=1),
+    limit: int = Query(10, ge=1, le=100),
+    db: AsyncSession = Depends(get_db)
+):
+    """
+    Retrieve temples within a specific state and district slug.
+    """
+    state_stmt = select(StateMaster).filter(StateMaster.slug == state_slug.lower())
+    state_res = await db.execute(state_stmt)
+    state_obj = state_res.scalars().first()
+    if not state_obj:
+        raise HTTPException(status_code=404, detail="State not found")
+
+    dist_stmt = select(DistrictMaster).filter(DistrictMaster.state_id == state_obj.id, DistrictMaster.slug == district_slug.lower())
+    dist_res = await db.execute(dist_stmt)
+    dist_obj = dist_res.scalars().first()
+    if not dist_obj:
+        raise HTTPException(status_code=404, detail="District not found")
+
+    stmt = (
+        select(Temple)
+        .filter(Temple.district_id == dist_obj.id, Temple.is_active == True, Temple.status == "APPROVED", Temple.directory_status == "ACTIVE")
+        .options(
+            selectinload(Temple.profile),
+            selectinload(Temple.website_settings_live),
+            selectinload(Temple.images),
+            selectinload(Temple.activities),
+            selectinload(Temple.festivals)
+        )
+        .order_by(Temple.name.asc())
+    )
+    
+    offset = (page - 1) * limit
+    stmt = stmt.limit(limit).offset(offset)
+    
+    result = await db.execute(stmt)
+    temples = result.scalars().all()
+    
+    items = []
+    for temple in temples:
+        profile = temple.profile
+        resolved_img = resolve_temple_image(temple)
+        variants = get_image_variants(resolved_img)
+        claim_badge = await resolve_claim_status(db, temple)
+        
+        items.append({
+            "id": str(temple.id),
+            "name": temple.name,
+            "location": profile.location if profile else "",
+            "district": dist_obj.name,
+            "state": state_obj.name,
+            "slug": temple.domain,
+            "image_url": resolved_img,
+            "hero_image_url": resolved_img,
+            "image_variants": variants,
+            "claim_status": claim_badge,
+            "management_mode": temple.management_mode,
+            "verification_level": temple.verification_level,
+            "is_featured": temple.is_featured,
+        })
+    return items
+
+
+@public_router.get("/search", response_model=List[dict])
+async def search_public_temples(
+    q: str = Query(..., min_length=1),
+    page: int = Query(1, ge=1),
+    limit: int = Query(10, ge=1, le=100),
+    db: AsyncSession = Depends(get_db)
+):
+    """
+    Ranked temple search matching query across Temple Name, Alternative Names,
+    District, State, Village, Deity, Keywords, and Festival Names.
+    """
+    clean_q = q.strip().lower()
+    if not clean_q:
+        return []
+
+    from sqlalchemy import or_
+    stmt = (
+        select(Temple)
+        .outerjoin(TempleSearchIndex, Temple.id == TempleSearchIndex.temple_id)
+        .outerjoin(TempleProfile, Temple.id == TempleProfile.temple_id)
+        .outerjoin(StateMaster, Temple.state_id == StateMaster.id)
+        .outerjoin(DistrictMaster, Temple.district_id == DistrictMaster.id)
+        .options(
+            selectinload(Temple.profile),
+            selectinload(Temple.website_settings_live),
+            selectinload(Temple.images),
+            selectinload(Temple.activities),
+            selectinload(Temple.festivals),
+            selectinload(Temple.search_index)
+        )
+        .filter(
+            Temple.is_active == True,
+            Temple.status == "APPROVED",
+            Temple.directory_status == "ACTIVE"
+        )
+        .filter(
+            or_(
+                sa.func.lower(Temple.name).like(f"%{clean_q}%"),
+                sa.func.lower(TempleProfile.main_deity).like(f"%{clean_q}%"),
+                sa.func.lower(StateMaster.name).like(f"%{clean_q}%"),
+                sa.func.lower(DistrictMaster.name).like(f"%{clean_q}%"),
+                sa.func.lower(TempleSearchIndex.alternative_names).like(f"%{clean_q}%"),
+                sa.func.lower(TempleSearchIndex.keywords).like(f"%{clean_q}%"),
+                sa.func.lower(TempleSearchIndex.village).like(f"%{clean_q}%"),
+                Temple.festivals.any(sa.func.lower(TempleFestival.name).like(f"%{clean_q}%"))
+            )
+        )
+    )
+
+    result = await db.execute(stmt)
+    candidates = result.scalars().all()
+
+    scored_items = []
+    from app.modules.governance.models.operational_states import TempleOperationalState
+
+    for temple in candidates:
+        profile = temple.profile
+        search_idx = temple.search_index
+        
+        name = temple.name.strip().lower() if temple.name else ""
+        alt_names = [n.strip().lower() for n in search_idx.alternative_names.split(",")] if (search_idx and search_idx.alternative_names) else []
+        main_deity = profile.main_deity.strip().lower() if (profile and profile.main_deity) else ""
+        deities = [d.strip().lower() for d in (profile.deities or [])] if (profile and profile.deities) else []
+        
+        state_stmt = select(StateMaster).filter(StateMaster.id == temple.state_id)
+        state_res = await db.execute(state_stmt)
+        state_obj = state_res.scalars().first()
+        state_name = state_obj.name.strip().lower() if state_obj else ""
+        
+        dist_stmt = select(DistrictMaster).filter(DistrictMaster.id == temple.district_id)
+        dist_res = await db.execute(dist_stmt)
+        dist_obj = dist_res.scalars().first()
+        district_name = dist_obj.name.strip().lower() if dist_obj else ""
+        
+        village = search_idx.village.strip().lower() if (search_idx and search_idx.village) else ""
+        keywords = [k.strip().lower() for k in search_idx.keywords.split(",")] if (search_idx and search_idx.keywords) else []
+        
+        festival_names = [f.name.strip().lower() for f in temple.festivals if f.name] if temple.festivals else []
+
+        base_score = 0
+        
+        # 1. Exact Match (Score = 100)
+        if clean_q == name or clean_q in alt_names:
+            base_score = max(base_score, 100)
+        # 2. Temple Name Match (Score = 50)
+        elif clean_q in name or any(clean_q in alt for alt in alt_names):
+            base_score = max(base_score, 50)
+        # 3. Deity Match (Score = 30)
+        elif clean_q == main_deity or clean_q in main_deity or clean_q in deities or any(clean_q in d for d in deities):
+            base_score = max(base_score, 30)
+        # 4. District Match (Score = 20)
+        elif clean_q == district_name or clean_q in district_name or clean_q == state_name or clean_q in state_name or clean_q == village or clean_q in village:
+            base_score = max(base_score, 20)
+        # 5. Keyword Match (Score = 10)
+        elif clean_q in keywords or any(clean_q in k for k in keywords) or any(clean_q in f for f in festival_names):
+            base_score = max(base_score, 10)
+
+        bonus = 0
+        if temple.operational_state == TempleOperationalState.ACTIVE:
+            bonus += 15
+        if temple.verification_level == 3:
+            bonus += 10
+        if temple.is_featured:
+            bonus += 5
+
+        total_score = base_score + bonus
+        
+        if base_score > 0:
+            resolved_img = resolve_temple_image(temple)
+            variants = get_image_variants(resolved_img)
+            claim_badge = await resolve_claim_status(db, temple)
+            
+            scored_items.append({
+                "temple": {
+                    "id": str(temple.id),
+                    "name": temple.name,
+                    "location": profile.location if profile else "",
+                    "district": dist_obj.name if dist_obj else "",
+                    "state": state_obj.name if state_obj else "",
+                    "slug": temple.domain,
+                    "image_url": resolved_img,
+                    "hero_image_url": resolved_img,
+                    "image_variants": variants,
+                    "claim_status": claim_badge,
+                    "management_mode": temple.management_mode,
+                    "verification_level": temple.verification_level,
+                    "is_featured": temple.is_featured,
+                },
+                "score": total_score,
+                "is_featured": temple.is_featured,
+                "name_key": name
+            })
+
+    scored_items.sort(key=lambda x: (-x["score"], -int(x["is_featured"]), x["name_key"]))
+    
+    offset = (page - 1) * limit
+    paginated_items = scored_items[offset:offset+limit]
+    
+    return [{**item["temple"], "search_score": item["score"]} for item in paginated_items]
+
+
+@public_router.get("/featured-temples", response_model=List[dict])
+async def get_public_featured_temples(
+    category: str = Query("FEATURED"),
+    db: AsyncSession = Depends(get_db)
+):
+    """
+    Retrieve up to 6 temples categorized by FEATURED, TRENDING, or RECENTLY_ADDED.
+    """
+    stmt = (
+        select(Temple)
+        .outerjoin(TempleWebsiteSettingsLive, Temple.id == TempleWebsiteSettingsLive.temple_id)
+        .outerjoin(TempleProfile, Temple.id == TempleProfile.temple_id)
+        .options(
+            selectinload(Temple.profile),
+            selectinload(Temple.website_settings_live),
+            selectinload(Temple.images),
+            selectinload(Temple.activities),
+            selectinload(Temple.festivals)
+        )
+        .filter(Temple.is_active == True, Temple.status == "APPROVED", Temple.directory_status == "ACTIVE")
+    )
+    
+    category = category.upper()
+    if category == "FEATURED":
+        stmt = stmt.filter(Temple.is_featured == True)
+    elif category == "TRENDING":
+        stmt = stmt.order_by(Temple.is_featured.desc(), Temple.created_at.desc())
+    elif category == "RECENTLY_ADDED":
+        stmt = stmt.order_by(Temple.created_at.desc())
+    else:
+        stmt = stmt.filter(Temple.is_featured == True)
+        
+    stmt = stmt.limit(6)
+    result = await db.execute(stmt)
+    temples = result.scalars().all()
+    
+    if category == "FEATURED" and len(temples) < 6:
+        needed = 6 - len(temples)
+        existing_ids = [t.id for t in temples]
+        fill_stmt = (
+            select(Temple)
+            .filter(Temple.is_active == True, Temple.status == "APPROVED", Temple.directory_status == "ACTIVE")
+            .filter(~Temple.id.in_(existing_ids) if existing_ids else True)
+            .options(
+                selectinload(Temple.profile),
+                selectinload(Temple.website_settings_live),
+                selectinload(Temple.images)
+            )
+            .limit(needed)
+        )
+        fill_res = await db.execute(fill_stmt)
+        temples.extend(fill_res.scalars().all())
+        
+    items = []
+    for temple in temples:
+        profile = temple.profile
+        resolved_img = resolve_temple_image(temple)
+        variants = get_image_variants(resolved_img)
+        claim_badge = await resolve_claim_status(db, temple)
+        
+        items.append({
+            "id": str(temple.id),
+            "name": temple.name,
+            "location": profile.location if profile else "",
+            "district": profile.district if profile else "",
+            "state": profile.state if profile else "",
+            "slug": temple.domain,
+            "image_url": resolved_img,
+            "hero_image_url": resolved_img,
+            "image_variants": variants,
+            "claim_status": claim_badge,
+            "management_mode": temple.management_mode,
+            "verification_level": temple.verification_level,
+            "is_featured": temple.is_featured,
+        })
+    return items
 

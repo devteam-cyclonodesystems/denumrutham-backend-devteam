@@ -86,7 +86,13 @@ ADMIN_PASSWORD = "admin@123"
 @pytest_asyncio.fixture(scope="session", autouse=True)
 async def seed_data(setup_database):
     async with TestSessionLocal() as session:
-        temple = Temple(id=TEMPLE_ID, name="Test Temple", domain="test", status="APPROVED")
+        temple = Temple(
+            id=TEMPLE_ID,
+            name="Test Temple",
+            domain="test",
+            status="APPROVED",
+            management_mode="SELF_MANAGED",
+        )
         session.add(temple)
         await session.commit()
 

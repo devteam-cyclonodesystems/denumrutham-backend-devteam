@@ -19,11 +19,12 @@ class Settings(BaseSettings):
     PORT: int = int(os.getenv("PORT", "8000"))
     CORS_ALLOWED_ORIGINS: str = os.getenv("CORS_ALLOWED_ORIGINS", "")
     ENABLE_STAFF_SELF_REGISTRATION: bool = False
+    RAZORPAY_WEBHOOK_SECRET: str = os.getenv("RAZORPAY_WEBHOOK_SECRET", "")
 
     @model_validator(mode="after")
     def validate_secrets(self) -> 'Settings':
         if self.ENVIRONMENT.lower() == "production":
-            required_vars = ["DATABASE_URL", "SECRET_KEY"]
+            required_vars = ["DATABASE_URL", "SECRET_KEY", "RAZORPAY_WEBHOOK_SECRET"]
             for var in required_vars:
                 if not os.getenv(var):
                     raise ValueError(f"Missing required production environment variable: {var}")
