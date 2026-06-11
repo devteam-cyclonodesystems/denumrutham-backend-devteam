@@ -21,6 +21,7 @@
 | INC-010 | Missing PaymentStatus import in devotee_portal schemas | P2 – High | ✅ Resolved | 2026-06-09 |
 | INC-011 | Website Builder updates blocked & store/hall sections missing | P1 – Critical | ✅ Resolved | 2026-06-10 |
 | INC-012 | Omitted sprint entity tables causing bootstrap/follow crash | P1 – Critical | ✅ Resolved | 2026-06-10 |
+| INC-013 | Non-idempotent migration blocks Alembic chain on redeploys | P1 – Critical | ✅ Resolved | 2026-06-11 |
 | FEAT-001 | Phase 1 – Sidebar Spotlight Ad Area & Layout Alignment | Feature Delivery | ✅ Shipped | 2026-06-10 |
 | FEAT-002 | Phase 2 – Layout Responsiveness & Spotlight Ad Rails | Feature Delivery | ✅ Shipped | 2026-06-10 |
 
@@ -569,6 +570,51 @@ Although the production database recorded its `alembic_version` as the latest he
 
 - Recovery script: `scratch/recreate_missing_tables.py`
 - Alembic Head: `48bd9fc73314`
+
+---
+
+## INC-013: Non-Idempotent Migration Blocks Alembic Chain on Redeploys
+
+| Field | Value |
+|-------|-------|
+| **Incident ID** | INC-013 |
+| **Incident Title** | Non-idempotent migration blocks Alembic chain causing backend 500 on redeploys |
+| **Date and Time** | 2026-06-11T23:50:00Z |
+| **Severity/Priority** | P1 – Critical |
+| **Current Status** | ✅ Resolved |
+
+### Description
+
+After deploying Phase 6/6.5 backend updates, public devotee portal APIs (e.g. `/api/v1/public/states`) returned `HTTP 500 Internal Server Error (DATABASE_ERROR)`. The explorer view in the frontend failed to load, displaying the "Unable to Load Directory Internal database error" status.
+
+### Root Cause
+
+1. **Non-Idempotent Migration**: The migration `add_public_directory_indexes.py` (which sits just before Phase 1 in the migration chain) attempted to create composite indexes (`idx_temple_profiles_state_district`, etc.) using bare `op.create_index()` calls without checking for their existence. Because these indexes were already present in the production database (manually created during previous runs/sprints), Alembic crashed with a `DuplicateTable/DuplicateObject` error.
+2. **Invalid Merge Topology**: The merge migration `phase6_directory_changes.py` had `down_revision = ('48bd9fc73314', '05757f236a11')` which bypassed `add_public_directory_indexes` and caused Alembic to see multiple unmerged heads. Correcting this `down_revision` to include `add_public_directory_indexes` solved the merge topology, but since `add_public_directory_indexes` is an ancestor of `05757f236a11` in the main chain, the merge itself was topologically redundant.
+3. **Redeployment Failure Cascade**: When the Alembic upgrade command `alembic upgrade head` failed on container startup during Railway deployment, the new container crashed and failed its health checks. Railway kept the *old* container running, which served the old codebase. However, queries from the frontend triggered database queries that referenced newer columns (e.g., `directory_status`, `management_mode`, etc.) that were never created in the database, leading to `DATABASE_ERROR` exceptions.
+
+### Affected Services, Components, or Features
+
+- Devotee Portal Explorer (States, Districts directories)
+- Public Portal APIs (`/api/v1/public/states`, `/api/v1/public/temples`)
+- Backend Deployment pipeline (Railway containers rolled back to legacy code)
+
+### Resolution Implemented
+
+1. **Idempotent Migration Patch**: Rewrote `add_public_directory_indexes.py` to inspect existing indexes via `sa.inspect(bind)` and only create the indexes if they are not already present.
+2. **Topology Correction**: Corrected `phase6_directory_changes.py` down_revision from `('48bd9fc73314', '05757f236a11')` to `('add_public_directory_indexes', '05757f236a11')` to correctly reference the branch tip.
+3. **Manual Migration Run**: Executed `alembic upgrade head` manually against the production Neon PostgreSQL database using local terminal context. This successfully applied all migrations up to `phase6_directory_changes`, creating the state master tables, district master tables, search index tables, and adding missing columns to the `temples` table.
+4. **Successful Validation**: Hitting the production API endpoints now returns a list of states and temples with zero errors.
+
+### Preventive Actions Taken
+
+1. **Migration Audits**: Enforce that *all* migrations must be fully idempotent, checking for table, column, index, and constraint existence before modification.
+2. **Health Check Isolation**: Ensure backend health checks distinguish database migration states from container liveness.
+
+### Related Tickets, PRs, Commits
+
+- Commit: `c4894fd` (backend migration fixes)
+- Manual database update executed successfully on 2026-06-11
 
 ---
 
