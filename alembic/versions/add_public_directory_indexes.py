@@ -16,12 +16,19 @@ branch_labels: Union[str, Sequence[str], None] = None
 depends_on: Union[str, Sequence[str], None] = None
 
 def upgrade() -> None:
+    bind = op.get_bind()
+    inspector = sa.inspect(bind)
+    existing_indexes = {idx['name'] for t in inspector.get_table_names() for idx in inspector.get_indexes(t)}
+
     # composite index on temple_profiles(state, district)
-    op.create_index('idx_temple_profiles_state_district', 'temple_profiles', ['state', 'district'])
+    if 'idx_temple_profiles_state_district' not in existing_indexes:
+        op.create_index('idx_temple_profiles_state_district', 'temple_profiles', ['state', 'district'])
     # index on temple_profiles(district)
-    op.create_index('idx_temple_profiles_district', 'temple_profiles', ['district'])
+    if 'idx_temple_profiles_district' not in existing_indexes:
+        op.create_index('idx_temple_profiles_district', 'temple_profiles', ['district'])
     # index on temples(name) for alphabetical ordering
-    op.create_index('idx_temples_name_alphabetical', 'temples', ['name'])
+    if 'idx_temples_name_alphabetical' not in existing_indexes:
+        op.create_index('idx_temples_name_alphabetical', 'temples', ['name'])
 
 def downgrade() -> None:
     op.drop_index('idx_temples_name_alphabetical', table_name='temples')

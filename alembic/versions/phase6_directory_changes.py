@@ -12,7 +12,7 @@ import datetime
 
 # revision identifiers, used by Alembic.
 revision: str = 'phase6_directory_changes'
-down_revision: Union[str, Sequence[str], None] = ('48bd9fc73314', '05757f236a11')
+down_revision: Union[str, Sequence[str], None] = ('add_public_directory_indexes', '05757f236a11')
 branch_labels: Union[str, Sequence[str], None] = None
 depends_on: Union[str, Sequence[str], None] = None
 
