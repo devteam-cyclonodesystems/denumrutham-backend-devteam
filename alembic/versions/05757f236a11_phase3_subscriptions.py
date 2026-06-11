@@ -19,41 +19,51 @@ depends_on: Union[str, Sequence[str], None] = None
 
 
 def upgrade() -> None:
-    """Upgrade schema."""
-    op.create_table(
-        'subscriptions',
-        sa.Column('id', sa.UUID(), nullable=False),
-        sa.Column('temple_id', sa.UUID(), nullable=False),
-        sa.Column('razorpay_subscription_id', sa.String(length=80), nullable=True),
-        sa.Column('razorpay_plan_id', sa.String(length=80), nullable=True),
-        sa.Column('subscription_plan', sa.String(length=40), nullable=False, server_default='FREE'),
-        sa.Column('status', sa.String(length=30), nullable=False, server_default='ACTIVE'),
-        sa.Column('current_period_start', sa.DateTime(timezone=True), nullable=True),
-        sa.Column('current_period_end', sa.DateTime(timezone=True), nullable=True),
-        sa.Column('trial_start', sa.DateTime(timezone=True), nullable=True),
-        sa.Column('trial_end', sa.DateTime(timezone=True), nullable=True),
-        sa.Column('grace_period_ends_at', sa.DateTime(timezone=True), nullable=True),
-        sa.Column('created_at', sa.DateTime(timezone=True), nullable=True, server_default=sa.text('CURRENT_TIMESTAMP')),
-        sa.Column('updated_at', sa.DateTime(timezone=True), nullable=True, server_default=sa.text('CURRENT_TIMESTAMP')),
-        sa.ForeignKeyConstraint(['temple_id'], ['temples.id'], ondelete='CASCADE'),
-        sa.PrimaryKeyConstraint('id'),
-        sa.UniqueConstraint('temple_id')
-    )
-    op.create_index('idx_subscriptions_razorpay_sub', 'subscriptions', ['razorpay_subscription_id'], unique=False)
+    """Upgrade schema — fully idempotent."""
+    bind = op.get_bind()
+    inspector = sa.inspect(bind)
+    tables = inspector.get_table_names()
 
-    op.create_table(
-        'subscription_events',
-        sa.Column('id', sa.UUID(), nullable=False),
-        sa.Column('subscription_id', sa.UUID(), nullable=True),
-        sa.Column('event_name', sa.String(length=80), nullable=False),
-        sa.Column('previous_status', sa.String(length=30), nullable=True),
-        sa.Column('new_status', sa.String(length=30), nullable=True),
-        sa.Column('payload_snapshot', sa.JSON(), nullable=True),
-        sa.Column('received_at', sa.DateTime(timezone=True), nullable=True, server_default=sa.text('CURRENT_TIMESTAMP')),
-        sa.ForeignKeyConstraint(['subscription_id'], ['subscriptions.id'], ondelete='SET NULL'),
-        sa.PrimaryKeyConstraint('id')
-    )
-    op.create_index('idx_subscription_events_sub', 'subscription_events', ['subscription_id'], unique=False)
+    if 'subscriptions' not in tables:
+        op.create_table(
+            'subscriptions',
+            sa.Column('id', sa.UUID(), nullable=False),
+            sa.Column('temple_id', sa.UUID(), nullable=False),
+            sa.Column('razorpay_subscription_id', sa.String(length=80), nullable=True),
+            sa.Column('razorpay_plan_id', sa.String(length=80), nullable=True),
+            sa.Column('subscription_plan', sa.String(length=40), nullable=False, server_default='FREE'),
+            sa.Column('status', sa.String(length=30), nullable=False, server_default='ACTIVE'),
+            sa.Column('current_period_start', sa.DateTime(timezone=True), nullable=True),
+            sa.Column('current_period_end', sa.DateTime(timezone=True), nullable=True),
+            sa.Column('trial_start', sa.DateTime(timezone=True), nullable=True),
+            sa.Column('trial_end', sa.DateTime(timezone=True), nullable=True),
+            sa.Column('grace_period_ends_at', sa.DateTime(timezone=True), nullable=True),
+            sa.Column('created_at', sa.DateTime(timezone=True), nullable=True, server_default=sa.text('CURRENT_TIMESTAMP')),
+            sa.Column('updated_at', sa.DateTime(timezone=True), nullable=True, server_default=sa.text('CURRENT_TIMESTAMP')),
+            sa.ForeignKeyConstraint(['temple_id'], ['temples.id'], ondelete='CASCADE'),
+            sa.PrimaryKeyConstraint('id'),
+            sa.UniqueConstraint('temple_id')
+        )
+        sub_indexes = {idx['name'] for idx in inspector.get_indexes('subscriptions')} if 'subscriptions' in tables else set()
+        if 'idx_subscriptions_razorpay_sub' not in sub_indexes:
+            op.create_index('idx_subscriptions_razorpay_sub', 'subscriptions', ['razorpay_subscription_id'], unique=False)
+
+    if 'subscription_events' not in tables:
+        op.create_table(
+            'subscription_events',
+            sa.Column('id', sa.UUID(), nullable=False),
+            sa.Column('subscription_id', sa.UUID(), nullable=True),
+            sa.Column('event_name', sa.String(length=80), nullable=False),
+            sa.Column('previous_status', sa.String(length=30), nullable=True),
+            sa.Column('new_status', sa.String(length=30), nullable=True),
+            sa.Column('payload_snapshot', sa.JSON(), nullable=True),
+            sa.Column('received_at', sa.DateTime(timezone=True), nullable=True, server_default=sa.text('CURRENT_TIMESTAMP')),
+            sa.ForeignKeyConstraint(['subscription_id'], ['subscriptions.id'], ondelete='SET NULL'),
+            sa.PrimaryKeyConstraint('id')
+        )
+        se_indexes = {idx['name'] for idx in inspector.get_indexes('subscription_events')} if 'subscription_events' in tables else set()
+        if 'idx_subscription_events_sub' not in se_indexes:
+            op.create_index('idx_subscription_events_sub', 'subscription_events', ['subscription_id'], unique=False)
 
 
 def downgrade() -> None:
