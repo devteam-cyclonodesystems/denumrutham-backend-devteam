@@ -24,6 +24,7 @@
 | INC-013 | Non-idempotent migration blocks Alembic chain on redeploys | P1 – Critical | ✅ Resolved | 2026-06-11 |
 | INC-014 | Empty explorer directory due to NULL state/district foreign keys | P2 – High | ✅ Resolved | 2026-06-12 |
 | INC-015 | Couldn't view/download 'Legal Verification Documents (Uploaded Proof)' in Claims Review | P2 – High | ✅ Resolved | 2026-06-12 |
+| INC-016 | Suggest Temple Step 2 Next disabled due to failed backend migration deployment | P2 – High | ✅ Resolved | 2026-06-12 |
 | FEAT-001 | Phase 1 – Sidebar Spotlight Ad Area & Layout Alignment | Feature Delivery |  Shipped | 2026-06-10 |
 | FEAT-002 | Phase 2 – Layout Responsiveness & Spotlight Ad Rails | Feature Delivery |  Shipped | 2026-06-10 |
 | FEAT-003 | Devotee Registration Hardening & Password Strength Enforcements | Feature Delivery |  Shipped | 2026-06-12 |
@@ -707,6 +708,51 @@ Superadmins reviewing temple claims in the Claims Governance dashboard were unab
 ### Related Tickets, PRs, Commits
 
 - Commit: `279fcfc` (frontend fixes)
+
+---
+
+## INC-016: Suggest Temple Step 2 Next Disabled Due to Failed Backend Migration Deployment
+
+| Field | Value |
+|-------|-------|
+| **Incident ID** | INC-016 |
+| **Incident Title** | Suggest Temple Step 2 Next disabled due to failed backend migration deployment |
+| **Date and Time** | 2026-06-12T23:26:00+05:30 |
+| **Severity/Priority** | P2 – High |
+| **Current Status** | ✅ Resolved |
+
+### Description
+
+In the devotee portal Suggest Temple flow (Step 2/5), the "Next: Duplicates & Map" button remained disabled even after all required fields were filled. Checking browser console logs revealed `401 Unauthorized` errors when fetching `/api/v1/auth/me`. Additionally, the state selection field did not successfully validate state IDs, causing the form's validity check to fail and blocking the user from proceeding.
+
+### Root Cause
+
+1. **Alembic Migration UUID Typing Mismatch**: The backend migration `phase6_directory_changes.py` performed a `bulk_insert` of state and district records using hardcoded UUID strings. Because SQLite and Neon PostgreSQL drivers expect Python `uuid.UUID` objects for columns defined as `sa.UUID()`, SQLAlchemy raised a `StatementError: (builtins.AttributeError) 'str' object has no attribute 'hex'` during container startup.
+2. **Railway Silent Rollback / Deploy Stall**: The migration crash caused container startup to fail on the new deployment on Railway. As a result, Railway kept routing traffic to the older container instance running an outdated build.
+3. **Outdated API Payload**: The old container served a legacy version of the `/api/v1/public/states` endpoint which did not return the state `id` key. The frontend Suggest Temple form could not map the selected state to an ID, leaving the form invalid and the "Next" button disabled.
+
+### Affected Services, Components, or Features
+
+- Devotee Portal Suggest Temple Flow (Step 2 validation)
+- `/api/v1/public/states` endpoint
+- Backend Deployment pipeline on Railway (master branch)
+
+### Resolution Implemented
+
+1. **Migration UUID Conversion**: Patched `phase6_directory_changes.py` to import `uuid` and map string IDs to Python `uuid.UUID` instances before calling `op.bulk_insert`.
+2. **Local Validation**: Verified that `alembic upgrade head` runs and completes successfully against SQLite.
+3. **Submodule Deployment Sync**: Committed the fix to backend `main`, merged into `master`, and pushed to remote origin. The backend submodule commit in the root repository was also updated and pushed to trigger a clean deployment.
+4. **API Verification**: Checked that `/api/v1/public/states` now returns state `id` keys and that `/health/live` correctly reports the new commit.
+
+### Preventive Actions Taken
+
+1. **Strict Type Conversion in Migrations**: Ensure all bulk-inserted data records containing UUID fields are explicitly parsed using Python `uuid.UUID()` objects in Alembic scripts to avoid driver-specific SQL execution errors.
+2. **Deployment Alerting**: Check build and startup logs on Railway whenever backend submodule updates are pushed.
+
+### Related Tickets, PRs, Commits
+
+- Commit (backend): `cfdb84a` (migration UUID fix)
+- Commit (root): `10ddff6` (submodule reference update)
 
 ---
 
