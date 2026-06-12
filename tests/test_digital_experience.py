@@ -260,8 +260,14 @@ async def test_tenant_isolation(client, auth_headers):
 @pytest.mark.asyncio
 async def test_public_portal_endpoint(client, auth_headers):
     """Verify that GET /api/v1/public/temples/{slug}/portal returns consolidated profile, settings, announcements, and activities."""
-    # Update test temple status to APPROVED in database to allow publication
+    # Update test temple status to APPROVED in database to allow publication, and clean up any dirty state from prior tests
     async with AsyncSessionLocal() as db:
+        from sqlalchemy import delete
+        from app.models.domain import TempleWebsiteSettingsLive, TempleAnnouncement, TempleActivity
+        await db.execute(delete(TempleWebsiteSettingsLive).filter(TempleWebsiteSettingsLive.temple_id == TEMPLE_ID))
+        await db.execute(delete(TempleAnnouncement).filter(TempleAnnouncement.temple_id == TEMPLE_ID))
+        await db.execute(delete(TempleActivity).filter(TempleActivity.temple_id == TEMPLE_ID))
+        
         stmt = select(Temple).filter(Temple.id == TEMPLE_ID)
         res = await db.execute(stmt)
         t = res.scalars().first()

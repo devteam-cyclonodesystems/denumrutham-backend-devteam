@@ -42,6 +42,7 @@ class TempleService:
             items.append({
                 "id": temple.id,
                 "name": temple.name,
+                "domain": temple.domain,
                 "location": profile.location if profile else "",
                 "district": profile.district if profile else "",
                 "state": profile.state if profile else "",

@@ -235,6 +235,10 @@ async def get_public_temple_portal(
     if not temple:
         raise HTTPException(status_code=404, detail="Temple not found")
 
+    if temple.management_mode != "DIRECTORY_ONLY" and not temple.website_settings_live:
+        raise HTTPException(status_code=404, detail="Temple website is not published")
+
+
     # 3. Direct Mapping of Profile & Images
     profile_db = temple.profile
     images = []
@@ -397,7 +401,17 @@ async def list_public_temples(
             selectinload(Temple.activities),
             selectinload(Temple.festivals)
         )
-        .filter(Temple.is_active == True, Temple.status == "APPROVED", Temple.directory_status == "ACTIVE")
+        .filter(
+            Temple.is_active == True,
+            Temple.status == "APPROVED",
+            Temple.directory_status == "ACTIVE"
+        )
+        .filter(
+            sa.or_(
+                Temple.management_mode == "DIRECTORY_ONLY",
+                TempleWebsiteSettingsLive.id != None
+            )
+        )
     )
     if search:
         from sqlalchemy import or_
@@ -637,6 +651,10 @@ async def get_public_temple_bootstrap(
     temple = result.scalars().first()
     if not temple:
         raise HTTPException(status_code=404, detail="Temple not found")
+
+    if temple.management_mode != "DIRECTORY_ONLY" and not temple.website_settings_live:
+        raise HTTPException(status_code=404, detail="Temple website is not published")
+
 
     # 3. Direct Mapping of Profile & Images
     profile_db = temple.profile
