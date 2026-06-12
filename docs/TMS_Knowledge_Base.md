@@ -23,6 +23,7 @@
 | INC-012 | Omitted sprint entity tables causing bootstrap/follow crash | P1 – Critical | ✅ Resolved | 2026-06-10 |
 | INC-013 | Non-idempotent migration blocks Alembic chain on redeploys | P1 – Critical | ✅ Resolved | 2026-06-11 |
 | INC-014 | Empty explorer directory due to NULL state/district foreign keys | P2 – High | ✅ Resolved | 2026-06-12 |
+| INC-015 | Couldn't view/download 'Legal Verification Documents (Uploaded Proof)' in Claims Review | P2 – High | ✅ Resolved | 2026-06-12 |
 | FEAT-001 | Phase 1 – Sidebar Spotlight Ad Area & Layout Alignment | Feature Delivery |  Shipped | 2026-06-10 |
 | FEAT-002 | Phase 2 – Layout Responsiveness & Spotlight Ad Rails | Feature Delivery |  Shipped | 2026-06-10 |
 | FEAT-003 | Devotee Registration Hardening & Password Strength Enforcements | Feature Delivery |  Shipped | 2026-06-12 |
@@ -661,6 +662,51 @@ As a result, the outer joins on the public portal endpoints (which group and cou
 
 - Data migration script: `scratch/sync_temples_directory_ids.py`
 - Database synchronization executed successfully on 2026-06-12
+
+
+
+---
+
+## INC-015: Couldn't View/Download 'Legal Verification Documents (Uploaded Proof)' in Claims Review
+
+| Field | Value |
+|-------|-------|
+| **Incident ID** | INC-015 |
+| **Incident Title** | Couldn't view/download 'Legal Verification Documents (Uploaded Proof)' in Claims Review |
+| **Date and Time** | 2026-06-12T11:26:00Z |
+| **Severity/Priority** | P2 – High |
+| **Current Status** | ✅ Resolved |
+
+### Description
+
+Superadmins reviewing temple claims in the Claims Governance dashboard were unable to view or download uploaded legal verification documents. Clicking the "View/Download" link either failed to load or opened the wrong hostname, pointing back to development or incorrect ports.
+
+### Root Cause
+
+1. **Hardcoded Origin Prepending**: The devotee portal file uploader in `ClaimTempleModal.tsx` prefixed relative backend upload paths (like `/static/uploads/{filename}`) with the frontend host's `window.location.origin` (evaluating to `http://localhost:5173` in development or the Vercel domain in production) before saving to the database.
+2. **Missing Base URL Resolver**: The Claims Governance review screen (`ClaimsGovernance.tsx`) rendered `proof_urls` directly via `<a href={url}>` without wrapping them in the frontend's `getMediaUrl()` utility. This caused absolute links with the wrong port/origin to fail during cross-environment review.
+3. **HTML5 URL Validation**: The text input field in `ClaimTempleModal.tsx` was typed as `type="url"`, throwing native browser validation errors when saving purely relative paths like `/static/uploads/{filename}`.
+
+### Affected Services, Components, or Features
+
+- Superadmin Claims Governance review page (`ClaimsGovernance.tsx`)
+- Devotee Claim Temple Modal (`ClaimTempleModal.tsx`)
+- Media URL resolver (`mediaUrl.ts`)
+
+### Resolution Implemented
+
+1. **Self-Healing URL Resolver**: Enhanced the global `getMediaUrl()` utility in `mediaUrl.ts` to detect paths containing `/static/uploads/`, extract the relative segment, and resolve it properly to the backend server domain or Vercel proxy rewrite target. This dynamically fixes all legacy records stored with wrong hostnames.
+2. **Dashboard Integration**: Modified `ClaimsGovernance.tsx` to wrap proof links in `getMediaUrl(url)`.
+3. **Form Upload Improvements**: Modified `ClaimTempleModal.tsx` to save the relative path from the backend file uploader directly (no frontend origin prefixing) and converted the input field to `type="text"` to bypass native browser URL validation blocks.
+
+### Preventive Actions Taken
+
+1. **Consistent URL Resolver**: Always use the `getMediaUrl()` utility for displaying or linking to assets and documents uploaded to the backend server.
+2. **Relative Path Storage**: Store only relative paths (e.g. `/static/uploads/filename.ext`) in the database instead of absolute URLs containing environment-specific hostnames or ports.
+
+### Related Tickets, PRs, Commits
+
+- Commit: `279fcfc` (frontend fixes)
 
 ---
 
