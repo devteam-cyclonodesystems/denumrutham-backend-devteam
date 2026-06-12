@@ -15,6 +15,7 @@ from app.modules.temple_management.routes import digital_experience, public_port
 from app.modules.governance.routes.platform_advertisements import router as platform_ads_router
 from app.modules.temple_management.routes.temple_advertisements import router as temple_ads_router
 from app.modules.governance.routes.claims import router as claims_router
+from app.modules.governance.routes.suggestions import router as suggestions_router
 from app.modules.billing.routes.subscriptions import router as subscriptions_router
 from app.modules.analytics.routes.telemetry import (
     public_router as telemetry_public_router,
@@ -50,6 +51,7 @@ api_router.include_router(subscriptions_router, prefix="/subscriptions", tags=["
 # ── Governance & RBAC ────────────────────────────────────────────────
 api_router.include_router(rbac.router, prefix="/rbac", tags=["Access Control (RBAC)"])
 api_router.include_router(claims_router, prefix="/claims", tags=["Temple Claims"])
+api_router.include_router(suggestions_router, prefix="/temple-suggestions", tags=["Temple Suggestions"])
 api_router.include_router(audit.router, prefix="/audit-logs", tags=["Audit Trails"])
 api_router.include_router(activity_logs.router, prefix="/manager/activity-logs", tags=["Activity Logs"])
 api_router.include_router(approvals.router, prefix="/approvals", tags=["Legacy Approvals"])

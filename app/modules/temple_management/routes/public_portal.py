@@ -1364,7 +1364,7 @@ async def get_public_states(
     """
     from sqlalchemy import func
     stmt = (
-        select(StateMaster.name, StateMaster.slug, StateMaster.code, func.count(Temple.id).label("temple_count"))
+        select(StateMaster.id, StateMaster.name, StateMaster.slug, StateMaster.code, func.count(Temple.id).label("temple_count"))
         .outerjoin(Temple, (Temple.state_id == StateMaster.id) & 
                             (Temple.is_active == True) & 
                             (Temple.status == "APPROVED") & 
@@ -1376,6 +1376,7 @@ async def get_public_states(
     rows = result.all()
     return [
         {
+            "id": str(r.id),
             "state": r.name,
             "slug": r.slug,
             "code": r.code,
@@ -1401,7 +1402,7 @@ async def get_public_districts(
         raise HTTPException(status_code=404, detail="State not found")
 
     stmt = (
-        select(DistrictMaster.name, DistrictMaster.slug, DistrictMaster.code, func.count(Temple.id).label("temple_count"))
+        select(DistrictMaster.id, DistrictMaster.name, DistrictMaster.slug, DistrictMaster.code, func.count(Temple.id).label("temple_count"))
         .filter(DistrictMaster.state_id == state_obj.id)
         .outerjoin(Temple, (Temple.district_id == DistrictMaster.id) & 
                             (Temple.is_active == True) & 
@@ -1414,6 +1415,7 @@ async def get_public_districts(
     rows = result.all()
     return [
         {
+            "id": str(r.id),
             "district": r.name,
             "slug": r.slug,
             "code": r.code,

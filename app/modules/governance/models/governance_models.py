@@ -263,6 +263,111 @@ class TempleClaimRequest(Base):
     )
 
 
+class TempleSuggestionStatus(str, enum.Enum):
+    PENDING = "PENDING"
+    APPROVED = "APPROVED"
+    REJECTED = "REJECTED"
+    MERGED = "MERGED"
+
+
+class TempleSuggestion(Base):
+    __tablename__ = "temple_suggestions"
+
+    id = Column(UUID(as_uuid=True), primary_key=True, default=uuid.uuid4)
+    reference_number = Column(String(30), unique=True, nullable=False, index=True)
+    name = Column(String, nullable=False)
+    deity = Column(String(150), nullable=False)
+    description = Column(Text, nullable=True)
+    
+    address_line_1 = Column(String, nullable=False)
+    address_line_2 = Column(String, nullable=True)
+    village_town = Column(String(150), nullable=False)
+    district_id = Column(UUID(as_uuid=True), ForeignKey("district_master.id", ondelete="RESTRICT"), nullable=False, index=True)
+    state_id = Column(UUID(as_uuid=True), ForeignKey("state_master.id", ondelete="RESTRICT"), nullable=False, index=True)
+    pincode = Column(String(10), nullable=False)
+    
+    latitude = Column(Float, nullable=True)
+    longitude = Column(Float, nullable=True)
+    google_maps_url = Column(String(512), nullable=True)
+    
+    website = Column(String(255), nullable=True)
+    social_media_links = Column(JSONB_VARIANT, nullable=True, default={})
+    festival_info = Column(Text, nullable=True)
+    office_phone = Column(String(30), nullable=True)
+    submitter_affiliation = Column(String(50), nullable=False)
+    
+    submitted_by = Column(UUID(as_uuid=True), ForeignKey("users.id", ondelete="CASCADE"), nullable=False, index=True)
+    submitter_ip = Column(String(45), nullable=True)
+    
+    confidence_score = Column(Integer, default=0, nullable=False)
+    original_submission_json = Column(JSONB_VARIANT, nullable=False)
+    
+    status = Column(Enum(TempleSuggestionStatus), nullable=False, default=TempleSuggestionStatus.PENDING, index=True)
+    rejection_reason = Column(Text, nullable=True)
+    moderator_notes = Column(Text, nullable=True)
+    reviewed_by = Column(UUID(as_uuid=True), ForeignKey("users.id", ondelete="SET NULL"), nullable=True)
+    reviewed_at = Column(DateTime(timezone=True), nullable=True)
+    
+    promoted_temple_id = Column(UUID(as_uuid=True), ForeignKey("temples.id", ondelete="SET NULL"), nullable=True)
+    merged_temple_id = Column(UUID(as_uuid=True), ForeignKey("temples.id", ondelete="SET NULL"), nullable=True)
+    
+    created_at = Column(DateTime(timezone=True), default=utcnow)
+    updated_at = Column(DateTime(timezone=True), default=utcnow, onupdate=utcnow)
+
+    # Relationships
+    state = relationship("StateMaster", foreign_keys=[state_id])
+    district = relationship("DistrictMaster", foreign_keys=[district_id])
+    submitter = relationship("User", foreign_keys=[submitted_by])
+    reviewer = relationship("User", foreign_keys=[reviewed_by])
+    promoted_temple = relationship("Temple", foreign_keys=[promoted_temple_id])
+    merged_temple = relationship("Temple", foreign_keys=[merged_temple_id])
+    images = relationship("TempleSuggestionImage", back_populates="suggestion", cascade="all, delete-orphan")
+    contacts = relationship("TempleSuggestionContact", back_populates="suggestion", cascade="all, delete-orphan")
+    audits = relationship("TempleSuggestionAudit", back_populates="suggestion", cascade="all, delete-orphan")
+
+
+class TempleSuggestionImage(Base):
+    __tablename__ = "temple_suggestion_images"
+
+    id = Column(UUID(as_uuid=True), primary_key=True, default=uuid.uuid4)
+    suggestion_id = Column(UUID(as_uuid=True), ForeignKey("temple_suggestions.id", ondelete="CASCADE"), nullable=False, index=True)
+    image_url = Column(String(512), nullable=False)
+    is_primary = Column(Boolean, default=False, nullable=False)
+    created_at = Column(DateTime(timezone=True), default=utcnow)
+
+    suggestion = relationship("TempleSuggestion", back_populates="images")
+
+
+class TempleSuggestionContact(Base):
+    __tablename__ = "temple_suggestion_contacts"
+
+    id = Column(UUID(as_uuid=True), primary_key=True, default=uuid.uuid4)
+    suggestion_id = Column(UUID(as_uuid=True), ForeignKey("temple_suggestions.id", ondelete="CASCADE"), nullable=False, index=True)
+    name = Column(String, nullable=False)
+    designation = Column(String(150), nullable=False)
+    mobile_number = Column(String(20), nullable=False)
+    is_primary = Column(Boolean, default=False, nullable=False)
+    created_at = Column(DateTime(timezone=True), default=utcnow)
+
+    suggestion = relationship("TempleSuggestion", back_populates="contacts")
+
+
+class TempleSuggestionAudit(Base):
+    __tablename__ = "temple_suggestion_audits"
+
+    id = Column(UUID(as_uuid=True), primary_key=True, default=uuid.uuid4)
+    suggestion_id = Column(UUID(as_uuid=True), ForeignKey("temple_suggestions.id", ondelete="CASCADE"), nullable=False, index=True)
+    action = Column(String(50), nullable=False)  # SUBMIT, EDIT, APPROVE, REJECT, MERGE
+    performed_by = Column(UUID(as_uuid=True), ForeignKey("users.id"), nullable=False)
+    change_diff = Column(JSONB_VARIANT, nullable=True)
+    notes = Column(Text, nullable=True)
+    created_at = Column(DateTime(timezone=True), default=utcnow)
+
+    suggestion = relationship("TempleSuggestion", back_populates="audits")
+    user = relationship("User", foreign_keys=[performed_by])
+
+
+
 
 
 

@@ -133,6 +133,10 @@ class Temple(Base):
     verification_level = Column(Integer, default=0, nullable=False, server_default=text("0"))
     is_featured = Column(Boolean, default=False, nullable=False, server_default=text("false"))
 
+    # Temple Suggestion Tracking
+    creation_source = Column(String(50), nullable=False, server_default="SUPERADMIN_CREATED", default="SUPERADMIN_CREATED")
+    source_suggestion_id = Column(UUID(as_uuid=True), ForeignKey("temple_suggestions.id", ondelete="SET NULL"), nullable=True)
+
     __table_args__ = (
         Index("unique_active_domain", "domain", unique=True, postgresql_where=text("deleted_at IS NULL")),
         Index("idx_temples_visible", "id", postgresql_where=text("status = 'APPROVED' AND is_active = TRUE")),
