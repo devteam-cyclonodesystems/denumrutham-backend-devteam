@@ -1,6 +1,7 @@
 """
 Suggestions Service Layer — Manages the devotee suggestion submission lifecycle.
 """
+from typing import Optional
 from datetime import datetime, timezone, timedelta
 from uuid import UUID, uuid4
 from fastapi import HTTPException, status
