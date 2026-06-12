@@ -56,6 +56,8 @@ class UnifiedRegister(BaseModel):
     def validate_password(cls, v: str) -> str:
         if len(v) < 8:
             raise ValueError("Password must be at least 8 characters long")
+        if not re.match(r'^(?=.*[a-z])(?=.*[A-Z])(?=.*\d)(?=.*[@$!%*?&]).{8,}$', v):
+            raise ValueError("Password must contain uppercase, lowercase, number and special character")
         return v
 
 
@@ -71,6 +73,15 @@ class TempleManagerRegister(BaseModel):
     temple_state: Optional[str] = ""
     temple_district: Optional[str] = ""
     temple_pincode: Optional[str] = ""
+
+    @field_validator("password")
+    @classmethod
+    def validate_password(cls, v: str) -> str:
+        if len(v) < 8:
+            raise ValueError("Password must be at least 8 characters long")
+        if not re.match(r'^(?=.*[a-z])(?=.*[A-Z])(?=.*\d)(?=.*[@$!%*?&]).{8,}$', v):
+            raise ValueError("Password must contain uppercase, lowercase, number and special character")
+        return v
 
     @field_validator("email_or_phone")
     @classmethod

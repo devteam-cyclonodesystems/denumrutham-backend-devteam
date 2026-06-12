@@ -140,4 +140,6 @@ class LeadConvert(BaseModel):
     def validate_password(cls, v: str) -> str:
         if len(v) < 8:
             raise ValueError("Password must be at least 8 characters long")
+        if not re.match(r'^(?=.*[a-z])(?=.*[A-Z])(?=.*\d)(?=.*[@$!%*?&]).{8,}$', v):
+            raise ValueError("Password must contain uppercase, lowercase, number and special character")
         return v

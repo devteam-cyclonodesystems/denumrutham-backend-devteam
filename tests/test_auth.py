@@ -87,3 +87,69 @@ async def test_role_cloning(client, auth_headers):
     cloned_perms = cloned_perms_resp.json()["permissions"]
     assert len(cloned_perms) == 1
     assert cloned_perms[0]["resource_key"] == perms[0]["resource_key"]
+
+
+@pytest.mark.asyncio
+async def test_devotee_unified_register_password_strength(client):
+    """Devotee registration fails with weak password and succeeds with strong password."""
+    # 1. Weak password (too short)
+    resp = await client.post(
+        "/api/v1/auth/register",
+        json={
+            "email_or_phone": "devotee_weak@example.com",
+            "password": "short",
+            "name": "Devotee Weak",
+            "role": "DEVOTEE"
+        }
+    )
+    assert resp.status_code == 422
+
+    # 2. Weak password (no special char)
+    resp = await client.post(
+        "/api/v1/auth/register",
+        json={
+            "email_or_phone": "devotee_weak2@example.com",
+            "password": "Password123",
+            "name": "Devotee Weak 2",
+            "role": "DEVOTEE"
+        }
+    )
+    assert resp.status_code == 422
+
+    # 3. Strong password (meets all requirements)
+    resp = await client.post(
+        "/api/v1/auth/register",
+        json={
+            "email_or_phone": "devotee_strong@example.com",
+            "password": "Password@123",
+            "name": "Devotee Strong",
+            "role": "DEVOTEE"
+        }
+    )
+    assert resp.status_code == 201
+
+
+@pytest.mark.asyncio
+async def test_devotee_legacy_register_password_strength(client):
+    """Legacy devotee registration fails with weak password and succeeds with strong password."""
+    # 1. Weak password (no uppercase, no special char)
+    resp = await client.post(
+        "/api/v1/auth/devotee/register",
+        json={
+            "phone_number": "9998887776",
+            "password": "password123",
+            "name": "Devotee Legacy"
+        }
+    )
+    assert resp.status_code == 422
+
+    # 2. Strong password (meets all requirements)
+    resp = await client.post(
+        "/api/v1/auth/devotee/register",
+        json={
+            "phone_number": "9998887777",
+            "password": "Password@123",
+            "name": "Devotee Legacy"
+        }
+    )
+    assert resp.status_code == 201

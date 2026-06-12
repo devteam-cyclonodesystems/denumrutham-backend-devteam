@@ -1,4 +1,5 @@
-from pydantic import BaseModel, ConfigDict, UUID4
+import re
+from pydantic import BaseModel, ConfigDict, UUID4, field_validator
 from typing import Optional, List
 from datetime import datetime
 from app.modules.bookings.models.booking_models import ServiceType, ServiceBookingStatus, PaymentMethod, NotificationMode, BookingSource
@@ -9,6 +10,15 @@ class DevoteeRegister(BaseModel):
     phone_number: str
     password: str
     name: str
+
+    @field_validator("password")
+    @classmethod
+    def validate_password(cls, v: str) -> str:
+        if len(v) < 8:
+            raise ValueError("Password must be at least 8 characters long")
+        if not re.match(r'^(?=.*[a-z])(?=.*[A-Z])(?=.*\d)(?=.*[@$!%*?&]).{8,}$', v):
+            raise ValueError("Password must contain uppercase, lowercase, number and special character")
+        return v
 
 
 class DevoteeProfileUpdate(BaseModel):
