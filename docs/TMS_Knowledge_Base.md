@@ -22,6 +22,7 @@
 | INC-011 | Website Builder updates blocked & store/hall sections missing | P1 – Critical | ✅ Resolved | 2026-06-10 |
 | INC-012 | Omitted sprint entity tables causing bootstrap/follow crash | P1 – Critical | ✅ Resolved | 2026-06-10 |
 | INC-013 | Non-idempotent migration blocks Alembic chain on redeploys | P1 – Critical | ✅ Resolved | 2026-06-11 |
+| INC-014 | Empty explorer directory due to NULL state/district foreign keys | P2 – High | ✅ Resolved | 2026-06-12 |
 | FEAT-001 | Phase 1 – Sidebar Spotlight Ad Area & Layout Alignment | Feature Delivery | ✅ Shipped | 2026-06-10 |
 | FEAT-002 | Phase 2 – Layout Responsiveness & Spotlight Ad Rails | Feature Delivery | ✅ Shipped | 2026-06-10 |
 
@@ -615,6 +616,50 @@ After deploying Phase 6/6.5 backend updates, public devotee portal APIs (e.g. `/
 
 - Commit: `c4894fd` (backend migration fixes)
 - Manual database update executed successfully on 2026-06-11
+
+---
+
+## INC-014: Empty Explorer Directory Due to NULL State/District Foreign Keys
+
+| Field | Value |
+|-------|-------|
+| **Incident ID** | INC-014 |
+| **Incident Title** | Empty explorer directory due to NULL state_id and district_id on existing temples |
+| **Date and Time** | 2026-06-12T09:40:00Z |
+| **Severity/Priority** | P2 – High |
+| **Current Status** | ✅ Resolved |
+
+### Description
+
+Devotees accessing the public directory ("Explore Temples" state/district listing) saw zero active states or counties with temple counts > 0, and no temples listed in the explore directory despite active, approved temples existing in the database.
+
+### Root Cause
+
+The Phase 6 database migration introduced canonical tables (`state_master` and `district_master`) and foreign key columns (`state_id` and `district_id`) on the `temples` table. However, because the migration did not include a data migration step to map existing temples' text-based `state` and `district` columns to these new foreign key columns, they defaulted to `NULL` for all existing temples.
+As a result, the outer joins on the public portal endpoints (which group and count temples by `state_id` and `district_id`) returned a `temple_count` of `0` for all states and districts, showing no temples in the directory.
+
+### Affected Services, Components, or Features
+
+- Explore Directory Page (Devotee Portal)
+- `/api/v1/public/states`, `/api/v1/public/states/{state}/districts` API endpoints
+
+### Resolution Implemented
+
+1. **Sync Script Execution**: Developed and ran `scratch/sync_temples_directory_ids.py` to:
+   - Load existing state and district lookup tables.
+   - Read text-based `state` and `district` fields from the `temples` and `temple_profiles` tables for each temple.
+   - Resolve and map these to canonical `StateMaster.id` and `DistrictMaster.id` values (including normalization of `"Trivandrum"` to `"Thiruvananthapuram"`).
+   - Update `state_id` and `district_id` for all 12 temples in the Neon production database.
+2. **Endpoint Validation**: Confirmed `/api/v1/public/states` now returns `Kerala` with `temple_count = 7`, and the explorer directory functions perfectly.
+
+### Preventive Actions Taken
+
+1. **Data Migration in Schema Updates**: Ensure future schema migrations adding foreign key relations or structural mappings include SQL queries to backfill or map existing records from legacy/flat columns.
+
+### Related Tickets, PRs, Commits
+
+- Data migration script: `scratch/sync_temples_directory_ids.py`
+- Database synchronization executed successfully on 2026-06-12
 
 ---
 
