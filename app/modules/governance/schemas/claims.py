@@ -77,6 +77,8 @@ class ClaimRequestResponse(BaseModel):
     # Extra field decorators
     temple_name: Optional[str] = None
     claimant_name: Optional[str] = None
+    claimant_email: Optional[str] = None
+    claimant_phone: Optional[str] = None
 
 
 class ClaimRequestListResponse(BaseModel):

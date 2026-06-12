@@ -119,7 +119,7 @@ async def test_claim_submission_and_superadmin_approval(client, superadmin_auth_
         headers=devotee_headers
     )
     assert dup_resp.status_code == 400
-    assert "Claim request already submitted" in str(dup_resp.json())
+    assert "Claim request for this temple already submitted. Thanks" in str(dup_resp.json())
 
     # Create second devotee user in database
     async with TestSessionLocal() as session:
@@ -153,7 +153,7 @@ async def test_claim_submission_and_superadmin_approval(client, superadmin_auth_
         headers=devotee2_headers
     )
     assert dup_resp2.status_code == 400
-    assert "Claim request already submitted" in str(dup_resp2.json())
+    assert "Claim request for this temple already submitted. Thanks" in str(dup_resp2.json())
 
     # 5. Super admin lists pending claims
     list_resp = await client.get(

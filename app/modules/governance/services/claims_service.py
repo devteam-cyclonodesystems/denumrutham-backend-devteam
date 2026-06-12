@@ -46,7 +46,7 @@ class ClaimsService:
         if (await db.execute(dup_stmt)).scalars().first():
             raise HTTPException(
                 status_code=400,
-                detail="Claim request already submitted"
+                detail="Claim request for this temple already submitted. Thanks"
             )
 
         # 3. Rate Limit Check: Max 5 submissions per user in the last 24 hours
@@ -85,6 +85,8 @@ class ClaimsService:
         user_res = await db.execute(select(User).filter(User.id == claimant_id))
         user = user_res.scalars().first()
         claim.claimant_name = user.name if user else ""
+        claim.claimant_email = user.email if user else None
+        claim.claimant_phone = user.phone if user else None
 
         return claim
 
@@ -125,6 +127,8 @@ class ClaimsService:
         for c in claims:
             c.temple_name = c.temple.name if c.temple else ""
             c.claimant_name = c.claimant.name if c.claimant else ""
+            c.claimant_email = c.claimant.email if c.claimant else None
+            c.claimant_phone = c.claimant.phone if c.claimant else None
 
         return claims, total
 
@@ -169,6 +173,8 @@ class ClaimsService:
             # Decorate
             claim.temple_name = temple.name
             claim.claimant_name = claim.claimant.name if claim.claimant else ""
+            claim.claimant_email = claim.claimant.email if claim.claimant else None
+            claim.claimant_phone = claim.claimant.phone if claim.claimant else None
             return claim
 
         # 3. Process approval
@@ -267,4 +273,6 @@ class ClaimsService:
         # Decorate
         claim.temple_name = temple.name
         claim.claimant_name = claim.claimant.name if claim.claimant else ""
+        claim.claimant_email = claim.claimant.email if claim.claimant else None
+        claim.claimant_phone = claim.claimant.phone if claim.claimant else None
         return claim
