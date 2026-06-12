@@ -23,8 +23,9 @@
 | INC-012 | Omitted sprint entity tables causing bootstrap/follow crash | P1 – Critical | ✅ Resolved | 2026-06-10 |
 | INC-013 | Non-idempotent migration blocks Alembic chain on redeploys | P1 – Critical | ✅ Resolved | 2026-06-11 |
 | INC-014 | Empty explorer directory due to NULL state/district foreign keys | P2 – High | ✅ Resolved | 2026-06-12 |
-| FEAT-001 | Phase 1 – Sidebar Spotlight Ad Area & Layout Alignment | Feature Delivery | ✅ Shipped | 2026-06-10 |
-| FEAT-002 | Phase 2 – Layout Responsiveness & Spotlight Ad Rails | Feature Delivery | ✅ Shipped | 2026-06-10 |
+| FEAT-001 | Phase 1 – Sidebar Spotlight Ad Area & Layout Alignment | Feature Delivery |  Shipped | 2026-06-10 |
+| FEAT-002 | Phase 2 – Layout Responsiveness & Spotlight Ad Rails | Feature Delivery |  Shipped | 2026-06-10 |
+| FEAT-003 | Devotee Registration Hardening & Password Strength Enforcements | Feature Delivery |  Shipped | 2026-06-12 |
 
 ---
 
@@ -853,4 +854,31 @@ Implemented global layout standardisation, responsive explorer grids, desktop ad
    - Right Spotlight Rail (Temple advertisements only).
    - Responsive visibility: visible side-by-side on desktop (xl+), stacked below grid on tablet, hidden completely on mobile.
 5. **Website Builder Controls**: Added `showLeftSpotlight`, `showRightSpotlight`, and `showSidebarRail` toggles to website settings and builder preview engines.
+
+---
+
+## FEAT-003: Devotee Registration Hardening & Password Strength Enforcements
+
+| Field | Value |
+|-------|-------|
+| **Feature ID** | FEAT-003 |
+| **Feature Title** | Devotee Registration Hardening & Password Strength Enforcements |
+| **Date and Time** | 2026-06-12T11:10:00Z |
+| **Status** | ✅ Shipped |
+
+### Description
+
+Enforced strong password policy verification checks during devotee and staff registrations across the Denumrutham ecosystem while maintaining a simple user interface by excluding a "confirm password" field from devotee and staff sign-ups.
+
+### Changes Completed
+
+1. **Frontend Validation**:
+   - Integrated `PASSWORD_REGEX` validation check in `Register.tsx` to ensure passwords are at least 8 characters long and contain at least 1 uppercase letter, 1 lowercase letter, 1 digit, and 1 special character.
+2. **Backend Validation**:
+   - Updated the `UnifiedRegister` schema in `app/modules/auth/schemas/auth.py` to enforce the strong password validator.
+   - Updated the `TempleManagerRegister` schema in `app/modules/auth/schemas/auth.py` to enforce the strong password validator.
+   - Updated the legacy `DevoteeRegister` schema in `app/modules/bookings/schemas/devotee_portal.py` to check for strong password compliance.
+   - Updated the onboarding (`TempleOnboardingRequest` in `onboarding.py`) and leads conversion (`LeadConvertRequest` in `leads.py`) schemas to validate manager password strength.
+3. **Unit Tests**:
+   - Added automated tests to `tests/test_auth.py` to verify devotee unified registration and legacy devotee registration validation under weak and strong passwords.
 
