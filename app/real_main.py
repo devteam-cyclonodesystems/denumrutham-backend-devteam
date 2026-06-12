@@ -159,7 +159,7 @@ app = FastAPI(
 
 @app.get("/health/live")
 async def health_live():
-    return {"status": "alive"}
+    return {"status": "alive", "commit": "check-deploy-1"}
 
 @app.get("/api/v1/diag/ping")
 async def diag_ping():
