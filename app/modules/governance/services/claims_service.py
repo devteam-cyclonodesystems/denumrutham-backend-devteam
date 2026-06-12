@@ -38,16 +38,15 @@ class ClaimsService:
                 detail="Only DIRECTORY_ONLY temples can be claimed."
             )
 
-        # 2. Duplicate Check: User cannot have another PENDING claim for the same temple
+        # 2. Duplicate Check: No pending claim can exist for this temple (by anyone)
         dup_stmt = select(TempleClaimRequest).filter(
-            TempleClaimRequest.claimant_id == claimant_id,
             TempleClaimRequest.temple_id == schema.temple_id,
             TempleClaimRequest.status == "PENDING"
         )
         if (await db.execute(dup_stmt)).scalars().first():
             raise HTTPException(
                 status_code=400,
-                detail="You already have a pending claim request for this temple."
+                detail="Claim request already submitted"
             )
 
         # 3. Rate Limit Check: Max 5 submissions per user in the last 24 hours

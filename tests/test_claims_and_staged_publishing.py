@@ -112,14 +112,48 @@ async def test_claim_submission_and_superadmin_approval(client, superadmin_auth_
     assert claim_data["target_subscription_plan"] == "GOVERNED_STANDARD"
     claim_id = claim_data["id"]
 
-    # 4. Try submitting duplicate claim request - should block
+    # 4. Try submitting duplicate claim request (same user) - should block
     dup_resp = await client.post(
         "/api/v1/claims",
         json=claim_payload,
         headers=devotee_headers
     )
     assert dup_resp.status_code == 400
-    assert "You already have a pending claim request" in str(dup_resp.json())
+    assert "Claim request already submitted" in str(dup_resp.json())
+
+    # Create second devotee user in database
+    async with TestSessionLocal() as session:
+        devotee2_res = await session.execute(select(User).filter(User.user_id == "devotee_claimant2@temple.org"))
+        devotee2 = devotee2_res.scalars().first()
+        if not devotee2:
+            devotee2 = User(
+                id=uuid4(),
+                user_id="devotee_claimant2@temple.org",
+                password_hash=get_password_hash("devotee@123"),
+                role="DEVOTEE",
+                status="ACTIVE",
+                is_active=True
+            )
+            session.add(devotee2)
+        await session.commit()
+
+    # Login second devotee user
+    login_resp2 = await client.post(
+        "/api/v1/auth/login",
+        data={"username": "devotee_claimant2@temple.org", "password": "devotee@123"},
+    )
+    assert login_resp2.status_code == 200
+    devotee2_token = login_resp2.json()["data"]["access_token"]
+    devotee2_headers = {"Authorization": f"Bearer {devotee2_token}"}
+
+    # Try submitting duplicate claim request (different user) - should also block
+    dup_resp2 = await client.post(
+        "/api/v1/claims",
+        json=claim_payload,
+        headers=devotee2_headers
+    )
+    assert dup_resp2.status_code == 400
+    assert "Claim request already submitted" in str(dup_resp2.json())
 
     # 5. Super admin lists pending claims
     list_resp = await client.get(
