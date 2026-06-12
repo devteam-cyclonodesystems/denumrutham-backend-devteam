@@ -9,6 +9,7 @@ from typing import Sequence, Union
 from alembic import op
 import sqlalchemy as sa
 import datetime
+import uuid
 
 # revision identifiers, used by Alembic.
 revision: str = 'phase6_directory_changes'
@@ -126,6 +127,13 @@ def upgrade() -> None:
         # Telangana
         {"id": "b0000000-0000-0000-0000-000000000024", "state_id": "a0000000-0000-0000-0000-000000000005", "name": "Hyderabad", "slug": "hyderabad", "code": "HYD", "created_at": now_dt}
     ]
+
+    # Convert IDs to uuid.UUID objects
+    for s in states:
+        s["id"] = uuid.UUID(s["id"])
+    for d in districts:
+        d["id"] = uuid.UUID(d["id"])
+        d["state_id"] = uuid.UUID(d["state_id"])
 
     # Insert states
     state_table = sa.table('state_master',
