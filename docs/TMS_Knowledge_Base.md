@@ -728,8 +728,9 @@ In the devotee portal Suggest Temple flow (Step 2/5), the "Next: Duplicates & Ma
 ### Root Cause
 
 1. **Alembic Migration UUID Typing Mismatch**: The backend migration `phase6_directory_changes.py` performed a `bulk_insert` of state and district records using hardcoded UUID strings. Because SQLite and Neon PostgreSQL drivers expect Python `uuid.UUID` objects for columns defined as `sa.UUID()`, SQLAlchemy raised a `StatementError: (builtins.AttributeError) 'str' object has no attribute 'hex'` during container startup.
-2. **Railway Silent Rollback / Deploy Stall**: The migration crash caused container startup to fail on the new deployment on Railway. As a result, Railway kept routing traffic to the older container instance running an outdated build.
-3. **Outdated API Payload**: The old container served a legacy version of the `/api/v1/public/states` endpoint which did not return the state `id` key. The frontend Suggest Temple form could not map the selected state to an ID, leaving the form invalid and the "Next" button disabled.
+2. **FastAPI Module Import NameError**: The new suggestions service layer (`suggestions_service.py`) introduced type annotations using `Optional[UUID]` but omitted importing `Optional` from the `typing` module. This triggered a `NameError: name 'Optional' is not defined` at application import time.
+3. **Railway Silent Rollback / Deploy Stall**: Both errors caused container startup to fail on new deployments on Railway. As a result, Railway kept routing traffic to the older container instance running an outdated build.
+4. **Outdated API Payload**: The old container served a legacy version of the `/api/v1/public/states` endpoint which did not return the state `id` key. The frontend Suggest Temple form could not map the selected state to an ID, leaving the form invalid and the "Next" button disabled.
 
 ### Affected Services, Components, or Features
 
@@ -740,19 +741,21 @@ In the devotee portal Suggest Temple flow (Step 2/5), the "Next: Duplicates & Ma
 ### Resolution Implemented
 
 1. **Migration UUID Conversion**: Patched `phase6_directory_changes.py` to import `uuid` and map string IDs to Python `uuid.UUID` instances before calling `op.bulk_insert`.
-2. **Local Validation**: Verified that `alembic upgrade head` runs and completes successfully against SQLite.
-3. **Submodule Deployment Sync**: Committed the fix to backend `main`, merged into `master`, and pushed to remote origin. The backend submodule commit in the root repository was also updated and pushed to trigger a clean deployment.
-4. **API Verification**: Checked that `/api/v1/public/states` now returns state `id` keys and that `/health/live` correctly reports the new commit.
+2. **Suggestions Service Import Correction**: Added `from typing import Optional` to `app/modules/governance/services/suggestions_service.py`.
+3. **Local Validation**: Verified that `alembic upgrade head` runs and completes successfully against SQLite, and that the backend app imports cleanly without NameErrors.
+4. **Submodule Deployment Sync**: Committed the fixes to backend `main`, merged into `master`, and pushed to remote origin. The backend submodule commit in the root repository was also updated and pushed to trigger a clean deployment.
+5. **API Verification**: Checked that `/api/v1/public/states` now returns state `id` keys and that `/health/live` correctly reports the new commit.
 
 ### Preventive Actions Taken
 
 1. **Strict Type Conversion in Migrations**: Ensure all bulk-inserted data records containing UUID fields are explicitly parsed using Python `uuid.UUID()` objects in Alembic scripts to avoid driver-specific SQL execution errors.
-2. **Deployment Alerting**: Check build and startup logs on Railway whenever backend submodule updates are pushed.
+2. **Pre-commit Import Checks**: Ensure that static checks or a quick import check (`python -c "from app.real_main import app"`) is executed as part of local verification or CI to catch NameErrors before pushing code.
+3. **Deployment Alerting**: Check build and startup logs on Railway whenever backend submodule updates are pushed.
 
 ### Related Tickets, PRs, Commits
 
-- Commit (backend): `cfdb84a` (migration UUID fix)
-- Commit (root): `10ddff6` (submodule reference update)
+- Commit (backend): `cfdb84a` (migration UUID fix), `fd0b59a` (suggestions service Optional import fix)
+- Commit (root): `323c043` (submodule reference update)
 
 ---
 
