@@ -331,7 +331,7 @@ class TempleSuggestionImage(Base):
 
     id = Column(UUID(as_uuid=True), primary_key=True, default=uuid.uuid4)
     suggestion_id = Column(UUID(as_uuid=True), ForeignKey("temple_suggestions.id", ondelete="CASCADE"), nullable=False, index=True)
-    image_url = Column(String(512), nullable=False)
+    image_url = Column(String, nullable=False)
     is_primary = Column(Boolean, default=False, nullable=False)
     created_at = Column(DateTime(timezone=True), default=utcnow)
 
