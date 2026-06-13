@@ -812,6 +812,48 @@ Additionally, during form validation and submission, the developer console logge
 
 ---
 
+## INC-018: Superadmin Review Action Submission Failure due to Status String Mismatch
+
+| Field | Value |
+|-------|-------|
+| **Incident ID** | INC-018 |
+| **Incident Title** | Superadmin Review Action Submission Failure due to Status String Mismatch |
+| **Date and Time** | 2026-06-13T11:15:30+05:30 |
+| **Severity/Priority** | P1 – Critical |
+| **Current Status** | ✅ Resolved |
+
+### Description
+
+When superadmins attempted to approve, reject, or merge devotee suggestions in the Governance Triage dashboard, the API returned an HTTP 400 Bad Request error (`BAD_REQUEST`) with the message `Invalid review status action` (traceId: `d1af126e-274`). This blocked moderators from processing incoming devotee suggestions.
+
+### Root Cause
+
+The frontend `SuggestionsGovernance.tsx` component was building the review payload by sending the active/verb forms of the action (`status: "APPROVE"`, `"REJECT"`, or `"MERGE"`). However, the backend suggestions service `review_suggestion` was strictly expecting the past-participle states of the status enum (`"APPROVED"`, `"REJECTED"`, or `"MERGED"`). Since they didn't match, the backend raised an HTTP 400 exception.
+
+### Affected Services, Components, or Features
+
+- Superadmin Suggestions Governance Triage Dashboard (`SuggestionsGovernance.tsx` frontend page)
+- `/api/v1/temple-suggestions/admin/{id}/review` POST API
+- Backend Suggestions Service (`suggestions_service.py`)
+
+### Resolution Implemented
+
+1. **Backend Status Normalization**: Modified the backend [suggestions_service.py](file:///c:/Denumrutham/backend/app/modules/governance/services/suggestions_service.py#L403-L410) to map incoming review status values (accepting both verb forms like `"APPROVE"` and past-participle states like `"APPROVED"`) into their canonical past-participle representations.
+2. **Frontend Payload Update**: Updated the frontend [SuggestionsGovernance.tsx](file:///c:/Denumrutham/frontend/src/pages/admin/governance/SuggestionsGovernance.tsx#L251-L253) to send `"APPROVED"`, `"REJECTED"`, or `"MERGED"`, aligning with the documented API contract.
+3. **Verification**: Successfully submitted suggestion creations as a devotee and approved/processed them using both status formats, confirming HTTP 200 responses.
+
+### Preventive Actions Taken
+
+1. **Align API Contracts**: Ensure frontend and backend contracts are synchronized during feature implementation.
+2. **Robust Input Normalization**: Implement input-tolerant enum mapping or casing standardization in the service layer.
+
+### Related Tickets, PRs, Commits
+
+- Commit (backend): `16b9060` (Normalize review status to accept both short verb and past participle)
+- Commit (frontend): `a8d0ec5` (Send past-participle review status to match API contract)
+
+---
+
 ## Incident Management Process
 
 ### When a New Incident Is Reported
