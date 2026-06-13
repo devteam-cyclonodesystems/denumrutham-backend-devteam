@@ -302,7 +302,7 @@ class TempleSuggestion(Base):
     confidence_score = Column(Integer, default=0, nullable=False)
     original_submission_json = Column(JSONB_VARIANT, nullable=False)
     
-    status = Column(Enum(TempleSuggestionStatus), nullable=False, default=TempleSuggestionStatus.PENDING, index=True)
+    status = Column(Enum(TempleSuggestionStatus, native_enum=False), nullable=False, default=TempleSuggestionStatus.PENDING, index=True)
     rejection_reason = Column(Text, nullable=True)
     moderator_notes = Column(Text, nullable=True)
     reviewed_by = Column(UUID(as_uuid=True), ForeignKey("users.id", ondelete="SET NULL"), nullable=True)

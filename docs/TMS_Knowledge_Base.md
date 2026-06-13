@@ -25,6 +25,7 @@
 | INC-014 | Empty explorer directory due to NULL state/district foreign keys | P2 – High | ✅ Resolved | 2026-06-12 |
 | INC-015 | Couldn't view/download 'Legal Verification Documents (Uploaded Proof)' in Claims Review | P2 – High | ✅ Resolved | 2026-06-12 |
 | INC-016 | Suggest Temple Step 2 Next disabled due to failed backend migration deployment | P2 – High | ✅ Resolved | 2026-06-12 |
+| INC-017 | Devotee Suggest Temple Submission failure due to UndefinedObjectError (native ENUM mismatch) | P1 – Critical | ✅ Resolved | 2026-06-13 |
 | FEAT-001 | Phase 1 – Sidebar Spotlight Ad Area & Layout Alignment | Feature Delivery |  Shipped | 2026-06-10 |
 | FEAT-002 | Phase 2 – Layout Responsiveness & Spotlight Ad Rails | Feature Delivery |  Shipped | 2026-06-10 |
 | FEAT-003 | Devotee Registration Hardening & Password Strength Enforcements | Feature Delivery |  Shipped | 2026-06-12 |
@@ -756,6 +757,51 @@ In the devotee portal Suggest Temple flow (Step 2/5), the "Next: Duplicates & Ma
 
 - Commit (backend): `cfdb84a` (migration UUID fix), `fd0b59a` (suggestions service Optional import fix)
 - Commit (root): `323c043` (submodule reference update)
+
+---
+
+## INC-017: Devotee Suggest Temple Submission Failure Due to UndefinedObjectError (Native ENUM Mismatch)
+
+| Field | Value |
+|-------|-------|
+| **Incident ID** | INC-017 |
+| **Incident Title** | Devotee Suggest Temple Submission failure due to UndefinedObjectError (native ENUM mismatch) |
+| **Date and Time** | 2026-06-13T10:09:45+05:30 |
+| **Severity/Priority** | P1 – Critical |
+| **Current Status** | ✅ Resolved |
+
+### Description
+
+When devotees completed Step 5 of 5 of the Suggest Temple flow and clicked submit, the API returned an HTTP 500 Internal Server Error (`DATABASE_ERROR`) with a message `Internal database error` (traceId: `42c93ef1-608`). This completely blocked devotees from submitting new temple suggestions.
+Additionally, during form validation and submission, the developer console logged devotee data (address, state, district, pincode, etc.) in plain text, raising privacy concerns.
+
+### Root Cause
+
+1. **SQLAlchemy vs Alembic Schema Mismatch**: The `status` column in `TempleSuggestion` in `governance_models.py` was defined as `Column(Enum(TempleSuggestionStatus))` (which by default maps to a native PostgreSQL ENUM type named `templesuggestionstatus`). However, the Alembic migration `253cb6f74d6c_add_temple_suggestions_staging_tables.py` had defined the `status` column as `sa.String(30)`.
+2. **SQL Execution Exception**: When SQLAlchemy attempted to execute the INSERT statement during suggestion creation, it generated SQL that cast the status parameter to `$24::templesuggestionstatus`. Since the native type `templesuggestionstatus` did not exist in the database, Postgres threw a `ProgrammingError: <class 'asyncpg.exceptions.UndefinedObjectError'>: type "templesuggestionstatus" does not exist`.
+3. **Verbose Client-Side Logging**: A debug `console.log` statement was left in `SuggestTempleModal.tsx` from development, which outputted the entire form state dynamically.
+
+### Affected Services, Components, or Features
+
+- Devotee Portal Suggest Temple Flow (Submission API)
+- `/api/v1/temple-suggestions` POST API
+- Devotee Portal UI components (`SuggestTempleModal.tsx`)
+
+### Resolution Implemented
+
+1. **Configure Non-Native Enum Mapping**: Modified the `status` column definition on the `TempleSuggestion` model in `governance_models.py` to use `native_enum=False`. This tells SQLAlchemy to map the enum values to a standard string/varchar column (matching the database schema) instead of trying to cast it to a native PostgreSQL enum type.
+2. **Remove Client-Side Debug Logs**: Removed the debug `console.log` from `SuggestTempleModal.tsx` to prevent exposing user-entered fields in the browser console.
+3. **Rerun Verification**: Verified that simulated devotee suggestions are successfully created in the production database and cleaned up the test record afterwards.
+
+### Preventive Actions Taken
+
+1. **Strict Enum Mapping Policy**: Enforce `native_enum=False` on model Enum columns where the underlying database table uses a standard `String` or `VARCHAR` type.
+2. **Code Reviews for Console Logging**: Review console logging rules to ensure debug/validation logs are not pushed to production build targets.
+
+### Related Tickets, PRs, Commits
+
+- Commit (backend): `5287f3c` (Configure status native_enum=False)
+- Commit (frontend): `1ed27a2` (Remove debug console.log)
 
 ---
 
