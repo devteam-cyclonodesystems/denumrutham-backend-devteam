@@ -26,6 +26,7 @@
 | INC-015 | Couldn't view/download 'Legal Verification Documents (Uploaded Proof)' in Claims Review | P2 – High | ✅ Resolved | 2026-06-12 |
 | INC-016 | Suggest Temple Step 2 Next disabled due to failed backend migration deployment | P2 – High | ✅ Resolved | 2026-06-12 |
 | INC-017 | Devotee Suggest Temple Submission failure due to UndefinedObjectError (native ENUM mismatch) | P1 – Critical | ✅ Resolved | 2026-06-13 |
+| INC-018 | Superadmin Review Action Submission Failure due to Status String Mismatch | P1 – Critical | ✅ Resolved | 2026-06-13 |
 | FEAT-001 | Phase 1 – Sidebar Spotlight Ad Area & Layout Alignment | Feature Delivery |  Shipped | 2026-06-10 |
 | FEAT-002 | Phase 2 – Layout Responsiveness & Spotlight Ad Rails | Feature Delivery |  Shipped | 2026-06-10 |
 | FEAT-003 | Devotee Registration Hardening & Password Strength Enforcements | Feature Delivery |  Shipped | 2026-06-12 |
