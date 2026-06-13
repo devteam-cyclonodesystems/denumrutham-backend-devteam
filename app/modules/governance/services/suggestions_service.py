@@ -401,6 +401,13 @@ class SuggestionsService:
 
         # Handle actions
         action_status = review.status.upper()
+        if action_status in ("APPROVED", "APPROVE"):
+            action_status = "APPROVED"
+        elif action_status in ("REJECTED", "REJECT"):
+            action_status = "REJECTED"
+        elif action_status in ("MERGED", "MERGE"):
+            action_status = "MERGED"
+
         if action_status == "REJECTED":
             if not review.rejection_reason or not review.rejection_reason.strip():
                 raise HTTPException(status_code=400, detail="Rejection reason is required for REJECTED status")
