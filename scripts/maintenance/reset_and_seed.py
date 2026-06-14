@@ -45,7 +45,7 @@ CHILD_TABLES = [
     "donation_campaigns",
     
     # Layer 1: Inventory/Store Transactions, Ledgers, Sessions, Orders, Costs, Snapshots, Mapping, Reconciliations
-    "price_approval_requests", "inventory_stock_ledger", "inventory_reconciliations", "donation_inventory_mapping",
+    "price_approval_requests", "supplier_price_history", "inventory_stock_ledger", "inventory_reconciliations", "donation_inventory_mapping",
     "procurement_cost_history", "inventory_daily_snapshots", "ritual_template_items",
     "inventory_transactions", "inventory_movements", "inventory_issue_sessions",
     "inventory_item_requests", "inventory_payment_transactions", "inventory_invoices",
