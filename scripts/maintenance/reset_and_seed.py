@@ -378,15 +378,17 @@ async def execute_reset_and_seed(version: str):
             ]
             for r_table in raw_tables:
                 try:
-                    await db.execute(text(f"DELETE FROM {r_table}"))
+                    async with db.begin_nested():
+                        await db.execute(text(f"DELETE FROM {r_table}"))
                 except Exception:
                     pass # Ignore if table not present in early migration stages
             
             # Truncate child modules
             for table_name in CHILD_TABLES:
                 try:
-                    await db.execute(text(f"DELETE FROM {table_name}"))
-                    logger.info(f"  [OK] Cleared table: {table_name}")
+                    async with db.begin_nested():
+                        await db.execute(text(f"DELETE FROM {table_name}"))
+                        logger.info(f"  [OK] Cleared table: {table_name}")
                 except Exception as e:
                     err_msg = str(e).lower()
                     if "no such table" in err_msg or "relation" in err_msg and "does not exist" in err_msg:
@@ -397,8 +399,9 @@ async def execute_reset_and_seed(version: str):
             
             # Truncate devotees
             try:
-                await db.execute(text("DELETE FROM devotees"))
-                logger.info("  [OK] Cleared devotees")
+                async with db.begin_nested():
+                    await db.execute(text("DELETE FROM devotees"))
+                    logger.info("  [OK] Cleared devotees")
             except Exception:
                 pass
                 
