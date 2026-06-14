@@ -38,7 +38,7 @@ CHILD_TABLES = [
     "refund_history", "approval_requests",
     "offering_receipts", "offering_payments", "offering_audit_logs", "offering_inventory_links", "offerings", "offering_categories",
     "service_bookings", "archana_bookings", "bookings", "pooja_services", "temple_services",
-    "archana_refunds", "archana_booking_payments", "ritual_queue", "archana_executions",
+    "archana_refunds", "archana_booking_payments", "archana_executions", "ritual_queue",
     "archana_booking_audit", "archana_booking_items", "archana_booking_members",
     "enterprise_archana_bookings", "archana_sync_state", "archana_catalog_versions",
     "archana_catalog", "deity_audit", "deity_master", "archana_execution_groups",
