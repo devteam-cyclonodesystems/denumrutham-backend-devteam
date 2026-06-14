@@ -46,6 +46,7 @@ CHILD_TABLES = [
     "booking_audit_logs", "booking_status_history", "booking_conflicts",
     "booking_holds", "booking_policies", "pricing_rules", "venue_slots",
     "hall_bookings", "halls",
+    "booking_adjustments", "financial_ledger", "daily_settlements", "cash_sessions",
     "donation_campaigns",
     
     # Layer 1: Inventory/Store Transactions, Ledgers, Sessions, Orders, Costs, Snapshots, Mapping, Reconciliations
