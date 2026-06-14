@@ -37,7 +37,11 @@ CHILD_TABLES = [
     # 1. Transaction Tables
     "offering_receipts", "offering_payments", "offering_audit_logs", "offering_inventory_links", "offerings", "offering_categories",
     "service_bookings", "archana_bookings", "bookings", "pooja_services", "temple_services",
-    "store_order_items", "store_orders", "products", "hall_bookings", "halls",
+    "store_order_items", "store_orders", "products",
+    "refund_transactions", "payment_transactions", "payment_ledgers",
+    "booking_audit_logs", "booking_status_history", "booking_conflicts",
+    "booking_holds", "booking_policies", "pricing_rules", "venue_slots",
+    "hall_bookings", "halls",
     "donation_campaigns", "inventory_transactions", "inventory_movements",
     "inventory_item_requests", "inventory_invoices", "inventory_items", "suppliers",
     # 2. Follower/Notification Tables
