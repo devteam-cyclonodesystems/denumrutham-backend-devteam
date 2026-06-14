@@ -312,6 +312,7 @@ async def seed_v1(db: AsyncSession, super_admin_id: uuid.UUID) -> dict:
         published_at=datetime.now(timezone.utc)
     )
     db.add(settings_c_live)
+    await db.flush()
 
     # Link manager user to Temple C
     manager_user.temple_id = temple_c.id

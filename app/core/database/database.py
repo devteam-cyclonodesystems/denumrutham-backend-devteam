@@ -20,6 +20,7 @@ db_url = settings.DATABASE_URL
 connect_args = {}
 
 if db_url.startswith("postgresql+asyncpg"):
+    connect_args["prepared_statement_cache_size"] = 0
     parsed = urllib.parse.urlparse(db_url)
     query_params = urllib.parse.parse_qs(parsed.query)
     

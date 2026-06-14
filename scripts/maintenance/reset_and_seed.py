@@ -35,6 +35,8 @@ DATASET_VERSION = "1.0.0"
 # Target tables in reverse-dependency order
 CHILD_TABLES = [
     # 1. Transaction Tables
+    "subscription_events", "subscriptions",
+    "payments", "donations", "transactions",
     "refund_history", "approval_requests",
     "offering_receipts", "offering_payments", "offering_audit_logs", "offering_inventory_links", "offerings", "offering_categories",
     "service_bookings", "archana_bookings", "bookings", "pooja_services", "temple_services",
@@ -55,7 +57,7 @@ CHILD_TABLES = [
     "inventory_transactions", "inventory_movements", "inventory_issue_sessions",
     "inventory_item_requests", "inventory_payment_transactions", "inventory_invoices",
     "procurement_grns", "store_sales_order_items", "store_sales_orders",
-    "store_auctions", "store_stock", "store_stock_reservations", "kalavara_stock",
+    "store_auction_bids", "store_auctions", "store_stock", "store_stock_reservations", "kalavara_stock",
     "store_order_items", "store_orders",
     
     # Layer 2: Products and Inventory Items
@@ -69,11 +71,13 @@ CHILD_TABLES = [
     # 3. Suggestion Child Tables
     "temple_suggestion_images", "temple_suggestion_contacts", "temple_suggestion_audits",
     # 4. Claims & Suggestions
-    "temple_claim_requests", "temple_suggestions",
+    "temple_claim_requests", "temple_suggestions", "change_requests", "temple_leads",
     # 5. Temple Child/Profile Tables
     "temple_announcements", "temple_activities", "temple_festivals",
     "temple_images", "temple_website_settings_live", "temple_website_settings",
     "temple_profile_drafts", "temple_profiles", "temple_search_index",
+    "operational_state_audits", "temple_ownership_history", "audit_governance_configs",
+    "leaves", "employees", "devotee_profiles",
     "user_roles", "role_permissions", "roles", "permissions", "user_temples"
 ]
 
@@ -90,6 +94,14 @@ def get_git_commit_hash() -> str:
         return result.stdout.strip()
     except Exception:
         return "N/A"
+
+async def initialize_rls_context(db):
+    try:
+        if db.bind.dialect.name != "sqlite":
+            await db.execute(text("SELECT set_config('app.current_temple_id', 'SYSTEM', false)"))
+            await db.execute(text("SELECT set_config('app.current_role', 'SUPER_ADMIN', false)"))
+    except Exception as e:
+        logger.warning(f"Failed to initialize RLS context: {e}")
 
 def check_environment():
     env = os.getenv("ENVIRONMENT")
@@ -369,6 +381,7 @@ async def execute_reset_and_seed(version: str):
         sys.exit(1)
         
     async with AsyncSessionLocal() as db:
+        await initialize_rls_context(db)
         # Phase 1: Superadmin check
         result = await db.execute(select(User).filter(User.role.in_(["SUPER_ADMIN", "SUPERADMIN"])))
         super_admin = result.scalars().first()
@@ -532,6 +545,7 @@ async def main():
     # 1. Verification Mode
     if args.verify:
         async with AsyncSessionLocal() as db:
+            await initialize_rls_context(db)
             success = await run_verification(db, args.dataset_version)
             sys.exit(0 if success else 1)
             
@@ -548,6 +562,7 @@ async def main():
         print("-" * 60)
         
         async with AsyncSessionLocal() as db:
+            await initialize_rls_context(db)
             estimates, failures = await get_db_estimates(db)
             media_files = get_media_estimates()
             
