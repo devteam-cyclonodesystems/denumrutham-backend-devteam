@@ -35,7 +35,7 @@ DATASET_VERSION = "1.0.0"
 # Target tables in reverse-dependency order
 CHILD_TABLES = [
     # 1. Transaction Tables
-    "offering_receipts", "offering_payments", "offerings", "offering_categories",
+    "offering_receipts", "offering_payments", "offering_audit_logs", "offerings", "offering_categories",
     "service_bookings", "archana_bookings", "bookings", "pooja_services", "temple_services",
     "store_order_items", "store_orders", "products", "hall_bookings", "halls",
     "donation_campaigns", "inventory_transactions", "inventory_movements",
