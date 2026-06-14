@@ -424,13 +424,13 @@ async def execute_reset_and_seed(version: str):
             except Exception:
                 pass
                 
-            # Truncate users except superadmin
-            await db.execute(text("DELETE FROM users WHERE role != 'SUPER_ADMIN' AND role != 'SUPERADMIN'"))
-            logger.info("  [OK] Cleared users (Superadmin preserved)")
-            
             # Truncate temples
             await db.execute(text("DELETE FROM temples"))
             logger.info("  [OK] Cleared temples")
+
+            # Truncate users except superadmin
+            await db.execute(text("DELETE FROM users WHERE role != 'SUPER_ADMIN' AND role != 'SUPERADMIN'"))
+            logger.info("  [OK] Cleared users (Superadmin preserved)")
             
             # Commit cleanup block
             await db.flush()
