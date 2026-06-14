@@ -44,7 +44,10 @@ CHILD_TABLES = [
     "booking_holds", "booking_policies", "pricing_rules", "venue_slots",
     "hall_bookings", "halls",
     "donation_campaigns", "inventory_transactions", "inventory_movements",
-    "inventory_item_requests", "inventory_invoices", "inventory_items", "suppliers",
+    "ritual_template_items", "inventory_stock_ledger", "inventory_reconciliations",
+    "donation_inventory_mapping", "procurement_grns", "inventory_issue_sessions",
+    "inventory_item_requests", "inventory_invoices", "inventory_items",
+    "ritual_templates", "inventory_locations", "suppliers",
     # 2. Follower/Notification Tables
     "temple_follower_preferences", "temple_followers", "notifications",
     # 3. Suggestion Child Tables
