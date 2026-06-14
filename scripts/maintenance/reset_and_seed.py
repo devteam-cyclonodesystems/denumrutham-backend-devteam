@@ -46,7 +46,7 @@ CHILD_TABLES = [
     "donation_campaigns", "inventory_transactions", "inventory_movements",
     "ritual_template_items", "inventory_stock_ledger", "inventory_reconciliations",
     "donation_inventory_mapping", "procurement_grns", "inventory_issue_sessions",
-    "inventory_item_requests", "inventory_invoices", "inventory_items",
+    "inventory_item_requests", "inventory_payment_transactions", "inventory_invoices", "inventory_items",
     "ritual_templates", "inventory_locations", "suppliers",
     # 2. Follower/Notification Tables
     "temple_follower_preferences", "temple_followers", "notifications",
