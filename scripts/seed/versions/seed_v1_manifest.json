@@ -1,0 +1,49 @@
+{
+  "dataset_version": "1.0.0",
+  "required_roles": ["SUPER_ADMIN", "TEMPLE_ADMIN", "DEVOTEE"],
+  "temple_assertions": [
+    {
+      "domain": "sabarimala-sree-dharma-sastha",
+      "management_mode": "DIRECTORY_ONLY",
+      "has_live_settings": false,
+      "description": "Stage 1 Sabarimala"
+    },
+    {
+      "domain": "alappuzha-sree-krishna",
+      "management_mode": "DIRECTORY_ONLY",
+      "has_live_settings": true,
+      "description": "Stage 2 Alappuzha"
+    },
+    {
+      "domain": "vaikom-mahadeva",
+      "management_mode": "SELF_MANAGED",
+      "min_services": 2,
+      "min_bookings": 2,
+      "description": "Stage 3 Vaikom"
+    },
+    {
+      "domain": "ambalappuzha-sree-krishna",
+      "management_mode": "DIRECTORY_ONLY",
+      "description": "Stage 4 Ambalappuzha"
+    },
+    {
+      "domain": "ambalapuzha-krishna-duplicate",
+      "status": "MERGED",
+      "has_redirect": true,
+      "description": "Merged Redirect"
+    },
+    {
+      "domain": "old-inactive-shrine",
+      "is_active": false,
+      "description": "Archived Shrine"
+    }
+  ],
+  "suggestions": {
+    "total_count": 3,
+    "required_statuses": ["PENDING", "APPROVED", "REJECTED"]
+  },
+  "claims": {
+    "total_count": 2,
+    "required_statuses": ["PENDING", "REJECTED"]
+  }
+}

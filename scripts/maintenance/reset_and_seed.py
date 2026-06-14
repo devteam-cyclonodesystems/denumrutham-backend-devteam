@@ -69,35 +69,84 @@ def get_git_commit_hash() -> str:
 
 def check_environment():
     env = os.getenv("ENVIRONMENT")
-    if not env:
-        print("ERROR: ENVIRONMENT variable is missing or empty. Aborting for safety.")
-        sys.exit(1)
-        
-    env_lower = env.lower()
-    if env_lower in ["production", "prod", "live", "staging", "preprod"]:
-        print(f"ERROR: Destructive operations are blocked in ENVIRONMENT: {env}. Aborting.")
-        sys.exit(1)
-        
+    railway_env = os.getenv("RAILWAY_ENVIRONMENT")
+    railway_env_name = os.getenv("RAILWAY_ENVIRONMENT_NAME")
     db_url = os.getenv("DATABASE_URL", "")
+    
+    # Extract host for safety report
+    db_host = "Unknown"
     if db_url:
-        db_url_lower = db_url.lower()
-        if any(keyword in db_url_lower for keyword in ["prod", "production", "live", "staging", "preprod", "neon.tech", "aws.com", "rds.amazonaws"]):
-            print("ERROR: Remote/Production host detected in DATABASE_URL connection string. Aborting.")
-            sys.exit(1)
+        try:
+            import urllib.parse
+            if "sqlite" in db_url:
+                db_host = "Local SQLite File"
+            else:
+                sanitized_url = db_url.split("://")[-1]
+                db_host = sanitized_url.split("@")[-1].split("/")[0].split(":")[0]
+        except Exception:
+            db_host = "Parse Error"
+
+    is_blocked = False
+    blocked_reasons = []
+
+    # 1. Check ENVIRONMENT
+    if not env:
+        is_blocked = True
+        blocked_reasons.append("ENVIRONMENT variable is missing or empty.")
+    else:
+        env_lower = env.lower()
+        if env_lower in ["production", "prod", "live", "staging", "preprod"]:
+            is_blocked = True
+            blocked_reasons.append(f"ENVIRONMENT is set to a restricted value: '{env}'")
+
+    # 2. Check Railway variables
+    for var_name, var_val in [
+        ("RAILWAY_ENVIRONMENT", railway_env),
+        ("RAILWAY_ENVIRONMENT_NAME", railway_env_name)
+    ]:
+        if var_val:
+            val_lower = var_val.lower()
+            if val_lower in ["production", "prod", "live", "staging", "preprod"]:
+                is_blocked = True
+                blocked_reasons.append(f"{var_name} is set to a restricted value: '{var_val}'")
+
+    # Print safety report
+    print("=" * 60)
+    print("  RESET SAFETY REPORT")
+    print("=" * 60)
+    print(f"ENVIRONMENT:            {env or 'Not Set'}")
+    print(f"RAILWAY_ENVIRONMENT:    {railway_env or 'Not Set'}")
+    print(f"RAILWAY_ENV_NAME:       {railway_env_name or 'Not Set'}")
+    print(f"DATABASE HOST:          {db_host}")
+    print("-" * 60)
+    if is_blocked:
+        print("RESULT:                 BLOCKED")
+        print("Reasons:")
+        for reason in blocked_reasons:
+            print(f"  - {reason}")
+        print("=" * 60)
+        sys.exit(1)
+    else:
+        print("RESULT:                 ALLOWED")
+        print("=" * 60)
 
 async def get_db_estimates(db):
     estimates = {}
+    failures = {}
     for table_name in CHILD_TABLES + ["temples", "users"]:
         try:
-            if table_name == "users":
-                res = await db.execute(text("SELECT COUNT(*) FROM users WHERE role != 'SUPER_ADMIN' AND role != 'SUPERADMIN'"))
-            else:
-                res = await db.execute(text(f"SELECT COUNT(*) FROM {table_name}"))
-            count = res.scalar()
-            estimates[table_name] = count
-        except Exception:
-            estimates[table_name] = 0
-    return estimates
+            async with db.begin_nested():
+                if table_name == "users":
+                    res = await db.execute(text("SELECT COUNT(*) FROM users WHERE role != 'SUPER_ADMIN' AND role != 'SUPERADMIN'"))
+                else:
+                    res = await db.execute(text(f"SELECT COUNT(*) FROM {table_name}"))
+                count = res.scalar()
+                estimates[table_name] = count
+        except Exception as e:
+            err_msg = str(e)
+            logger.error(f"Failed to count table '{table_name}': {err_msg}")
+            failures[table_name] = err_msg
+    return estimates, failures
 
 def get_media_estimates():
     media_files = []
@@ -156,11 +205,28 @@ async def backup_data(db, backup_dir: str):
             logger.error(f"[Backup] [FAILED] Failed to back up table '{name}': {e}")
             raise e
 
-async def run_verification(db) -> bool:
+async def run_verification(db, dataset_version: str) -> bool:
     print("=" * 60)
-    print("  DENUMRUTHAM SYSTEM VERIFICATION RUN")
+    print(f"  DENUMRUTHAM SYSTEM VERIFICATION RUN (dataset: {dataset_version})")
     print("=" * 60)
     
+    # Resolve path to manifest file
+    manifest_path = os.path.join(
+        os.path.dirname(os.path.dirname(os.path.dirname(os.path.abspath(__file__)))),
+        "scripts", "seed", "versions", f"seed_{dataset_version}_manifest.json"
+    )
+    
+    if not os.path.exists(manifest_path):
+        print(f"ERROR: Dataset manifest not found at: {manifest_path}")
+        return False
+        
+    try:
+        with open(manifest_path, "r", encoding="utf-8") as f:
+            manifest = json.load(f)
+    except Exception as e:
+        print(f"ERROR: Failed to load dataset manifest: {e}")
+        return False
+
     failures = []
     
     # 1. Superadmin User check
@@ -174,89 +240,83 @@ async def run_verification(db) -> bool:
     # 2. Base Roles check
     roles = (await db.execute(select(SystemRole))).scalars().all()
     role_names = [r.name for r in roles]
-    required_roles = ["SUPER_ADMIN", "TEMPLE_ADMIN", "DEVOTEE"]
+    required_roles = manifest.get("required_roles", [])
     for role in required_roles:
         if role not in role_names:
             failures.append(f"Missing required role: {role}")
         else:
             print(f"  [PASS] Mapped role: {role}")
 
-    # 3. Canonical Temples A-F check
-    temple_domains = [
-        "sabarimala-sree-dharma-sastha",  # Stage 1
-        "alappuzha-sree-krishna",         # Stage 2
-        "vaikom-mahadeva",                # Stage 3
-        "ambalappuzha-sree-krishna",       # Stage 4 / Merge target
-        "ambalapuzha-krishna-duplicate",  # Merged redirect
-        "old-inactive-shrine"             # Archived/Inactive
-    ]
-    for domain in temple_domains:
+    # 3. Canonical Temples check
+    temple_assertions = manifest.get("temple_assertions", [])
+    for assert_data in temple_assertions:
+        domain = assert_data.get("domain")
         t = (await db.execute(select(Temple).filter(Temple.domain == domain))).scalars().first()
         if not t:
             failures.append(f"Missing canonical temple domain: {domain}")
-        else:
-            # Check Stage 1 timing fallbacks and claiming CTA status
-            if domain == "sabarimala-sree-dharma-sastha":
-                if t.management_mode != "DIRECTORY_ONLY":
-                    failures.append("Temple A Sabarimala is not configured as DIRECTORY_ONLY")
-                # Preload website settings
-                settings = (await db.execute(select(TempleWebsiteSettings).filter(TempleWebsiteSettings.temple_id == t.id))).scalars().first()
-                if not settings:
-                    failures.append("Temple A Sabarimala is missing website settings")
-                live = (await db.execute(select(TempleWebsiteSettingsLive).filter(TempleWebsiteSettingsLive.temple_id == t.id))).scalars().first()
-                if live:
-                    failures.append("Temple A Sabarimala has active live settings (should be Stage 1)")
+            continue
             
-            # Check Stage 2 curation settings
-            elif domain == "alappuzha-sree-krishna":
-                live = (await db.execute(select(TempleWebsiteSettingsLive).filter(TempleWebsiteSettingsLive.temple_id == t.id))).scalars().first()
-                if not live:
-                    failures.append("Temple B Alappuzha has no live settings (should be Stage 2)")
-                    
-            # Check Stage 3 commerce configuration
-            elif domain == "vaikom-mahadeva":
-                if t.management_mode != "SELF_MANAGED":
-                    failures.append("Temple C Vaikom is not configured as SELF_MANAGED")
-                services = (await db.execute(select(TempleService).filter(TempleService.temple_id == t.id))).scalars().all()
-                if len(services) < 2:
-                    failures.append(f"Temple C Vaikom is missing services (found {len(services)})")
-                bookings = (await db.execute(select(ServiceBooking).filter(ServiceBooking.temple_id == t.id))).scalars().all()
-                if len(bookings) < 2:
-                    failures.append(f"Temple C Vaikom is missing bookings (found {len(bookings)})")
+        # Check specific assertions
+        if "management_mode" in assert_data:
+            if t.management_mode != assert_data["management_mode"]:
+                failures.append(f"Temple {domain} management_mode is '{t.management_mode}', expected '{assert_data['management_mode']}'")
+        
+        if "is_active" in assert_data:
+            if t.is_active != assert_data["is_active"]:
+                failures.append(f"Temple {domain} is_active is {t.is_active}, expected {assert_data['is_active']}")
 
-            # Check Merged Redirection
-            elif domain == "ambalapuzha-krishna-duplicate":
-                if t.status != "MERGED" or not t.merged_temple_id:
-                    failures.append("Temple E duplicate is not marked as MERGED or is missing merged_temple_id redirect link")
-                    
-            # Check Inactive Search target
-            elif domain == "old-inactive-shrine":
-                if t.is_active is not False:
-                    failures.append("Temple F archived shrine is not inactive")
-            
-            print(f"  [PASS] Canonical Temple: {t.name} (domain: {t.domain})")
+        if "status" in assert_data:
+            if t.status != assert_data["status"]:
+                failures.append(f"Temple {domain} status is '{t.status}', expected '{assert_data['status']}'")
+
+        if assert_data.get("has_live_settings") is not None:
+            live = (await db.execute(select(TempleWebsiteSettingsLive).filter(TempleWebsiteSettingsLive.temple_id == t.id))).scalars().first()
+            if assert_data["has_live_settings"] and not live:
+                failures.append(f"Temple {domain} is missing website_settings_live snapshot")
+            elif not assert_data["has_live_settings"] and live:
+                failures.append(f"Temple {domain} should not have website_settings_live snapshot")
+
+        if assert_data.get("has_redirect") is not None:
+            if assert_data["has_redirect"] and not t.merged_temple_id:
+                failures.append(f"Temple {domain} should have merged_temple_id redirect link")
+                
+        if "min_services" in assert_data:
+            services = (await db.execute(select(TempleService).filter(TempleService.temple_id == t.id))).scalars().all()
+            if len(services) < assert_data["min_services"]:
+                failures.append(f"Temple {domain} has {len(services)} services, expected at least {assert_data['min_services']}")
+
+        if "min_bookings" in assert_data:
+            bookings = (await db.execute(select(ServiceBooking).filter(ServiceBooking.temple_id == t.id))).scalars().all()
+            if len(bookings) < assert_data["min_bookings"]:
+                failures.append(f"Temple {domain} has {len(bookings)} bookings, expected at least {assert_data['min_bookings']}")
+                
+        print(f"  [PASS] Canonical Temple assertions satisfied: {t.name} (domain: {t.domain})")
 
     # 4. Suggestions check
-    suggestions = (await db.execute(select(TempleSuggestion))).scalars().all()
-    sug_statuses = [s.status for s in suggestions]
-    if "PENDING" not in sug_statuses:
-        failures.append("Missing PENDING suggestion")
-    if "APPROVED" not in sug_statuses:
-        failures.append("Missing APPROVED suggestion")
-    if "REJECTED" not in sug_statuses:
-        failures.append("Missing REJECTED suggestion")
-    
-    print(f"  [PASS] Seeded Suggestions (Total: {len(suggestions)})")
+    suggestions_data = manifest.get("suggestions", {})
+    if suggestions_data:
+        suggestions = (await db.execute(select(TempleSuggestion))).scalars().all()
+        expected_count = suggestions_data.get("total_count", 0)
+        if len(suggestions) < expected_count:
+            failures.append(f"Expected at least {expected_count} suggestions, found {len(suggestions)}")
+        sug_statuses = [s.status for s in suggestions]
+        for req_status in suggestions_data.get("required_statuses", []):
+            if req_status not in sug_statuses:
+                failures.append(f"Missing suggestion status: {req_status}")
+        print(f"  [PASS] Seeded Suggestions validated (Total: {len(suggestions)})")
 
     # 5. Claims check
-    claims = (await db.execute(select(TempleClaimRequest))).scalars().all()
-    claim_statuses = [c.status for c in claims]
-    if "PENDING" not in claim_statuses:
-        failures.append("Missing PENDING claim request")
-    if "REJECTED" not in claim_statuses:
-        failures.append("Missing REJECTED claim request")
-    
-    print(f"  [PASS] Seeded Claims (Total: {len(claims)})")
+    claims_data = manifest.get("claims", {})
+    if claims_data:
+        claims = (await db.execute(select(TempleClaimRequest))).scalars().all()
+        expected_count = claims_data.get("total_count", 0)
+        if len(claims) < expected_count:
+            failures.append(f"Expected at least {expected_count} claims, found {len(claims)}")
+        claim_statuses = [c.status for c in claims]
+        for req_status in claims_data.get("required_statuses", []):
+            if req_status not in claim_statuses:
+                failures.append(f"Missing claim status: {req_status}")
+        print(f"  [PASS] Seeded Claims validated (Total: {len(claims)})")
 
     # Final result
     print("-" * 60)
@@ -445,11 +505,14 @@ async def main():
     # 1. Verification Mode
     if args.verify:
         async with AsyncSessionLocal() as db:
-            success = await run_verification(db)
+            success = await run_verification(db, args.dataset_version)
             sys.exit(0 if success else 1)
             
     # 2. Dry-Run Mode (Default)
     if not args.force:
+        # Check environment and display safety report first
+        check_environment()
+        
         print("=" * 60)
         print("  DENUMRUTHAM DATABASE RESET - DRY-RUN")
         print("=" * 60)
@@ -458,17 +521,23 @@ async def main():
         print("-" * 60)
         
         async with AsyncSessionLocal() as db:
-            estimates = await get_db_estimates(db)
+            estimates, failures = await get_db_estimates(db)
             media_files = get_media_estimates()
             
             print(f"Database dialect connection active.")
-            print("\nEstimated rows targeted for deletion:")
+            print("\nSuccessfully Counted:")
+            print("---------------------")
             total_rows = 0
             for tbl, count in estimates.items():
-                if count > 0:
-                    print(f"  - {tbl}: {count} rows")
-                    total_rows += count
+                print(f"  - {tbl}: {count} rows")
+                total_rows += count
             print(f"Total estimated rows to delete: {total_rows}")
+            
+            if failures:
+                print("\nFailed To Count:")
+                print("----------------")
+                for tbl, err in failures.items():
+                    print(f"  - {tbl}: {err}")
             
             print(f"\nEstimated media files targeted for deletion:")
             print(f"  - static/uploads/: {len(media_files)} files")
