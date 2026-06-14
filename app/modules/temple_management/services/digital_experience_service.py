@@ -814,7 +814,8 @@ class DigitalExperienceService:
         db: AsyncSession,
         temple_id: UUID,
         current_user_id: UUID,
-        role: str
+        role: str,
+        bypass_mode_check: bool = False
     ) -> TempleWebsiteSettingsLive:
         # We wrap the entire validation, serialization, upsert, and logging in a nested transaction
         async with db.begin_nested():
@@ -833,7 +834,7 @@ class DigitalExperienceService:
                 )
                 
             # Governance checks
-            if temple.management_mode != "SELF_MANAGED":
+            if not bypass_mode_check and temple.management_mode != "SELF_MANAGED":
                 raise HTTPException(
                     status_code=400, 
                     detail=f"Direct website publishing is disabled for {temple.management_mode} temples. Changes must be submitted for approval."

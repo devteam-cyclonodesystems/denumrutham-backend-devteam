@@ -18,7 +18,7 @@ from app.modules.governance.models.governance_models import (
 from app.modules.governance.schemas.suggestions import (
     TempleSuggestionCreate, TempleSuggestionReview, DuplicateMatchResponse
 )
-from app.modules.temple_management.models.temple_models import TempleImage, ImageCategory, TempleProfile
+from app.modules.temple_management.models.temple_models import TempleImage, ImageCategory, TempleProfile, TempleWebsiteSettings
 
 def utcnow():
     return datetime.now(timezone.utc)
@@ -534,6 +534,36 @@ class SuggestionsService:
                 created_at=utcnow()
             )
             db.add(new_profile)
+
+            # Create default TempleWebsiteSettings draft record
+            default_settings = TempleWebsiteSettings(
+                id=uuid4(),
+                temple_id=new_temple.id,
+                theme_name="default",
+                primary_color="#ff6600",
+                secondary_color="#ffcc00",
+                logo_url=None,
+                hero_layout="split",
+                section_order=["hero", "about", "timings", "gallery", "location"],
+                feature_visibility={
+                    "enablePoojaBooking": False,
+                    "enableOfferings": False,
+                    "enableStore": False,
+                    "enableHallBooking": False,
+                    "enableFollow": True
+                },
+                enable_mantras=True,
+                enable_festivals=True,
+                enable_donations=True,
+                enable_hall_booking=True,
+                enable_store=True,
+                hero_title=new_temple.name,
+                hero_subtitle=new_temple.location,
+                approval_status="DRAFT",
+                created_at=utcnow(),
+                updated_at=utcnow()
+            )
+            db.add(default_settings)
 
             # 3. Promote staged images to Temple gallery
             for staged_img in suggestion.images:

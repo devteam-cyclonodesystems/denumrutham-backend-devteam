@@ -7,7 +7,7 @@ from fastapi import APIRouter, Depends, HTTPException, Request, Query
 from fastapi.responses import FileResponse
 from sqlalchemy.ext.asyncio import AsyncSession
 from sqlalchemy.future import select
-from sqlalchemy.orm import selectinload
+from sqlalchemy.orm import selectinload, joinedload
 from uuid import UUID
 from typing import List, Optional
 from datetime import datetime, timezone
@@ -229,11 +229,18 @@ async def get_public_temple_portal(
             selectinload(Temple.images),
             selectinload(Temple.website_settings_live)
         )
-        .filter(Temple.domain == slug, Temple.is_active == True, Temple.status == "APPROVED")
+        .filter(Temple.domain == slug, Temple.is_active == True, Temple.status.in_(["APPROVED", "MERGED"]))
     )
     temple = result.scalars().first()
     if not temple:
         raise HTTPException(status_code=404, detail="Temple not found")
+
+    if temple.status == "MERGED" and temple.merged_temple_id:
+        dest_res = await db.execute(select(Temple.domain).filter(Temple.id == temple.merged_temple_id))
+        dest_domain = dest_res.scalars().first()
+        if dest_domain:
+            from fastapi.responses import RedirectResponse
+            return RedirectResponse(url=str(request.url).replace(temple.domain, dest_domain, 1), status_code=301)
 
     if temple.management_mode != "DIRECTORY_ONLY" and not temple.website_settings_live:
         raise HTTPException(status_code=404, detail="Temple website is not published")
@@ -598,11 +605,18 @@ async def list_public_store_products(
         raise HTTPException(status_code=400, detail="Invalid temple slug format")
         
     result = await db.execute(
-        select(Temple).filter(Temple.domain == slug, Temple.is_active == True, Temple.status == "APPROVED")
+        select(Temple).filter(Temple.domain == slug, Temple.is_active == True, Temple.status.in_(["APPROVED", "MERGED"]))
     )
     temple = result.scalars().first()
     if not temple:
         raise HTTPException(status_code=404, detail="Temple not found")
+
+    if temple.status == "MERGED" and temple.merged_temple_id:
+        dest_res = await db.execute(select(Temple.domain).filter(Temple.id == temple.merged_temple_id))
+        dest_domain = dest_res.scalars().first()
+        if dest_domain:
+            from fastapi.responses import RedirectResponse
+            return RedirectResponse(url=str(request.url).replace(temple.domain, dest_domain, 1), status_code=301)
         
     from app.models.domain import StoreProduct
     prod_stmt = select(StoreProduct).filter(
@@ -643,14 +657,25 @@ async def get_public_temple_bootstrap(
         .options(
             selectinload(Temple.profile),
             selectinload(Temple.images),
-            selectinload(Temple.website_settings_live),
+            joinedload(Temple.website_settings_live),
             selectinload(Temple.festivals)
         )
-        .filter(Temple.domain == slug, Temple.is_active == True, Temple.status == "APPROVED")
+        .filter(Temple.domain == slug, Temple.is_active == True, Temple.status.in_(["APPROVED", "MERGED"]))
     )
     temple = result.scalars().first()
     if not temple:
         raise HTTPException(status_code=404, detail="Temple not found")
+
+    if temple.status == "MERGED" and temple.merged_temple_id:
+        dest_res = await db.execute(select(Temple.domain).filter(Temple.id == temple.merged_temple_id))
+        dest_domain = dest_res.scalars().first()
+        if dest_domain:
+            from fastapi.responses import RedirectResponse
+            return RedirectResponse(url=str(request.url).replace(temple.domain, dest_domain, 1), status_code=301)
+
+    # Resolve active website maturity stage
+    from app.modules.temple_management.services.resolver import TempleWebsiteLifecycleResolver
+    lifecycle_stage = TempleWebsiteLifecycleResolver.resolve_stage(temple)
 
     if temple.management_mode != "DIRECTORY_ONLY" and not temple.website_settings_live:
         raise HTTPException(status_code=404, detail="Temple website is not published")
@@ -766,6 +791,26 @@ async def get_public_temple_bootstrap(
         for k, v in snapshot_visibility.items():
             feature_visibility[k] = v
 
+    if lifecycle_stage == "DIRECTORY_TEMPLATE":
+        # Force disable transaction CTAs
+        feature_visibility["enablePoojaBooking"] = False
+        feature_visibility["enableOfferings"] = False
+        feature_visibility["enableStore"] = False
+        feature_visibility["enableHallBooking"] = False
+        feature_visibility["enableFollow"] = True
+
+    raw_section_order = settings_snapshot.get("section_order") or ["hero", "about", "timings", "gallery", "location"]
+    section_order = list(raw_section_order)
+    if lifecycle_stage == "DIRECTORY_TEMPLATE":
+        # Strip transactional sections
+        for sec in ["offerings", "store", "hall_booking"]:
+            if sec in section_order:
+                section_order.remove(sec)
+        # Strip timings if empty
+        timings_settings = settings_snapshot.get("timings_settings")
+        if not timings_settings and "timings" in section_order:
+            section_order.remove("timings")
+
     settings = {
         "id": settings_id,
         "temple_id": str(temple.id),
@@ -774,7 +819,7 @@ async def get_public_temple_bootstrap(
         "secondary_color": settings_snapshot.get("secondary_color") or "#ffcc00",
         "logo_url": settings_snapshot.get("logo_url"),
         "hero_layout": settings_snapshot.get("hero_layout") or "split",
-        "section_order": settings_snapshot.get("section_order") or ["hero", "about", "deities", "announcements", "activities", "gallery", "offerings", "location"],
+        "section_order": section_order,
         "enable_mantras": settings_snapshot.get("enable_mantras") if settings_snapshot.get("enable_mantras") is not None else True,
         "enable_festivals": settings_snapshot.get("enable_festivals") if settings_snapshot.get("enable_festivals") is not None else True,
         "enable_donations": settings_snapshot.get("enable_donations") if settings_snapshot.get("enable_donations") is not None else True,
@@ -966,11 +1011,18 @@ async def get_public_recommendations(
 
     # 2. Fetch temple by slug
     result = await db.execute(
-        select(Temple).filter(Temple.domain == slug, Temple.is_active == True, Temple.status == "APPROVED")
+        select(Temple).filter(Temple.domain == slug, Temple.is_active == True, Temple.status.in_(["APPROVED", "MERGED"]))
     )
     temple = result.scalars().first()
     if not temple:
         raise HTTPException(status_code=404, detail="Temple not found")
+
+    if temple.status == "MERGED" and temple.merged_temple_id:
+        dest_res = await db.execute(select(Temple.domain).filter(Temple.id == temple.merged_temple_id))
+        dest_domain = dest_res.scalars().first()
+        if dest_domain:
+            from fastapi.responses import RedirectResponse
+            return RedirectResponse(url=str(request.url).replace(temple.domain, dest_domain, 1), status_code=301)
 
     # 3. Resolve
     recs = await RecommendationService.resolve_recommendations(

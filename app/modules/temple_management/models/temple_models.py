@@ -136,6 +136,7 @@ class Temple(Base):
     # Temple Suggestion Tracking
     creation_source = Column(String(50), nullable=False, server_default="SUPERADMIN_CREATED", default="SUPERADMIN_CREATED")
     source_suggestion_id = Column(UUID(as_uuid=True), ForeignKey("temple_suggestions.id", ondelete="SET NULL"), nullable=True)
+    merged_temple_id = Column(UUID(as_uuid=True), ForeignKey("temples.id", ondelete="SET NULL"), nullable=True)
 
     __table_args__ = (
         Index("unique_active_domain", "domain", unique=True, postgresql_where=text("deleted_at IS NULL")),
@@ -150,6 +151,7 @@ class Temple(Base):
     followers = relationship("TempleFollower", back_populates="temple")
     website_settings = relationship("TempleWebsiteSettings", back_populates="temple", uselist=False, cascade="all, delete-orphan")
     website_settings_live = relationship("TempleWebsiteSettingsLive", uselist=False, cascade="all, delete-orphan")
+    merged_temple = relationship("Temple", remote_side=[id], foreign_keys=[merged_temple_id])
     advertisements = relationship("TempleAdvertisement", back_populates="temple", cascade="all, delete-orphan")
     recommendations = relationship("ServiceRecommendation", back_populates="temple", cascade="all, delete-orphan")
     

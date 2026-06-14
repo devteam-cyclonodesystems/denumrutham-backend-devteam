@@ -599,3 +599,74 @@ async def delete_festival(
         role=current_user.role,
     )
     return {"status": "success", "message": "Festival deleted successfully"}
+
+
+# =============================================================================
+# SUPERADMIN EXPERIENCE CURATION ENDPOINTS
+# =============================================================================
+@router.put(
+    "/website-settings/{target_temple_id}",
+    response_model=TempleWebsiteSettingsResponse,
+    tags=["digital-experience-admin"]
+)
+async def admin_overwrite_website_settings(
+    target_temple_id: UUID,
+    data: TempleWebsiteSettingsUpdate,
+    db: AsyncSession = Depends(get_db),
+    current_user: TokenData = Depends(require_system_permission("APPROVE_WEBSITE_CHANGES")),
+):
+    """Overwrite the website settings draft row for a specific target temple. (Admin only)."""
+    return await DigitalExperienceService.update_settings(
+        db=db,
+        temple_id=target_temple_id,
+        data=data.model_dump(exclude_unset=True),
+        current_user_id=UUID(current_user.sub),
+        role=current_user.role,
+    )
+
+
+@router.post(
+    "/website-settings/{target_temple_id}/publish",
+    tags=["digital-experience-admin"]
+)
+async def admin_publish_website(
+    target_temple_id: UUID,
+    db: AsyncSession = Depends(get_db),
+    current_user: TokenData = Depends(require_system_permission("APPROVE_WEBSITE_CHANGES")),
+):
+    """Publish the website settings directly for a target temple, bypassing the queue. (Admin only)."""
+    live = await DigitalExperienceService.publish_settings(
+        db=db,
+        temple_id=target_temple_id,
+        current_user_id=UUID(current_user.sub),
+        role=current_user.role,
+        bypass_mode_check=True
+    )
+    return {
+        "status": "success",
+        "message": "Website published successfully by admin",
+        "publishedAt": live.published_at.isoformat() if live.published_at else None,
+        "version": live.version
+    }
+
+
+@router.post(
+    "/website-settings/{target_temple_id}/revert-to-template",
+    tags=["digital-experience-admin"]
+)
+async def admin_revert_website_to_template(
+    target_temple_id: UUID,
+    db: AsyncSession = Depends(get_db),
+    current_user: TokenData = Depends(require_system_permission("APPROVE_WEBSITE_CHANGES")),
+):
+    """Revert the website settings for a target temple, deleting the live snapshot. (Admin only)."""
+    await DigitalExperienceService.unpublish_settings(
+        db=db,
+        temple_id=target_temple_id,
+        current_user_id=UUID(current_user.sub),
+        role=current_user.role,
+    )
+    return {
+        "status": "success",
+        "message": "Website reverted to Stage 1 directory template successfully"
+    }
