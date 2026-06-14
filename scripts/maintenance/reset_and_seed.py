@@ -38,20 +38,27 @@ CHILD_TABLES = [
     "refund_history", "approval_requests",
     "offering_receipts", "offering_payments", "offering_audit_logs", "offering_inventory_links", "offerings", "offering_categories",
     "service_bookings", "archana_bookings", "bookings", "pooja_services", "temple_services",
-    "store_sales_order_items", "store_sales_orders", "store_order_items", "store_orders",
-    "store_auctions", "store_stock", "store_stock_reservations",
-    "inventory_daily_snapshots", "procurement_cost_history",
-    "kalavara_stock",
-    "store_products", "products",
     "refund_transactions", "payment_transactions", "payment_ledgers",
     "booking_audit_logs", "booking_status_history", "booking_conflicts",
     "booking_holds", "booking_policies", "pricing_rules", "venue_slots",
     "hall_bookings", "halls",
-    "donation_campaigns", "inventory_transactions", "inventory_movements",
-    "ritual_template_items", "inventory_stock_ledger", "inventory_reconciliations",
-    "donation_inventory_mapping", "procurement_grns", "inventory_issue_sessions",
-    "inventory_item_requests", "inventory_payment_transactions", "inventory_invoices", "kalavara_inventory_items", "inventory_items",
+    "donation_campaigns",
+    
+    # Layer 1: Inventory/Store Transactions, Ledgers, Sessions, Orders, Costs, Snapshots, Mapping, Reconciliations
+    "inventory_stock_ledger", "inventory_reconciliations", "donation_inventory_mapping",
+    "procurement_cost_history", "inventory_daily_snapshots", "ritual_template_items",
+    "inventory_transactions", "inventory_movements", "inventory_issue_sessions",
+    "inventory_item_requests", "inventory_payment_transactions", "inventory_invoices",
+    "procurement_grns", "store_sales_order_items", "store_sales_orders",
+    "store_auctions", "store_stock", "store_stock_reservations", "kalavara_stock",
+    "store_order_items", "store_orders",
+    
+    # Layer 2: Products and Inventory Items
+    "store_products", "products", "kalavara_inventory_items", "inventory_items",
+    
+    # Layer 3: Masters, Templates, Locations, Suppliers
     "ritual_templates", "inventory_locations", "suppliers",
+    
     # 2. Follower/Notification Tables
     "temple_follower_preferences", "temple_followers", "notifications",
     # 3. Suggestion Child Tables
