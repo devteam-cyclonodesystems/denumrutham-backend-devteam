@@ -69,7 +69,7 @@ CHILD_TABLES = [
     "temple_announcements", "temple_activities", "temple_festivals",
     "temple_images", "temple_website_settings_live", "temple_website_settings",
     "temple_profile_drafts", "temple_profiles", "temple_search_index",
-    "user_temples"
+    "user_roles", "role_permissions", "roles", "permissions", "user_temples"
 ]
 
 def get_git_commit_hash() -> str:
