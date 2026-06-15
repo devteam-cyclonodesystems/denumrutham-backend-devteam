@@ -216,6 +216,14 @@ async def trigger_manual_verification(
     db: AsyncSession = Depends(get_db),
 ):
     tid = UUID(temple_id)
+    # Process outbox first to guarantee real-time updates in the verification
+    try:
+        from app.modules.audit.services.activity_log_processor import ActivityLogProcessor
+        await ActivityLogProcessor.process_outbox(db)
+    except Exception as e:
+        import logging
+        logging.getLogger(__name__).error(f"Failed to process outbox on verification: {str(e)}")
+
     result = await ChainVerificationService.verify_audit_chain(db, tid)
     report = await ChainVerificationService.record_verification_report(db, tid, result)
     await db.commit()
@@ -243,6 +251,14 @@ async def get_verification_reports(
     db: AsyncSession = Depends(get_db),
 ):
     tid = UUID(temple_id)
+    # Process outbox first to ensure logs are processed before fetching reports
+    try:
+        from app.modules.audit.services.activity_log_processor import ActivityLogProcessor
+        await ActivityLogProcessor.process_outbox(db)
+    except Exception as e:
+        import logging
+        logging.getLogger(__name__).error(f"Failed to process outbox on reports request: {str(e)}")
+
     stmt = (
         select(AuditIntegrityVerificationReport)
         .filter(AuditIntegrityVerificationReport.temple_id == tid)
@@ -261,6 +277,14 @@ async def export_evidence_package(
     db: AsyncSession = Depends(get_db),
 ):
     tid = UUID(temple_id)
+    # Process outbox first to guarantee real-time updates in the exported package
+    try:
+        from app.modules.audit.services.activity_log_processor import ActivityLogProcessor
+        await ActivityLogProcessor.process_outbox(db)
+    except Exception as e:
+        import logging
+        logging.getLogger(__name__).error(f"Failed to process outbox on export: {str(e)}")
+
     zip_bytes = await ActivityLogQueryService.generate_evidence_package(
         db=db,
         temple_id=tid,

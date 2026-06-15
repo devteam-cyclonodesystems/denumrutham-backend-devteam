@@ -32,6 +32,8 @@
 | FEAT-002 | Phase 2 – Layout Responsiveness & Spotlight Ad Rails | Feature Delivery |  Shipped | 2026-06-10 |
 | FEAT-003 | Devotee Registration Hardening & Password Strength Enforcements | Feature Delivery |  Shipped | 2026-06-12 |
 | FEAT-004 | Temple Timing Management UX Enhancements | Feature Delivery |  Shipped | 2026-06-15 |
+| FEAT-005 | Platform Campaign Approvals & Ad Governance Enhancements | Feature Delivery |  Shipped | 2026-06-15 |
+| FEAT-006 | Platform Audit Dashboard & Log Synchronization | Feature Delivery |  Shipped | 2026-06-16 |
 
 ---
 
@@ -1155,4 +1157,59 @@ Enhanced the Temple Timing Management panel (`TimingsSettings.tsx`) inside the m
 - Commit (frontend): `f640d35` (enhance temple timing management with sorted cards, timing gaps, and clock dropdown selectors)
 - Commit (frontend): `913ddcd` (fix(website): retain unsaved changes state across tab navigation in WebsiteModuleLayout)
 - Commit (frontend): `feat-timing-normalization` (integrate shared timing utility, public portal timings sync, and refined hero status rendering)
+
+---
+
+## FEAT-005: Platform Campaign Approvals & Ad Governance Enhancements
+
+| Field | Value |
+|-------|-------|
+| **Feature ID** | FEAT-005 |
+| **Feature Title** | Platform Campaign Approvals & Ad Governance Enhancements |
+| **Date and Time** | 2026-06-15T19:38:00+05:30 |
+| **Status** | ✅ Shipped |
+
+### Description
+
+Enhanced the platform-wide campaign governance page (`PlatformAdsGovernance.tsx`) to support a multi-step Approve/Publish workflow with confirmation dialogues, suspension toggles, and audit visibility. Extended placements with "Right Spotlight" and media formats with "Video" support.
+
+### Changes Completed
+
+1. **Workflow Actions**:
+   - Implemented confirmation modal window overlays for the campaign **Approve** and **Publish** buttons.
+   - Upon approval, changed the status from pending to approved and transformed the Approve button to **Publish**.
+   - Upon publishing, replaced the Reject action with a **Suspend** toggle button (alternating with **Resume** if suspended).
+2. **Media and Ad Placement**:
+   - Added `VIDEO` to the allowed Media Type values list in campaigns.
+   - Added `RIGHT_SPOTLIGHT` as an option under placements to let the platform configure sidebar spotlight ads on behalf of a temple.
+3. **Audit History Visibility**:
+   - Implemented an audit history view button (eye icon) to let managers check the historical log timeline of actions taken on a campaign.
+
+---
+
+## FEAT-006: Platform Audit Dashboard & Log Synchronization
+
+| Field | Value |
+|-------|-------|
+| **Feature ID** | FEAT-006 |
+| **Feature Title** | Platform Audit Dashboard & Log Synchronization |
+| **Date and Time** | 2026-06-16T01:30:00+05:30 |
+| **Status** | ✅ Shipped |
+
+### Description
+
+Addressed real-time update issues in the admin audit logs check page by running outbox events processing synchronously on request. Redesigned all dashboard terminology to remove cryptographic/blockchain complexity, replacing them with standard IT audit concepts.
+
+### Changes Completed
+
+1. **Backend Route Synchronization**:
+   - Modified the `/governance/verify`, `/governance/reports`, and `/governance/export` endpoints in `audit.py` to synchronously run `ActivityLogProcessor.process_outbox(db)`. This guarantees that pending events queued in `activity_outbox` are materialized into `immutable_activity_logs` before any scans, exports, or reports are returned.
+2. **UI Terminology Simplification**:
+   - **Main Titles**: Renamed page headers and descriptions to **Platform Audit Dashboard** and "Monitor audit logs, verify record integrity, and generate compliance reports."
+   - **Verification Checks**: Renamed *Cryptographic Audit Chain Scan* to **Audit Log Integrity Check** and replaced cryptographic validation details with outcome-focused descriptions: "Verifies audit records to ensure they have not been modified, deleted, or tampered with."
+   - **Verification Results**: Renamed scan statistics labels to **Latest Verification Result**, **Log Entries Verified**, and **Tampered/Modified Logs**.
+   - **Compliance Package Export**: Renamed *Evidence Package Export* tab and description to **Compliance Report Export** and simplified field labels (e.g. *Auditor / Requestor Name*, *Export Compliance ZIP*).
+3. **Consistency**:
+   - Applied identical terminology updates to both the standalone page (`AuditGovernance.tsx`) and the portal settings tab (`SettingsGovernance.tsx`).
+
 
