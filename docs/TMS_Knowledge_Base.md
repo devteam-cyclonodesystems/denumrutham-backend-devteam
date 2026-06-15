@@ -1093,9 +1093,11 @@ Enhanced the Temple Timing Management panel (`TimingsSettings.tsx`) inside the m
 1. **Chronological Sorting**: Sorted the session cards by opening time using `sortedTimings` while maintaining `originalIndex` references for edit/delete functions.
 2. **Timing Gaps Warning Panel**: Added an warning panel immediately above the timing card grid that identifies gaps between consecutive operating windows and displays them formatted (e.g. "30 mins gap").
 3. **Dropdown Clock Selectors**: Implemented dropdown-based hour (`01`-`12`), minute (`00`-`59`), and period (`AM`/`PM`) selectors. Enhanced `parseTimeParts` with a 24-hour military time fallback parser to handle legacy data formats safely.
-4. **Validation**: Ran full compilation build (`npm run build`) successfully with no TypeScript compiler errors.
+4. **Tab State Retention**: Introduced an `initialized` state variable in `WebsiteModuleLayout.tsx` to prevent `fetchPortalState` from re-fetching settings on sub-tab navigation click, retaining unsaved changes across website builder tabs.
+5. **Validation**: Ran full compilation build (`npm run build`) successfully with no TypeScript compiler errors.
 
 ### Related Tickets, PRs, Commits
 
 - Commit (frontend): `f640d35` (enhance temple timing management with sorted cards, timing gaps, and clock dropdown selectors)
+- Commit (frontend): `913ddcd` (fix(website): retain unsaved changes state across tab navigation in WebsiteModuleLayout)
 
