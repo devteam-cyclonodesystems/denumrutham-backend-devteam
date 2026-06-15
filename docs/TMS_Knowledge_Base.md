@@ -1134,13 +1134,25 @@ Enhanced the Temple Timing Management panel (`TimingsSettings.tsx`) inside the m
 ### Changes Completed
 
 1. **Chronological Sorting**: Sorted the session cards by opening time using `sortedTimings` while maintaining `originalIndex` references for edit/delete functions.
-2. **Timing Gaps Warning Panel**: Added an warning panel immediately above the timing card grid that identifies gaps between consecutive operating windows and displays them formatted (e.g. "30 mins gap").
+2. **Timing Gaps Warning Panel**: Added a warning panel immediately above the timing card grid that identifies gaps between consecutive operating windows and displays them formatted (e.g. "30 mins gap").
 3. **Dropdown Clock Selectors**: Implemented dropdown-based hour (`01`-`12`), minute (`00`-`59`), and period (`AM`/`PM`) selectors. Enhanced `parseTimeParts` with a 24-hour military time fallback parser to handle legacy data formats safely.
 4. **Tab State Retention**: Introduced an `initialized` state variable in `WebsiteModuleLayout.tsx` to prevent `fetchPortalState` from re-fetching settings on sub-tab navigation click, retaining unsaved changes across website builder tabs.
-5. **Validation**: Ran full compilation build (`npm run build`) successfully with no TypeScript compiler errors.
+5. **Shared Timing Utility (`templeTimings.ts`)**:
+   - Created a central utility containing `isValidTime`, `parseTimeToMinutes`, `formatTime12h`, `sortTimingEntries`, and `getNextOpeningTime`.
+   - Normalizes legacy 24-hour formats (e.g., `04:00` -> `04:00 AM`, `17:00` -> `05:00 PM`) and correctly processes midnight boundaries (`00:00` -> `12:00 AM`, `12:00` -> `12:00 PM`).
+   - `sortTimingEntries` filters out invalid or incomplete times, returning only renderable, chronologically-sorted timing windows.
+   - `getNextOpeningTime` computes the next future opening session. If all sessions for the current day have passed, it scans future days in IST to find and display the upcoming session.
+6. **Portal Synchronization**:
+   - Standardized timings rendering across the Devotee Public Portal (`TemplePublicPortal.tsx`) and Website Builder Preview (`PortalWebsitePreview.tsx`) to show sorted custom timings, falling back to morning/evening sessions formatted in 12-hour AM/PM.
+7. **Hero Status Rendering**:
+   - Updated the status pill in `PortalHeroPreview.tsx` to split status (e.g. `Closed`, `Open`) and details cleanly, stripping redundant prefixes.
+   - For online states (`Open`, `Closing Soon`), the active activity in-progress takes precedence over the closing time.
+   - For offline states (`Closed`, `Opening Soon`), active activities are suppressed and the next future opening session (`Opens at ...`) is displayed.
+8. **Validation**: Ran full compilation build (`npm run build`) successfully with no TypeScript compiler errors.
 
 ### Related Tickets, PRs, Commits
 
 - Commit (frontend): `f640d35` (enhance temple timing management with sorted cards, timing gaps, and clock dropdown selectors)
 - Commit (frontend): `913ddcd` (fix(website): retain unsaved changes state across tab navigation in WebsiteModuleLayout)
+- Commit (frontend): `feat-timing-normalization` (integrate shared timing utility, public portal timings sync, and refined hero status rendering)
 
