@@ -38,8 +38,8 @@ async def get_current_user(request: Request, token: str = Depends(oauth2_scheme)
     
     # Phase 2: Advanced Security Hardening
     if token_data.temple_id:
-        db_gen = get_db()
-        db = await anext(db_gen)
+        from app.core.database import AsyncSessionLocal
+        db = AsyncSessionLocal()
         try:
             from app.models.domain import Temple
             from app.services.tenant_policy import TenantPolicy, OperationalCapability

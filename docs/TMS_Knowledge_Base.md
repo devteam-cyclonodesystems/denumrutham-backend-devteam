@@ -27,9 +27,11 @@
 | INC-016 | Suggest Temple Step 2 Next disabled due to failed backend migration deployment | P2 – High | ✅ Resolved | 2026-06-12 |
 | INC-017 | Devotee Suggest Temple Submission failure due to UndefinedObjectError (native ENUM mismatch) | P1 – Critical | ✅ Resolved | 2026-06-13 |
 | INC-018 | Superadmin Review Action Submission Failure due to Status String Mismatch | P1 – Critical | ✅ Resolved | 2026-06-13 |
+| INC-019 | HTTP 500 errors due to DB connection pool exhaustion in user auth dependency | P1 – Critical | ✅ Resolved | 2026-06-15 |
 | FEAT-001 | Phase 1 – Sidebar Spotlight Ad Area & Layout Alignment | Feature Delivery |  Shipped | 2026-06-10 |
 | FEAT-002 | Phase 2 – Layout Responsiveness & Spotlight Ad Rails | Feature Delivery |  Shipped | 2026-06-10 |
 | FEAT-003 | Devotee Registration Hardening & Password Strength Enforcements | Feature Delivery |  Shipped | 2026-06-12 |
+| FEAT-004 | Temple Timing Management UX Enhancements | Feature Delivery |  Shipped | 2026-06-15 |
 
 ---
 
@@ -852,6 +854,47 @@ The frontend `SuggestionsGovernance.tsx` component was building the review paylo
 
 - Commit (backend): `16b9060` (Normalize review status to accept both short verb and past participle)
 - Commit (frontend): `a8d0ec5` (Send past-participle review status to match API contract)
+
+---
+
+## INC-019: HTTP 500 Internal Server Errors due to Database Connection Pool Exhaustion in Current User Authentication Dependency
+
+| Field | Value |
+|-------|-------|
+| **Incident ID** | INC-019 |
+| **Incident Title** | HTTP 500 Internal Server Errors due to Database Connection Pool Exhaustion in Current User Authentication Dependency |
+| **Date and Time** | 2026-06-15T12:45:00+05:30 |
+| **Severity/Priority** | P1 – Critical |
+| **Current Status** | ✅ Resolved |
+
+### Description
+
+All database-dependent endpoints (such as `/api/v1/auth/me`, `/api/v1/manager/website-settings/...`, `/api/v1/auth/login/redirect`) began failing with HTTP 500 Internal Server Errors under load or after several consecutive requests.
+
+### Root Cause
+
+The authentication dependency function `get_current_user` (duplicated across `app/core/database/deps.py`, `app/core/security/deps.py`, and `app/core/tenancy/deps.py`) was retrieving a database session using `db_gen = get_db()` and `db = await anext(db_gen)`.
+Because `get_db()` is an asynchronous generator wrapping a session context manager, calling `anext` suspends the generator at the `yield` statement without exiting the context manager. Since `get_current_user` did not resume or close the generator, the database connection remained checked out from the pool indefinitely. Every authenticated API request leaked a connection, eventually exhausting the pool and causing all subsequent database operations to timeout and return HTTP 500.
+
+### Affected Services, Components, or Features
+
+- FastAPI Backend dependency injections (`get_current_user`)
+- Database Connection Pool (Neon Postgres / local Postgres)
+- All authenticated REST API endpoints
+
+### Resolution Implemented
+
+1. **Replaced Session Retrieval**: Modified `get_current_user` in `database/deps.py`, `security/deps.py`, and `tenancy/deps.py` to directly instantiate the database session:
+   ```python
+   from app.core.database import AsyncSessionLocal
+   db = AsyncSessionLocal()
+   ```
+2. **Ensured Proper Cleanup**: Leveraged the existing `try...finally` block to call `await db.close()`, guaranteeing the session is closed and the connection is returned to the pool immediately upon completion of the authentication checks.
+3. **Validation**: Verified successful syntax compilation (`python -m py_compile`).
+
+### Related Tickets, PRs, Commits
+
+- Commit (backend): `8c992ae` (resolve database connection pool leak in get_current_user)
 
 ---
 
