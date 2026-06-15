@@ -1073,3 +1073,29 @@ Enforced strong password policy verification checks during devotee and staff reg
 3. **Unit Tests**:
    - Added automated tests to `tests/test_auth.py` to verify devotee unified registration and legacy devotee registration validation under weak and strong passwords.
 
+---
+
+## FEAT-004: Temple Timing Management UX Enhancements
+
+| Field | Value |
+|-------|-------|
+| **Feature ID** | FEAT-004 |
+| **Feature Title** | Temple Timing Management UX Enhancements |
+| **Date and Time** | 2026-06-15T12:30:00+05:30 |
+| **Status** | ✅ Shipped |
+
+### Description
+
+Enhanced the Temple Timing Management panel (`TimingsSettings.tsx`) inside the manager's Website Builder, improving chronological sorting, adding a visual gaps alert panel, and replacing manual text time inputs with custom dropdown clock selectors.
+
+### Changes Completed
+
+1. **Chronological Sorting**: Sorted the session cards by opening time using `sortedTimings` while maintaining `originalIndex` references for edit/delete functions.
+2. **Timing Gaps Warning Panel**: Added an warning panel immediately above the timing card grid that identifies gaps between consecutive operating windows and displays them formatted (e.g. "30 mins gap").
+3. **Dropdown Clock Selectors**: Implemented dropdown-based hour (`01`-`12`), minute (`00`-`59`), and period (`AM`/`PM`) selectors. Enhanced `parseTimeParts` with a 24-hour military time fallback parser to handle legacy data formats safely.
+4. **Validation**: Ran full compilation build (`npm run build`) successfully with no TypeScript compiler errors.
+
+### Related Tickets, PRs, Commits
+
+- Commit (frontend): `f640d35` (enhance temple timing management with sorted cards, timing gaps, and clock dropdown selectors)
+
