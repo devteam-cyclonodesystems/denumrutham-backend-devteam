@@ -170,9 +170,18 @@ async def get_accessible_temple_ids(
     return temple_ids
 
 async def get_current_temple_id(
+    request: Request,
     current_user: TokenData = Depends(get_current_user)
 ) -> str:
-    """Strictly enforces that a temple_id is present in the token/session."""
+    """Strictly enforces that a temple_id is present in the token/session or provided via context headers for SUPERADMIN."""
+    if current_user.role and current_user.role.upper().replace("_", "") == "SUPERADMIN":
+        header_tid = request.headers.get("X-Temple-ID")
+        if header_tid:
+            return header_tid
+        query_tid = request.query_params.get("temple_id")
+        if query_tid:
+            return query_tid
+
     if not current_user.temple_id:
         raise HTTPException(
             status_code=400, 
