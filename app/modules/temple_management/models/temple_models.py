@@ -514,7 +514,7 @@ class PlatformAdvertisement(Base):
 
     __table_args__ = (
         CheckConstraint(
-            "media_type IN ('IMAGE', 'CAROUSEL')",
+            "media_type IN ('IMAGE', 'CAROUSEL', 'VIDEO')",
             name="chk_platform_ad_media_type"
         ),
     )
@@ -555,7 +555,7 @@ class TempleAdvertisement(Base):
     __table_args__ = (
         Index("idx_temple_ads_active", "temple_id", "start_date", "end_date", postgresql_where=text("is_active = TRUE")),
         CheckConstraint(
-            "media_type IN ('IMAGE', 'CAROUSEL')",
+            "media_type IN ('IMAGE', 'CAROUSEL', 'VIDEO')",
             name="chk_temple_ad_media_type"
         ),
     )
@@ -572,9 +572,9 @@ def validate_platform_ad_media(mapper, connection, target):
     media_urls = target.media_urls
     if not isinstance(media_urls, list):
         raise ValueError("media_urls must be a list of strings")
-    if media_type == "IMAGE":
+    if media_type == "IMAGE" or media_type == "VIDEO":
         if len(media_urls) != 1:
-            raise ValueError("IMAGE platform advertisement must contain exactly 1 media URL")
+            raise ValueError(f"{media_type} platform advertisement must contain exactly 1 media URL")
     elif media_type == "CAROUSEL":
         if len(media_urls) < 2:
             raise ValueError("CAROUSEL platform advertisement must contain at least 2 media URLs")
@@ -591,9 +591,9 @@ def validate_temple_ad_media(mapper, connection, target):
     media_urls = target.media_urls
     if not isinstance(media_urls, list):
         raise ValueError("media_urls must be a list of strings")
-    if media_type == "IMAGE":
+    if media_type == "IMAGE" or media_type == "VIDEO":
         if len(media_urls) != 1:
-            raise ValueError("IMAGE temple advertisement must contain exactly 1 media URL")
+            raise ValueError(f"{media_type} temple advertisement must contain exactly 1 media URL")
     elif media_type == "CAROUSEL":
         if len(media_urls) < 2:
             raise ValueError("CAROUSEL temple advertisement must contain at least 2 media URLs")

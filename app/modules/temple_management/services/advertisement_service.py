@@ -39,6 +39,13 @@ class AdvertisementService:
             start_date=payload.start_date,
             end_date=payload.end_date,
             is_active=payload.is_active,
+            priority=payload.priority or "MEDIUM",
+            cpm_rate=payload.cpm_rate or 0.0,
+            cpc_rate=payload.cpc_rate or 0.0,
+            impression_cap=payload.impression_cap,
+            click_cap=payload.click_cap,
+            billing_contact=payload.billing_contact,
+            approval_status=payload.approval_status or "PENDING"
         )
         db.add(ad)
         await db.commit()

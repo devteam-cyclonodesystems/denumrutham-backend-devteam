@@ -764,3 +764,39 @@ async def reject_advertisement(
     return {"status": "success", "message": "Advertisement rejected", "ad_id": str(ad_id)}
 
 
+@router.get("/advertisements/{ad_id}/audit-history")
+async def get_ad_audit_history(
+    ad_id: UUID,
+    db: AsyncSession = Depends(get_db),
+    current_user: TokenData = Depends(get_current_superadmin),
+):
+    """
+    Get audit logs for a specific advertisement campaign.
+    """
+    from app.modules.audit.models.audit_models import AuditLog
+    from sqlalchemy import select, desc
+    
+    stmt = (
+        select(AuditLog)
+        .filter(AuditLog.entity_id == str(ad_id))
+        .order_by(desc(AuditLog.created_at))
+    )
+    res = await db.execute(stmt)
+    logs = res.scalars().all()
+    
+    return [
+        {
+            "id": str(log.id),
+            "action": log.action,
+            "action_type": log.action_type,
+            "user_id": str(log.user_id),
+            "created_at": log.created_at.isoformat() if log.created_at else None,
+            "old_value": log.old_value,
+            "new_value": log.new_value,
+            "details": log.details,
+        }
+        for log in logs
+    ]
+
+
+

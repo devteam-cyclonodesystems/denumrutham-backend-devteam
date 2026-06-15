@@ -10,11 +10,18 @@ from datetime import datetime
 class PlatformAdvertisementBase(BaseModel):
     placement: str = Field(..., description="E.g., HEADER_LEADERBOARD, TEMPLE_LIST_INLINE, TEMPLE_LIST_FOOTER")
     media_urls: List[str] = Field(..., description="Array of image URLs")
-    media_type: str = Field(default="IMAGE", pattern="^(IMAGE|CAROUSEL)$")
+    media_type: str = Field(default="IMAGE", pattern="^(IMAGE|CAROUSEL|VIDEO)$")
     target_url: str = Field(..., description="Click-through redirect destination link")
     start_date: datetime
     end_date: datetime
     is_active: bool = True
+    priority: Optional[str] = "MEDIUM"
+    cpm_rate: Optional[float] = 0.0
+    cpc_rate: Optional[float] = 0.0
+    impression_cap: Optional[int] = None
+    click_cap: Optional[int] = None
+    billing_contact: Optional[str] = None
+    approval_status: Optional[str] = "PENDING"
 
     @model_validator(mode="after")
     def validate_ad_dates_and_media(self) -> 'PlatformAdvertisementBase':
@@ -23,9 +30,9 @@ class PlatformAdvertisementBase(BaseModel):
         
         m_urls = self.media_urls
         m_type = self.media_type
-        if m_type == "IMAGE":
+        if m_type == "IMAGE" or m_type == "VIDEO":
             if len(m_urls) != 1:
-                raise ValueError("IMAGE ad must have exactly 1 media URL")
+                raise ValueError(f"{m_type} ad must have exactly 1 media URL")
         elif m_type == "CAROUSEL":
             if len(m_urls) < 2:
                 raise ValueError("CAROUSEL ad must have at least 2 media URLs")
@@ -44,6 +51,13 @@ class PlatformAdvertisementUpdate(BaseModel):
     start_date: Optional[datetime] = None
     end_date: Optional[datetime] = None
     is_active: Optional[bool] = None
+    priority: Optional[str] = None
+    cpm_rate: Optional[float] = None
+    cpc_rate: Optional[float] = None
+    impression_cap: Optional[int] = None
+    click_cap: Optional[int] = None
+    billing_contact: Optional[str] = None
+    approval_status: Optional[str] = None
 
     @model_validator(mode="after")
     def validate_ad_updates(self) -> 'PlatformAdvertisementUpdate':
@@ -71,12 +85,20 @@ class PlatformAdvertisementResponse(BaseModel):
     is_active: bool
     created_at: datetime
     updated_at: datetime
+    priority: str
+    cpm_rate: float
+    cpc_rate: float
+    impression_cap: Optional[int]
+    click_cap: Optional[int]
+    billing_contact: Optional[str]
+    approval_status: str
+    approval_remarks: Optional[str]
 
 
 class TempleAdvertisementBase(BaseModel):
     placement: str = Field(..., description="E.g., TEMPLE_DETAILS_AFTER_ABOUT, TEMPLE_DETAILS_BEFORE_GALLERY, TEMPLE_DETAILS_INLINE")
     media_urls: List[str] = Field(..., description="Array of image URLs")
-    media_type: str = Field(default="IMAGE", pattern="^(IMAGE|CAROUSEL)$")
+    media_type: str = Field(default="IMAGE", pattern="^(IMAGE|CAROUSEL|VIDEO)$")
     target_url: str = Field(..., description="Click-through redirect destination link")
     start_date: datetime
     end_date: datetime
@@ -90,9 +112,9 @@ class TempleAdvertisementBase(BaseModel):
         
         m_urls = self.media_urls
         m_type = self.media_type
-        if m_type == "IMAGE":
+        if m_type == "IMAGE" or m_type == "VIDEO":
             if len(m_urls) != 1:
-                raise ValueError("IMAGE ad must have exactly 1 media URL")
+                raise ValueError(f"{m_type} ad must have exactly 1 media URL")
         elif m_type == "CAROUSEL":
             if len(m_urls) < 2:
                 raise ValueError("CAROUSEL ad must have at least 2 media URLs")
