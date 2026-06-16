@@ -339,6 +339,17 @@ async def test_ad_approval_rejection_and_caps(client: AsyncClient, superadmin_au
         assert metrics.total_clicks >= 2
         assert metrics.estimated_revenue == 0.50 * metrics.total_clicks
 
+    # Verify we can fetch the audit history for this ad
+    audit_resp = await client.get(
+        f"/api/v1/superadmin/advertisements/{ad_id}/audit-history",
+        headers=superadmin_auth_headers
+    )
+    assert audit_resp.status_code == 200
+    audit_history = audit_resp.json()
+    assert isinstance(audit_history, list)
+    assert len(audit_history) >= 1
+
+
 
 @pytest.mark.anyio
 async def test_advertisement_reports(client: AsyncClient, superadmin_auth_headers: dict):

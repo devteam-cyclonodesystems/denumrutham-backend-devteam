@@ -30,6 +30,7 @@
 | INC-019 | HTTP 500 errors due to DB connection pool exhaustion in user auth dependency | P1 – Critical | ✅ Resolved | 2026-06-15 |
 | INC-020 | HTTP 500 when creating Video Campaign due to database check constraint violation | P1 – Critical | ✅ Resolved | 2026-06-16 |
 | INC-021 | HTTP 500 on Campaign Health Reports due to DateTime timezone mismatch and class method indentation | P1 – Critical | ✅ Resolved | 2026-06-16 |
+| INC-022 | HTTP 500 when fetching Advertisement Audit History due to incorrect import path | P1 – Critical | ✅ Resolved | 2026-06-16 |
 | FEAT-001 | Phase 1 – Sidebar Spotlight Ad Area & Layout Alignment | Feature Delivery |  Shipped | 2026-06-10 |
 | FEAT-002 | Phase 2 – Layout Responsiveness & Spotlight Ad Rails | Feature Delivery |  Shipped | 2026-06-10 |
 | FEAT-003 | Devotee Registration Hardening & Password Strength Enforcements | Feature Delivery |  Shipped | 2026-06-12 |
@@ -1308,6 +1309,54 @@ Client sends GET to /api/v1/superadmin/advertisements/reports
 
 1. **Verify Class Attributes**: Run diagnostic imports in test files to ensure classes and methods are correctly bound.
 2. **Event Loop Scoping**: Standardize test suites to share a session-scoped event loop when dealing with stateful pools like SQLite memory databases.
+
+
+---
+
+## INC-022: HTTP 500 when fetching Advertisement Audit History due to Incorrect Import Path
+
+| Field | Value |
+|-------|-------|
+| **Incident ID** | INC-022 |
+| **Incident Title** | HTTP 500 when fetching Advertisement Audit History due to incorrect import path |
+| **Date and Time** | 2026-06-16T19:50:00+05:30 |
+| **Severity/Priority** | P1 – Critical |
+| **Current Status** | ✅ Resolved |
+
+### Description
+
+Attempting to view the audit history of an advertisement campaign via the endpoint `GET /api/v1/superadmin/advertisements/{ad_id}/audit-history` resulted in an HTTP 500 Internal Server Error in production.
+
+### Root Cause
+
+The superadmin router file `app/modules/governance/routes/superadmin.py` contained an invalid import statement:
+`from app.modules.audit.models.audit_models import AuditLog`
+However, the `AuditLog` database model is actually defined in the governance module at `app/modules/governance/models/governance_models.py`. The incorrect path caused a Python `ImportError` on request, which crashed the route.
+
+### Affected Services, Components, or Features
+
+- **Campaign Audit History View** — Viewing audit trails for any platform/temple campaign failed with HTTP 500.
+
+### Cascade Failure Chain
+
+```
+User clicks "eye" button to view campaign audit history
+  → Frontend sends GET to /api/v1/superadmin/advertisements/{ad_id}/audit-history
+    → Router executes get_ad_audit_history()
+      → Python throws ImportError: cannot import name 'AuditLog' from 'app.modules.audit.models.audit_models'
+        → API returns HTTP 500 (Internal Server Error)
+```
+
+### Resolution Implemented
+
+1. **Fixed Import**: Corrected the import statement in `superadmin.py` to:
+   `from app.modules.governance.models.governance_models import AuditLog`
+2. **Added Integration Test**: Added a client request check in `test_ad_approval_rejection_and_caps` inside [test_sprint4_requirements.py](file:///C:/Denumrutham/backend/tests/test_sprint4_requirements.py) to programmatically verify that the advertisements audit history endpoint resolves successfully with status `200` OK and returns a non-empty audit history list.
+3. **Database Migration Applied**: Manually ran `alembic upgrade head` targeting the production PostgreSQL database to resolve the database-side check constraint for video campaigns (`INC-020`), which was missing on the live PostgreSQL server despite the migration script existing.
+
+### Preventive Actions Taken
+
+1. **Test Coverage**: Keep integration tests active for all critical governance pathways to catch import errors prior to deployment.
 
 
 

@@ -773,7 +773,7 @@ async def get_ad_audit_history(
     """
     Get audit logs for a specific advertisement campaign.
     """
-    from app.modules.audit.models.audit_models import AuditLog
+    from app.modules.governance.models.governance_models import AuditLog
     from sqlalchemy import select, desc
     
     stmt = (
