@@ -99,6 +99,120 @@ class AnalyticsService:
         
         return True
 
+    @staticmethod
+    async def log_portal_event(
+        db: AsyncSession,
+        temple_id: Optional[UUID],
+        event_name: str,
+        visitor_hash: str,
+        session_id: Optional[str] = None,
+        user_id: Optional[UUID] = None,
+        event_metadata: Optional[Dict[str, Any]] = None,
+    ) -> PortalAnalyticsEvent:
+        """Centralized logging for standard devotee portal events."""
+        # 1. Event Validation
+        try:
+            PortalAnalyticsEventType(event_name)
+        except ValueError:
+            raise HTTPException(
+                status_code=400,
+                detail=f"Invalid analytics event name: '{event_name}'"
+            )
+
+        # 2. Persistence and Enrichment
+        event = PortalAnalyticsEvent(
+            temple_id=temple_id,
+            event_name=event_name,
+            visitor_hash=visitor_hash,
+            session_id=session_id,
+            user_id=user_id,
+            event_metadata=event_metadata or {},
+        )
+        db.add(event)
+        await db.commit()
+        await db.refresh(event)
+        logger.info("Logged portal event: name=%s, temple=%s", event_name, temple_id)
+        return event
+
+    @staticmethod
+    async def get_campaign_health_report(
+        db: AsyncSession, temple_id: Optional[UUID] = None
+    ) -> List[Dict[str, Any]]:
+        """Pre-aggregate campaign health metrics for admins."""
+        now = datetime.now(timezone.utc)
+        report = []
+
+        if temple_id:
+            # Query temple specific advertisements
+            stmt = select(TempleAdvertisement).filter(TempleAdvertisement.temple_id == temple_id)
+            res = await db.execute(stmt)
+            campaigns = res.scalars().all()
+        else:
+            # Query platform advertisements
+            stmt = select(PlatformAdvertisement)
+            res = await db.execute(stmt)
+            campaigns = res.scalars().all()
+
+        # Gather metrics for each campaign
+        for camp in campaigns:
+            # Calculate impressions
+            imp_stmt = select(func.count(AdvertisementAnalytics.id)).filter(
+                AdvertisementAnalytics.event_type == "IMPRESSION"
+            )
+            if temple_id:
+                imp_stmt = imp_stmt.filter(AdvertisementAnalytics.temple_advertisement_id == camp.id)
+            else:
+                imp_stmt = imp_stmt.filter(AdvertisementAnalytics.platform_advertisement_id == camp.id)
+            
+            imp_res = await db.execute(imp_stmt)
+            impressions = imp_res.scalar() or 0
+
+            # Calculate clicks
+            clk_stmt = select(func.count(AdvertisementAnalytics.id)).filter(
+                AdvertisementAnalytics.event_type == "CLICK"
+            )
+            if temple_id:
+                clk_stmt = clk_stmt.filter(AdvertisementAnalytics.temple_advertisement_id == camp.id)
+            else:
+                clk_stmt = clk_stmt.filter(AdvertisementAnalytics.platform_advertisement_id == camp.id)
+            
+            clk_res = await db.execute(clk_stmt)
+            clicks = clk_res.scalar() or 0
+
+            # CTR Calculation
+            ctr = (clicks / impressions * 100.0) if impressions > 0 else 0.0
+
+            # Ensure timezone safety (SQLite datetime objects are read as timezone-naive)
+            camp_start = camp.start_date
+            if camp_start.tzinfo is None:
+                camp_start = camp_start.replace(tzinfo=timezone.utc)
+            
+            camp_end = camp.end_date
+            if camp_end.tzinfo is None:
+                camp_end = camp_end.replace(tzinfo=timezone.utc)
+
+            # Duration Remaining Calculation
+            time_remaining = camp_end - now
+            duration_remaining_days = max(0, time_remaining.days)
+
+            # Active checks
+            is_active_campaign = camp.is_active and (camp_start <= now <= camp_end)
+
+            report.append({
+                "campaign_id": camp.id,
+                "placement": camp.placement,
+                "media_type": camp.media_type,
+                "target_url": camp.target_url,
+                "impressions": impressions,
+                "clicks": clicks,
+                "ctr": round(ctr, 2),
+                "is_active": is_active_campaign,
+                "duration_remaining_days": duration_remaining_days,
+                "top_performing": ctr > 5.0, # Top performing if Click-Through Rate is above 5%
+            })
+
+        return report
+
 
 async def _bg_recalculate_revenue_and_check_caps(campaign_id: UUID, campaign_type: str):
     from app.core.database.database import AsyncSessionLocal
@@ -190,109 +304,3 @@ async def _bg_recalculate_revenue_and_check_caps(campaign_id: UUID, campaign_typ
                     
     except Exception as e:
         logger.error("Error in background ad revenue and cap calculations: %s", e)
-
-
-    @staticmethod
-    async def log_portal_event(
-        db: AsyncSession,
-        temple_id: Optional[UUID],
-        event_name: str,
-        visitor_hash: str,
-        session_id: Optional[str] = None,
-        user_id: Optional[UUID] = None,
-        event_metadata: Optional[Dict[str, Any]] = None,
-    ) -> PortalAnalyticsEvent:
-        """Centralized logging for standard devotee portal events."""
-        # 1. Event Validation
-        try:
-            PortalAnalyticsEventType(event_name)
-        except ValueError:
-            raise HTTPException(
-                status_code=400,
-                detail=f"Invalid analytics event name: '{event_name}'"
-            )
-
-        # 2. Persistence and Enrichment
-        event = PortalAnalyticsEvent(
-            temple_id=temple_id,
-            event_name=event_name,
-            visitor_hash=visitor_hash,
-            session_id=session_id,
-            user_id=user_id,
-            event_metadata=event_metadata or {},
-        )
-        db.add(event)
-        await db.commit()
-        await db.refresh(event)
-        logger.info("Logged portal event: name=%s, temple=%s", event_name, temple_id)
-        return event
-
-    @staticmethod
-    async def get_campaign_health_report(
-        db: AsyncSession, temple_id: Optional[UUID] = None
-    ) -> List[Dict[str, Any]]:
-        """Pre-aggregate campaign health metrics for admins."""
-        now = datetime.now(timezone.utc)
-        report = []
-
-        if temple_id:
-            # Query temple specific advertisements
-            stmt = select(TempleAdvertisement).filter(TempleAdvertisement.temple_id == temple_id)
-            res = await db.execute(stmt)
-            campaigns = res.scalars().all()
-        else:
-            # Query platform advertisements
-            stmt = select(PlatformAdvertisement)
-            res = await db.execute(stmt)
-            campaigns = res.scalars().all()
-
-        # Gather metrics for each campaign
-        for camp in campaigns:
-            # Calculate impressions
-            imp_stmt = select(func.count(AdvertisementAnalytics.id)).filter(
-                AdvertisementAnalytics.event_type == "IMPRESSION"
-            )
-            if temple_id:
-                imp_stmt = imp_stmt.filter(AdvertisementAnalytics.temple_advertisement_id == camp.id)
-            else:
-                imp_stmt = imp_stmt.filter(AdvertisementAnalytics.platform_advertisement_id == camp.id)
-            
-            imp_res = await db.execute(imp_stmt)
-            impressions = imp_res.scalar() or 0
-
-            # Calculate clicks
-            clk_stmt = select(func.count(AdvertisementAnalytics.id)).filter(
-                AdvertisementAnalytics.event_type == "CLICK"
-            )
-            if temple_id:
-                clk_stmt = clk_stmt.filter(AdvertisementAnalytics.temple_advertisement_id == camp.id)
-            else:
-                clk_stmt = clk_stmt.filter(AdvertisementAnalytics.platform_advertisement_id == camp.id)
-            
-            clk_res = await db.execute(clk_stmt)
-            clicks = clk_res.scalar() or 0
-
-            # CTR Calculation
-            ctr = (clicks / impressions * 100.0) if impressions > 0 else 0.0
-
-            # Duration Remaining Calculation
-            time_remaining = camp.end_date - now
-            duration_remaining_days = max(0, time_remaining.days)
-
-            # Active checks
-            is_active_campaign = camp.is_active and (camp.start_date <= now <= camp.end_date)
-
-            report.append({
-                "campaign_id": camp.id,
-                "placement": camp.placement,
-                "media_type": camp.media_type,
-                "target_url": camp.target_url,
-                "impressions": impressions,
-                "clicks": clicks,
-                "ctr": round(ctr, 2),
-                "is_active": is_active_campaign,
-                "duration_remaining_days": duration_remaining_days,
-                "top_performing": ctr > 5.0, # Top performing if Click-Through Rate is above 5%
-            })
-
-        return report

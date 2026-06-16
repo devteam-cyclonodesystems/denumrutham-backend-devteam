@@ -338,3 +338,15 @@ async def test_ad_approval_rejection_and_caps(client: AsyncClient, superadmin_au
         assert metrics is not None
         assert metrics.total_clicks >= 2
         assert metrics.estimated_revenue == 0.50 * metrics.total_clicks
+
+
+@pytest.mark.anyio
+async def test_advertisement_reports(client: AsyncClient, superadmin_auth_headers: dict):
+    # Retrieve platform ad reports
+    resp = await client.get(
+        "/api/v1/superadmin/advertisements/reports",
+        headers=superadmin_auth_headers
+    )
+    assert resp.status_code == 200
+    data = resp.json()
+    assert isinstance(data, list)
