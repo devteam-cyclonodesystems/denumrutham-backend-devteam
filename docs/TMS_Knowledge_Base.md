@@ -28,6 +28,7 @@
 | INC-017 | Devotee Suggest Temple Submission failure due to UndefinedObjectError (native ENUM mismatch) | P1 – Critical | ✅ Resolved | 2026-06-13 |
 | INC-018 | Superadmin Review Action Submission Failure due to Status String Mismatch | P1 – Critical | ✅ Resolved | 2026-06-13 |
 | INC-019 | HTTP 500 errors due to DB connection pool exhaustion in user auth dependency | P1 – Critical | ✅ Resolved | 2026-06-15 |
+| INC-020 | HTTP 500 when creating Video Campaign due to database check constraint violation | P1 – Critical | ✅ Resolved | 2026-06-16 |
 | FEAT-001 | Phase 1 – Sidebar Spotlight Ad Area & Layout Alignment | Feature Delivery |  Shipped | 2026-06-10 |
 | FEAT-002 | Phase 2 – Layout Responsiveness & Spotlight Ad Rails | Feature Delivery |  Shipped | 2026-06-10 |
 | FEAT-003 | Devotee Registration Hardening & Password Strength Enforcements | Feature Delivery |  Shipped | 2026-06-12 |
@@ -1211,5 +1212,55 @@ Addressed real-time update issues in the admin audit logs check page by running 
    - **Compliance Package Export**: Renamed *Evidence Package Export* tab and description to **Compliance Report Export** and simplified field labels (e.g. *Auditor / Requestor Name*, *Export Compliance ZIP*).
 3. **Consistency**:
    - Applied identical terminology updates to both the standalone page (`AuditGovernance.tsx`) and the portal settings tab (`SettingsGovernance.tsx`).
+
+---
+
+## INC-020: HTTP 500 When Creating Video Campaign Due to Database Check Constraint Violation
+
+| Field | Value |
+|-------|-------|
+| **Incident ID** | INC-020 |
+| **Incident Title** | HTTP 500 when creating Video Campaign due to database check constraint violation |
+| **Date and Time** | 2026-06-16T16:40:00+05:30 |
+| **Severity/Priority** | P1 – Critical |
+| **Current Status** | ✅ Resolved |
+
+### Description
+
+Launching a campaign with media type `VIDEO` resulted in an HTTP 500 Internal Server Error when sending the POST request to `/api/v1/superadmin/platform-advertisements`. The backend logs reported a check constraint violation `chk_platform_ad_media_type` from the database.
+
+### Root Cause
+
+During the implementation of video campaigns, the backend SQLAlchemy model check constraints (`chk_platform_ad_media_type` and `chk_temple_ad_media_type`) were updated to allow `('IMAGE', 'CAROUSEL', 'VIDEO')`. However, no corresponding Alembic migration was created or run to update these check constraints in the live PostgreSQL and SQLite databases. As a result, the database check constraint remained restricted to `('IMAGE', 'CAROUSEL')`, throwing a constraint violation when a `VIDEO` campaign was inserted.
+
+### Affected Services, Components, or Features
+
+- **Platform Advertisements creation** — Creating platform campaigns with `VIDEO` media type failed.
+- **Temple Advertisements creation** — Creating temple-specific campaigns with `VIDEO` media type would have failed for the same reason.
+
+### Cascade Failure Chain
+
+```
+User submits a Video Campaign form in the admin UI
+  → Frontend sends POST to /api/v1/superadmin/platform-advertisements
+    → Backend attempts to insert PlatformAdvertisement with media_type='VIDEO'
+      → Database throws constraint violation on check constraint 'chk_platform_ad_media_type'
+        → SQLAlchemy transaction rolls back and raises IntegrityError
+          → Router catches error and returns HTTP 500 (Internal Server Error)
+```
+
+### Resolution Implemented
+
+1. **Alembic Migration**:
+   - Generated a new migration `027dfbbd5b13_add_video_media_type_to_advertisements.py` to drop and recreate the check constraints on `platform_advertisements` and `temple_advertisements` tables to include `VIDEO`:
+     - `media_type IN ('IMAGE', 'CAROUSEL', 'VIDEO')`
+   - Ran `alembic upgrade head` locally to update the local SQLite database.
+2. **Commit and Push**:
+   - Committed the migration file and pushed to backend `main` branch.
+
+### Preventive Actions Taken
+
+1. **Migration Verification**: Check constraints in Python model code should always be verified against existing database migrations.
+
 
 
