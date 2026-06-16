@@ -790,6 +790,7 @@ async def get_ad_audit_history(
             "action": log.action,
             "action_type": log.action_type,
             "user_id": str(log.user_id),
+            "role": log.role,
             "created_at": log.created_at.isoformat() if log.created_at else None,
             "old_value": log.old_value,
             "new_value": log.new_value,

@@ -1360,5 +1360,34 @@ User clicks "eye" button to view campaign audit history
 1. **Test Coverage**: Keep integration tests active for all critical governance pathways to catch import errors prior to deployment.
 
 
+---
+
+## FEAT-007: Campaign Audit Trail Timeline & Details Overview
+
+| Field | Value |
+|-------|-------|
+| **Feature ID** | FEAT-007 |
+| **Feature Title** | Campaign Audit Trail Timeline & Details Overview |
+| **Date and Time** | 2026-06-16T21:30:00+05:30 |
+| **Status** | ✅ Shipped |
+
+### Description
+
+Enhanced the advertisement campaigns audit dashboard to display a structured compliance audit trail, lifecycle checkpoints with precise timestamps, and a live visual campaign placement preview simulator for both desktop and mobile layouts.
+
+### Changes Completed
+
+1. **Structured Timeline Summary**:
+   - Added a **Campaign Compliance & Audit Trail Summary** timeline tracker at the top of the campaign audit history modal.
+   - Summarizes three core stages (Created, Approved, Published) with exact timestamps, duration, and placement parameters.
+2. **Refactored Logs Delta Rendering**:
+   - Replaced raw JSON displays with beautifully formatted human-readable delta panels.
+   - Custom-formatted details for creation configs, decisions, CPC/CPM rates, impression caps, and administrator remarks.
+3. **Interactive Live Campaign Preview**:
+   - Implemented a **Preview Campaign** modal featuring a desktop and mobile device simulator.
+   - Programmed wireframe previews customized for each ad placement (Homepage Banner, Temple Details, Checkout Sidebar, Store Footer, Left/Right Spotlight).
+   - Added full support for media rendering: single image fallback, carousel arrows/dot sliders, and iframe/custom video players.
+
+
 
 
