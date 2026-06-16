@@ -29,6 +29,7 @@
 | INC-018 | Superadmin Review Action Submission Failure due to Status String Mismatch | P1 – Critical | ✅ Resolved | 2026-06-13 |
 | INC-019 | HTTP 500 errors due to DB connection pool exhaustion in user auth dependency | P1 – Critical | ✅ Resolved | 2026-06-15 |
 | INC-020 | HTTP 500 when creating Video Campaign due to database check constraint violation | P1 – Critical | ✅ Resolved | 2026-06-16 |
+| INC-021 | HTTP 500 on Campaign Health Reports due to DateTime timezone mismatch and class method indentation | P1 – Critical | ✅ Resolved | 2026-06-16 |
 | FEAT-001 | Phase 1 – Sidebar Spotlight Ad Area & Layout Alignment | Feature Delivery |  Shipped | 2026-06-10 |
 | FEAT-002 | Phase 2 – Layout Responsiveness & Spotlight Ad Rails | Feature Delivery |  Shipped | 2026-06-10 |
 | FEAT-003 | Devotee Registration Hardening & Password Strength Enforcements | Feature Delivery |  Shipped | 2026-06-12 |
@@ -1261,6 +1262,53 @@ User submits a Video Campaign form in the admin UI
 ### Preventive Actions Taken
 
 1. **Migration Verification**: Check constraints in Python model code should always be verified against existing database migrations.
+
+---
+
+## INC-021: HTTP 500 on Campaign Health Reports due to DateTime Timezone Mismatch and Class Method Indentation
+
+| Field | Value |
+|-------|-------|
+| **Incident ID** | INC-021 |
+| **Incident Title** | HTTP 500 on Campaign Health Reports due to DateTime timezone mismatch and class method indentation |
+| **Date and Time** | 2026-06-16T17:15:00+05:30 |
+| **Severity/Priority** | P1 – Critical |
+| **Current Status** | ✅ Resolved |
+
+### Description
+
+Requesting the campaign health report endpoint `GET /api/v1/superadmin/advertisements/reports` resulted in an HTTP 500 Internal Server Error in production. Additionally, the backend test suite failed with `AttributeError: type object 'AnalyticsService' has no attribute 'get_campaign_health_report'`.
+
+### Root Cause
+
+1. **DateTime Mismatch**: In SQLite, database datetime objects are read as timezone-naive, whereas backend calculations used timezone-aware datetime objects (`datetime.now(timezone.utc)`). Subtracting a timezone-naive datetime from a timezone-aware datetime threw a `TypeError`, crashing the reports API.
+2. **Indentation Bug**: During a previous background ad revenue/cap checking feature implementation, a module-level helper function `_bg_recalculate_revenue_and_check_caps` was defined with 0 spaces of indentation in the middle of `class AnalyticsService`. Since Python classes are closed by module-level indentation, the class block ended, and the subsequent methods `log_portal_event` and `get_campaign_health_report` (which had 4 spaces of indentation) were parsed as nested functions inside `_bg_recalculate_revenue_and_check_caps` instead of methods of `AnalyticsService`.
+
+### Affected Services, Components, or Features
+
+- **Platform & Temple Campaign Health Reports** — Requesting reports failed with HTTP 500.
+- **Analytics Service API** — The class was missing crucial static methods at runtime.
+
+### Cascade Failure Chain
+
+```
+Client sends GET to /api/v1/superadmin/advertisements/reports
+  → Router calls AnalyticsService.get_campaign_health_report()
+    → AttributeError: type object 'AnalyticsService' has no attribute 'get_campaign_health_report'
+      → API returns HTTP 500 (Internal Server Error)
+```
+
+### Resolution Implemented
+
+1. **Indentation Fix**: Moved the helper function `_bg_recalculate_revenue_and_check_caps` to the end of `analytics_service.py` outside `class AnalyticsService`, restoring all static methods to the class.
+2. **DateTime Normalization**: Replaced direct datetime comparison with normalized timezone-aware UTC datetime values (`camp_start.replace(tzinfo=timezone.utc)` if timezone-naive).
+3. **Pytest-Asyncio Configuration**: Added `pytest.ini` setting `asyncio_default_fixture_loop_scope = session` and `asyncio_default_test_loop_scope = session` to prevent SQLite connection pool deadlocks across different event loops in sequential test execution.
+
+### Preventive Actions Taken
+
+1. **Verify Class Attributes**: Run diagnostic imports in test files to ensure classes and methods are correctly bound.
+2. **Event Loop Scoping**: Standardize test suites to share a session-scoped event loop when dealing with stateful pools like SQLite memory databases.
+
 
 
 
