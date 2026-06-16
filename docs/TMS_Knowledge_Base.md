@@ -37,6 +37,7 @@
 | FEAT-004 | Temple Timing Management UX Enhancements | Feature Delivery |  Shipped | 2026-06-15 |
 | FEAT-005 | Platform Campaign Approvals & Ad Governance Enhancements | Feature Delivery |  Shipped | 2026-06-15 |
 | FEAT-006 | Platform Audit Dashboard & Log Synchronization | Feature Delivery |  Shipped | 2026-06-16 |
+| FEAT-007 | Campaign Audit Trail Timeline & Details Overview | Feature Delivery |  Shipped | 2026-06-16 |
 
 ---
 
