@@ -104,6 +104,13 @@ class TempleAdvertisementBase(BaseModel):
     end_date: datetime
     display_order: int = 0
     is_active: bool = True
+    priority: Optional[str] = "MEDIUM"
+    cpm_rate: Optional[float] = 0.0
+    cpc_rate: Optional[float] = 0.0
+    impression_cap: Optional[int] = None
+    click_cap: Optional[int] = None
+    billing_contact: Optional[str] = None
+    approval_status: Optional[str] = "PENDING"
 
     @model_validator(mode="after")
     def validate_ad_dates_and_media(self) -> 'TempleAdvertisementBase':
@@ -134,6 +141,14 @@ class TempleAdvertisementUpdate(BaseModel):
     end_date: Optional[datetime] = None
     display_order: Optional[int] = None
     is_active: Optional[bool] = None
+    priority: Optional[str] = None
+    cpm_rate: Optional[float] = None
+    cpc_rate: Optional[float] = None
+    impression_cap: Optional[int] = None
+    click_cap: Optional[int] = None
+    billing_contact: Optional[str] = None
+    approval_status: Optional[str] = None
+    approval_remarks: Optional[str] = None
 
     @model_validator(mode="after")
     def validate_ad_updates(self) -> 'TempleAdvertisementUpdate':
@@ -157,3 +172,11 @@ class TempleAdvertisementResponse(BaseModel):
     is_active: bool
     created_at: datetime
     updated_at: datetime
+    priority: str
+    cpm_rate: float
+    cpc_rate: float
+    impression_cap: Optional[int]
+    click_cap: Optional[int]
+    billing_contact: Optional[str]
+    approval_status: str
+    approval_remarks: Optional[str]
