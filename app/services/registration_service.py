@@ -697,6 +697,33 @@ class RegistrationService:
 
             temple.status = "APPROVED"
             
+            # Resolve canonical state_id and district_id from state_master and district_master
+            from app.modules.temple_management.models.temple_models import StateMaster, DistrictMaster
+            from sqlalchemy import func
+            
+            if not temple.state_id and temple.state:
+                state_stmt = select(StateMaster).filter(func.lower(StateMaster.name) == func.lower(temple.state.strip()))
+                state_res = await db.execute(state_stmt)
+                state_obj = state_res.scalars().first()
+                if state_obj:
+                    temple.state_id = state_obj.id
+
+            if not temple.district_id and temple.district:
+                dist_name = temple.district.strip()
+                if dist_name.lower() == "trivandrum":
+                    dist_name = "Thiruvananthapuram"
+                if temple.state_id:
+                    dist_stmt = select(DistrictMaster).filter(
+                        func.lower(DistrictMaster.name) == func.lower(dist_name),
+                        DistrictMaster.state_id == temple.state_id
+                    )
+                else:
+                    dist_stmt = select(DistrictMaster).filter(func.lower(DistrictMaster.name) == func.lower(dist_name))
+                dist_res = await db.execute(dist_stmt)
+                dist_obj = dist_res.scalars().first()
+                if dist_obj:
+                    temple.district_id = dist_obj.id
+
             # Phase 1 Hardening: Explicit approval audit fields
             temple.approved_at = datetime.now(timezone.utc)
             temple.approved_by = approver_id

@@ -529,6 +529,38 @@ class OnboardingService:
             # --- Phase 2: Generate temple_code (Concurrency-Safe #1) ---
             temple_code = await OnboardingService._generate_temple_code_safely(db)
 
+            # Resolve canonical state_id and district_id from state_master and district_master
+            state_id = None
+            district_id = None
+            
+            from app.modules.temple_management.models.temple_models import StateMaster, DistrictMaster
+            from sqlalchemy import func
+            
+            if temple_req.state:
+                state_stmt = select(StateMaster).filter(func.lower(StateMaster.name) == func.lower(temple_req.state.strip()))
+                state_res = await db.execute(state_stmt)
+                state_obj = state_res.scalars().first()
+                if state_obj:
+                    state_id = state_obj.id
+                    
+            if temple_req.district:
+                dist_name = temple_req.district.strip()
+                if dist_name.lower() == "trivandrum":
+                    dist_name = "Thiruvananthapuram"
+                
+                if state_id:
+                    dist_stmt = select(DistrictMaster).filter(
+                        func.lower(DistrictMaster.name) == func.lower(dist_name),
+                        DistrictMaster.state_id == state_id
+                    )
+                else:
+                    dist_stmt = select(DistrictMaster).filter(func.lower(DistrictMaster.name) == func.lower(dist_name))
+                    
+                dist_res = await db.execute(dist_stmt)
+                dist_obj = dist_res.scalars().first()
+                if dist_obj:
+                    district_id = dist_obj.id
+
             # 4. Create production Temple
             # PHASE 3: UPDATE OPERATION VALIDATION
             temple = Temple(
@@ -540,6 +572,8 @@ class OnboardingService:
                 address_line_1=temple_req.address or "",
                 state=temple_req.state or "",
                 district=temple_req.district or "",
+                state_id=state_id,
+                district_id=district_id,
                 pincode=temple_req.pincode or "",
                 email=temple_req.email or "",
                 status="APPROVED",
