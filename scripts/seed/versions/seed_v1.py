@@ -51,10 +51,20 @@ async def seed_v1(db: AsyncSession, super_admin_id: uuid.UUID) -> dict:
         await db.flush()
     
     districts = [
+        {"name": "Thiruvananthapuram", "slug": "thiruvananthapuram", "code": "TVM"},
+        {"name": "Kollam", "slug": "kollam", "code": "KLM"},
         {"name": "Pathanamthitta", "slug": "pathanamthitta", "code": "PTA"},
         {"name": "Alappuzha", "slug": "alappuzha", "code": "ALP"},
         {"name": "Kottayam", "slug": "kottayam", "code": "KTM"},
-        {"name": "Ernakulam", "slug": "ernakulam", "code": "EKM"}
+        {"name": "Idukki", "slug": "idukki", "code": "IDK"},
+        {"name": "Ernakulam", "slug": "ernakulam", "code": "EKM"},
+        {"name": "Thrissur", "slug": "thrissur", "code": "TCR"},
+        {"name": "Palakkad", "slug": "palakkad", "code": "PKD"},
+        {"name": "Malappuram", "slug": "malappuram", "code": "MPM"},
+        {"name": "Kozhikode", "slug": "kozhikode", "code": "KKD"},
+        {"name": "Wayanad", "slug": "wayanad", "code": "WYD"},
+        {"name": "Kannur", "slug": "kannur", "code": "KNR"},
+        {"name": "Kasaragod", "slug": "kasaragod", "code": "KSD"}
     ]
     district_objs = {}
     for dist in districts:
