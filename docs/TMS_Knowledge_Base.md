@@ -38,6 +38,7 @@
 | FEAT-005 | Platform Campaign Approvals & Ad Governance Enhancements | Feature Delivery |  Shipped | 2026-06-15 |
 | FEAT-006 | Platform Audit Dashboard & Log Synchronization | Feature Delivery |  Shipped | 2026-06-16 |
 | FEAT-007 | Campaign Audit Trail Timeline & Details Overview | Feature Delivery |  Shipped | 2026-06-16 |
+| FEAT-008 | Ad Placements Integration & Scrollable Audit Modal | Feature Delivery |  Shipped | 2026-06-17 |
 
 ---
 
@@ -1389,5 +1390,28 @@ Enhanced the advertisement campaigns audit dashboard to display a structured com
    - Added full support for media rendering: single image fallback, carousel arrows/dot sliders, and iframe/custom video players.
 
 
+---
 
+## FEAT-008: Ad Placements Integration & Scrollable Audit Modal
 
+| Field | Value |
+|-------|-------|
+| **Feature ID** | FEAT-008 |
+| **Feature Title** | Ad Placements Integration & Scrollable Audit Modal |
+| **Date and Time** | 2026-06-17T10:45:00+05:30 |
+| **Status** | ✅ Shipped |
+
+### Description
+
+Integrated the platform's standard ad placements resolver across all public explorer views, user cart pages, and store modules. Enhanced the Campaign Audit History modal to restrict heights and support infinite scrolling.
+
+### Changes Completed
+
+1. **Integrated `HOMEPAGE_BANNER`**:
+   - Reused `AdvertisementPlacementResolver` across public explorer pages: [StateDirectory.tsx](file:///c:/Denumrutham/frontend/src/pages/devotee/StateDirectory.tsx), [DistrictDirectory.tsx](file:///c:/Denumrutham/frontend/src/pages/devotee/DistrictDirectory.tsx), and [TempleSearchResults.tsx](file:///c:/Denumrutham/frontend/src/pages/devotee/TempleSearchResults.tsx).
+   - Placed the banner prominently directly below the main search filter card on each page.
+2. **Integrated `CHECKOUT_SIDEBAR` & `STORE_FOOTER`**:
+   - Wired ads fetch logic inside the shopping prasad page [CartPage.tsx](file:///c:/Denumrutham/frontend/src/pages/devotee/CartPage.tsx) and placed the `CHECKOUT_SIDEBAR` banner below the pay button summary checkout card.
+   - Rendered the `STORE_FOOTER` banner below the Prasad Store items catalogue in [TemplePublicPortal.tsx](file:///c:/Denumrutham/frontend/src/pages/devotee/TemplePublicPortal.tsx).
+3. **Scrollable Audit History Log**:
+   - Fixed the timeline logs container in `PlatformAdsGovernance.tsx` to set `max-h-[380px]` and allow independent vertical scrolling of audit trail entries, resolving clipping issues for long histories.
