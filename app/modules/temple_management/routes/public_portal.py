@@ -920,7 +920,7 @@ async def get_public_temple_bootstrap(
         # We query active platform ads
         platform_ads_stmt = select(PlatformAdvertisement).filter(
             PlatformAdvertisement.is_active == True,
-            PlatformAdvertisement.approval_status == "APPROVED",
+            PlatformAdvertisement.approval_status == "PUBLISHED",
             PlatformAdvertisement.start_date <= now,
             PlatformAdvertisement.end_date >= now
         ).order_by(PlatformAdvertisement.created_at.desc())
@@ -1365,22 +1365,12 @@ async def list_active_public_advertisements(
     # active platform ads
     platform_ads_stmt = select(PlatformAdvertisement).filter(
         PlatformAdvertisement.is_active == True,
-        PlatformAdvertisement.approval_status == "APPROVED",
+        PlatformAdvertisement.approval_status == "PUBLISHED",
         PlatformAdvertisement.start_date <= now,
         PlatformAdvertisement.end_date >= now
     ).order_by(PlatformAdvertisement.created_at.desc())
     platform_ads_res = await db.execute(platform_ads_stmt)
     platform_ads = platform_ads_res.scalars().all()
-
-    # active temple ads
-    temple_ads_stmt = select(TempleAdvertisement).filter(
-        TempleAdvertisement.is_active == True,
-        TempleAdvertisement.approval_status == "APPROVED",
-        TempleAdvertisement.start_date <= now,
-        TempleAdvertisement.end_date >= now
-    ).order_by(TempleAdvertisement.display_order.asc(), TempleAdvertisement.created_at.desc())
-    temple_ads_res = await db.execute(temple_ads_stmt)
-    temple_ads = temple_ads_res.scalars().all()
 
     for ad in platform_ads:
         advertisements.append({
@@ -1393,19 +1383,6 @@ async def list_active_public_advertisements(
             "start_date": ad.start_date.isoformat() if ad.start_date else None,
             "end_date": ad.end_date.isoformat() if ad.end_date else None,
             "display_order": 0
-        })
-
-    for ad in temple_ads:
-        advertisements.append({
-            "id": str(ad.id),
-            "advertisement_type": "TEMPLE",
-            "placement": ad.placement,
-            "media_urls": ad.media_urls,
-            "media_type": ad.media_type,
-            "target_url": ad.target_url,
-            "start_date": ad.start_date.isoformat() if ad.start_date else None,
-            "end_date": ad.end_date.isoformat() if ad.end_date else None,
-            "display_order": ad.display_order
         })
 
     return advertisements
