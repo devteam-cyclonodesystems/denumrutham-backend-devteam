@@ -84,7 +84,8 @@ def calculate_temple_status(
                         pass
             else:
                 day_req = t.get("day_of_week", "Daily")
-                if day_req == "Daily" or day_req.strip().lower() == day_name.lower():
+                req_days = [d.strip().lower() for d in day_req.split(",") if d.strip()]
+                if "daily" in req_days or day_name.lower() in req_days:
                     regular_timings.append(t)
                     
         if special_timings:

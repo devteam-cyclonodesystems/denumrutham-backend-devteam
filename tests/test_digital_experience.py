@@ -503,7 +503,7 @@ async def test_status_engine_timings_and_activities(client, auth_headers):
             },
             {
                 "session_name": "Evening Darshan",
-                "day_of_week": "Daily",
+                "day_of_week": "Tuesday, Friday",
                 "opening_time": "05:00 PM",
                 "closing_time": "08:30 PM",
                 "is_special": False
