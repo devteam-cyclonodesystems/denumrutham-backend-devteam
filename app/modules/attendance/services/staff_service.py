@@ -662,4 +662,4 @@ class StaffService:
                         )
                         db.add(rp)
         
-        await db.commit()
+        await db.flush()

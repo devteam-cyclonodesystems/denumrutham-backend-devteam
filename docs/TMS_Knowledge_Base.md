@@ -31,6 +31,7 @@
 | INC-020 | HTTP 500 when creating Video Campaign due to database check constraint violation | P1 – Critical | ✅ Resolved | 2026-06-16 |
 | INC-021 | HTTP 500 on Campaign Health Reports due to DateTime timezone mismatch and class method indentation | P1 – Critical | ✅ Resolved | 2026-06-16 |
 | INC-022 | HTTP 500 when fetching Advertisement Audit History due to incorrect import path | P1 – Critical | ✅ Resolved | 2026-06-16 |
+| INC-023 | HTTP 500 when approving onboarded temple due to transaction commit in sub-service | P1 – Critical | ✅ Resolved | 2026-06-17 |
 | FEAT-001 | Phase 1 – Sidebar Spotlight Ad Area & Layout Alignment | Feature Delivery |  Shipped | 2026-06-10 |
 | FEAT-002 | Phase 2 – Layout Responsiveness & Spotlight Ad Rails | Feature Delivery |  Shipped | 2026-06-10 |
 | FEAT-003 | Devotee Registration Hardening & Password Strength Enforcements | Feature Delivery |  Shipped | 2026-06-12 |
@@ -1359,6 +1360,57 @@ User clicks "eye" button to view campaign audit history
 ### Preventive Actions Taken
 
 1. **Test Coverage**: Keep integration tests active for all critical governance pathways to catch import errors prior to deployment.
+
+
+---
+
+## INC-023: HTTP 500 When Approving Onboarded Temple due to Transaction Commit in Sub-service
+
+| Field | Value |
+|-------|-------|
+| **Incident ID** | INC-023 |
+| **Incident Title** | HTTP 500 when approving onboarded temple due to transaction commit in sub-service |
+| **Date and Time** | 2026-06-17T11:20:00+05:30 |
+| **Severity/Priority** | P1 – Critical |
+| **Current Status** | ✅ Resolved |
+
+### Description
+
+Attempting to approve a pending temple registration request via the endpoint `POST /api/v1/admin/onboarding/approve-temple/{request_id}` resulted in an HTTP 500 Internal Server Error in production.
+
+### Root Cause
+
+During the promotion of staging records to production records, `OnboardingService.approve_temple` executes the sub-service function `StaffService.seed_default_temple_roles(db, temple_id)` to initialize default employee roles (Pujari, Store Staff, Counter Staff, etc.) for the newly created temple.
+The `seed_default_temple_roles` function ended with an explicit `await db.commit()`. Since `OnboardingService.approve_temple` runs inside an active transaction (`tx = await db.begin()`), calling `commit()` on the shared database session midway terminated and closed the parent transaction.
+When the parent service attempted to perform subsequent operations (e.g. mapping the manager user to the "Manager" role) and finally call `await tx.commit()` at the end, SQLAlchemy threw a `ResourceClosedError: This transaction is closed` exception. This crashed the request with an HTTP 500 error and broke the transaction's atomicity.
+
+### Affected Services, Components, or Features
+
+- **Temple Onboarding Approval** — Approving staging registration requests failed with HTTP 500.
+
+### Cascade Failure Chain
+
+```
+Super Admin clicks "Approve" for a pending temple request
+  → Frontend sends POST to /api/v1/admin/onboarding/approve-temple/{request_id}
+    → Router invokes OnboardingService.approve_temple()
+      → approve_temple() starts a transaction and creates the Temple record
+        → approve_temple() calls StaffService.seed_default_temple_roles()
+          → seed_default_temple_roles() calls await db.commit() which commits and closes the transaction midway
+            → approve_temple() attempts to execute further updates and calls await tx.commit()
+              → SQLAlchemy raises ResourceClosedError ("This transaction is closed")
+                → API returns HTTP 500 (Internal Server Error)
+```
+
+### Resolution Implemented
+
+1. **Transaction Refactoring**: Modified `StaffService.seed_default_temple_roles` in [staff_service.py](file:///C:/Denumrutham/backend/app/modules/attendance/services/staff_service.py#L665) to call `await db.flush()` instead of `await db.commit()`. This registers the default role assignments in the session buffer without prematurely committing the transaction, allowing the parent service to safely commit the entire unit of work atomically.
+2. **Local Simulation & Verification**: Created a mock onboarding approval test script which verified that parent transactions now commit successfully without raising `ResourceClosedError`.
+3. **Integration Test Suite**: Ran the entire backend test suite (`tests/test_sprint4_requirements.py` and other test files) to confirm all requirements remain fully functional.
+
+### Preventive Actions Taken
+
+1. **Avoid Service-level Commits**: Avoid calling `.commit()` inside reusable sub-service helper functions. Sub-services should use `.flush()` to validate constraints, leaving transaction boundary control (`commit`/`rollback`) to the entry-point router/service orchestrator.
 
 
 ---
