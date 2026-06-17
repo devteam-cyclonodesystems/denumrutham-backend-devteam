@@ -1529,7 +1529,7 @@ Integrated the platform's standard ad placements resolver across all public expl
 | Field | Value |
 |-------|-------|
 | **Incident ID** | INC-024 |
-| **Incident Title** | Bhima Gold advertisement not displaying on temple page due to placement mismatch, and platform ads missing due to status mismatch |
+| **Incident Title** | Bhima Gold advertisement not displaying on temple page due to placement mismatch and missing media_type, and platform ads missing due to status mismatch |
 | **Date and Time** | 2026-06-17T20:00:00+05:30 |
 | **Severity/Priority** | P1 – Critical |
 | **Current Status** | ✅ Resolved |
@@ -1540,6 +1540,7 @@ Devotees and temple managers noted that:
 1. The approved temple-scoped Bhima Gold advertisement was not displaying in the right-rail sidebar on the temple's public portal page.
 2. All platform-wide advertisements (e.g. Attukal, Mannarasala) disappeared completely from the portal.
 3. Temple manager advertisements were erroneously visible on the global directory/explorer homepage.
+4. Ad creative images and carousels failed to render on devotee-facing pages, showing a plain text fallback card containing "Advertisement" instead of the visual banner assets.
 
 ### Root Cause
 
@@ -1547,6 +1548,7 @@ Devotees and temple managers noted that:
 2. **Missing Approval State**: The Bhima Gold campaign was left in a `PENDING` approval status in the database.
 3. **Platform Ads Status Mismatch**: Platform advertisements use `"PUBLISHED"` as their active approval status in the database, whereas temple-scoped advertisements use `"APPROVED"`. Adding a backend filter checking for `"APPROVED"` on all active public campaigns caused all platform advertisements to be excluded.
 4. **Scope Leakage**: The global `/advertisements/active` endpoint queried and returned both platform and temple advertisements, leaking temple manager advertisements (which should only showcase on their specific temple pages) onto the directory homepage.
+5. **Omitted Media Type**: The backend configuration endpoint `get_public_temple_bootstrap` did not serialize the `"media_type"` field in the response payload. The frontend resolver, receiving no media type, fell back to rendering a plain text block.
 
 ### Affected Services, Components, or Features
 
@@ -1561,8 +1563,10 @@ Devotees and temple managers noted that:
 2. **Backend Status Correction**: Updated public endpoints in [public_portal.py](file:///C:/Denumrutham/backend/app/modules/temple_management/routes/public_portal.py) to check for `approval_status == 'PUBLISHED'` for platform advertisements, restoring all platform campaigns.
 3. **Backend Scope Restriction**: Removed the `TempleAdvertisement` query and serialization from the global `/advertisements/active` endpoint in `public_portal.py` so that temple advertisements are never returned on the homepage/explore views.
 4. **Frontend Resolution**: Modified [SidebarWidgetResolver.tsx](file:///C:/Denumrutham/frontend/src/components/ads/SidebarWidgetResolver.tsx) to allow `RIGHT_SPOTLIGHT` advertisements to render in the `SIDEBAR_SPOTLIGHT` right-rail placement, resolving the placement mismatch.
+5. **Media Type Serialization**: Updated the `get_public_temple_bootstrap` API in `public_portal.py` to serialize `"media_type": ad.media_type` for both platform and temple advertisements.
 
 ### Preventive Actions Taken
 
 1. **Verify Environment Status Values**: Document and respect status value differences between platform-scoped (`"PUBLISHED"`) and temple-scoped (`"APPROVED"`) models.
 2. **Isolate Scope Queries**: Restrict tenant-specific resources to target tenant endpoints (`get_public_temple_bootstrap`), leaving global list queries for global platform resources.
+3. **Complete Field Mappings**: Ensure schema objects and API endpoints serialize all fields required by frontend layout and media resolvers.
