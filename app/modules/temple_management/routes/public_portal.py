@@ -909,6 +909,7 @@ async def get_public_temple_bootstrap(
         temple_ads_stmt = select(TempleAdvertisement).filter(
             TempleAdvertisement.temple_id == temple.id,
             TempleAdvertisement.is_active == True,
+            TempleAdvertisement.approval_status == "APPROVED",
             TempleAdvertisement.start_date <= now,
             TempleAdvertisement.end_date >= now
         ).order_by(TempleAdvertisement.display_order.asc(), TempleAdvertisement.created_at.desc())
@@ -919,6 +920,7 @@ async def get_public_temple_bootstrap(
         # We query active platform ads
         platform_ads_stmt = select(PlatformAdvertisement).filter(
             PlatformAdvertisement.is_active == True,
+            PlatformAdvertisement.approval_status == "APPROVED",
             PlatformAdvertisement.start_date <= now,
             PlatformAdvertisement.end_date >= now
         ).order_by(PlatformAdvertisement.created_at.desc())
@@ -1363,6 +1365,7 @@ async def list_active_public_advertisements(
     # active platform ads
     platform_ads_stmt = select(PlatformAdvertisement).filter(
         PlatformAdvertisement.is_active == True,
+        PlatformAdvertisement.approval_status == "APPROVED",
         PlatformAdvertisement.start_date <= now,
         PlatformAdvertisement.end_date >= now
     ).order_by(PlatformAdvertisement.created_at.desc())
@@ -1372,6 +1375,7 @@ async def list_active_public_advertisements(
     # active temple ads
     temple_ads_stmt = select(TempleAdvertisement).filter(
         TempleAdvertisement.is_active == True,
+        TempleAdvertisement.approval_status == "APPROVED",
         TempleAdvertisement.start_date <= now,
         TempleAdvertisement.end_date >= now
     ).order_by(TempleAdvertisement.display_order.asc(), TempleAdvertisement.created_at.desc())

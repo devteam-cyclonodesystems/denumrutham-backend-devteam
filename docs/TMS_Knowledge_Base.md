@@ -32,6 +32,7 @@
 | INC-021 | HTTP 500 on Campaign Health Reports due to DateTime timezone mismatch and class method indentation | P1 – Critical | ✅ Resolved | 2026-06-16 |
 | INC-022 | HTTP 500 when fetching Advertisement Audit History due to incorrect import path | P1 – Critical | ✅ Resolved | 2026-06-16 |
 | INC-023 | HTTP 500 when approving onboarded temple due to transaction commit & missing tables | P1 – Critical | ✅ Resolved | 2026-06-17 |
+| INC-024 | Bhima Gold advertisement not displaying on temple page due to placement mismatch and missing approval | P2 – High | ✅ Resolved | 2026-06-17 |
 | FEAT-001 | Phase 1 – Sidebar Spotlight Ad Area & Layout Alignment | Feature Delivery |  Shipped | 2026-06-10 |
 | FEAT-002 | Phase 2 – Layout Responsiveness & Spotlight Ad Rails | Feature Delivery |  Shipped | 2026-06-10 |
 | FEAT-003 | Devotee Registration Hardening & Password Strength Enforcements | Feature Delivery |  Shipped | 2026-06-12 |
@@ -1520,3 +1521,42 @@ Integrated the platform's standard ad placements resolver across all public expl
    - Fixed the timeline logs container in `PlatformAdsGovernance.tsx` to set `max-h-[380px]` and allow independent vertical scrolling of audit trail entries, resolving clipping issues for long histories.
 4. **Build Fix (TS6133)**:
    - Removed unused variable declaration `oldVal` from `renderLogDelta` in [PlatformAdsGovernance.tsx](file:///c:/Denumrutham/frontend/src/pages/admin/governance/PlatformAdsGovernance.tsx) to resolve strict compiler errors blocking deployment.
+
+---
+
+## INC-024: Bhima Gold Advertisement Not Displaying on Temple Page
+
+| Field | Value |
+|-------|-------|
+| **Incident ID** | INC-024 |
+| **Incident Title** | Bhima Gold advertisement not displaying on temple page due to placement mismatch and missing approval |
+| **Date and Time** | 2026-06-17T20:00:00+05:30 |
+| **Severity/Priority** | P2 – High |
+| **Current Status** | ✅ Resolved |
+
+### Description
+
+Devotees and temple managers noted that the approved/active temple-scoped Bhima Gold advertisement with target URL `https://www.bhimagold.com/` was not displaying in the right-rail sidebar on the temple's public portal page.
+
+### Root Cause
+
+1. **Placement Mismatch**: The advertisement was registered with placement `RIGHT_SPOTLIGHT` (Explore Page Right Rail). The public temple portal sidebar widget resolver defaults to `SIDEBAR_SPOTLIGHT` and filters out any advertisements whose placement does not match the resolver's target placement.
+2. **Missing Approval State**: The advertisement campaign was created but left in a `PENDING` approval status in the PostgreSQL database.
+3. **Backend Query Omission**: Public endpoints queried active advertisements but failed to filter them by `approval_status == 'APPROVED'`, which is a database leakage issue.
+
+### Affected Services, Components, or Features
+
+- Public Devotee Portal landing pages (`TemplePublicPortal.tsx`)
+- Sidebar Spotlight widget resolver (`SidebarWidgetResolver.tsx`)
+- Active public advertisements list endpoints (`public_portal.py`)
+
+### Resolution Implemented
+
+1. **Database Approval**: Modified the `approval_status` of the Bhima Gold advertisement (ID: `a3f9464a-d8b1-4e9d-9b53-169ff82d45dd`) to `'APPROVED'` in the Neon PostgreSQL database.
+2. **Backend Filtering**: Updated queries in `get_public_temple_bootstrap` and `list_active_public_advertisements` in [public_portal.py](file:///C:/Denumrutham/backend/app/modules/temple_management/routes/public_portal.py) to explicitly filter by `approval_status == 'APPROVED'` for all public-facing queries.
+3. **Frontend Resolution**: Modified [SidebarWidgetResolver.tsx](file:///C:/Denumrutham/frontend/src/components/ads/SidebarWidgetResolver.tsx) to allow `RIGHT_SPOTLIGHT` advertisements to render in the `SIDEBAR_SPOTLIGHT` right-rail placement, resolving the placement mismatch.
+
+### Preventive Actions Taken
+
+1. **Enforce Approval Checks**: Always include `approval_status == 'APPROVED'` filter logic for public devotee-facing resource endpoints.
+2. **Flexible Placement Support**: Ensure sidebar and spotlight components permit rendering of related/compatible placement configurations when appropriate.
