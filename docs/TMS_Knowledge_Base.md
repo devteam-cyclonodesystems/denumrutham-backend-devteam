@@ -1570,3 +1570,44 @@ Devotees and temple managers noted that:
 1. **Verify Environment Status Values**: Document and respect status value differences between platform-scoped (`"PUBLISHED"`) and temple-scoped (`"APPROVED"`) models.
 2. **Isolate Scope Queries**: Restrict tenant-specific resources to target tenant endpoints (`get_public_temple_bootstrap`), leaving global list queries for global platform resources.
 3. **Complete Field Mappings**: Ensure schema objects and API endpoints serialize all fields required by frontend layout and media resolvers.
+
+---
+
+## INC-025: Budhshiv Campaign Display & Ad Analytics Telemetry Failure
+
+| Field | Value |
+|-------|-------|
+| **Incident ID** | INC-025 |
+| **Incident Title** | Budhshiv temple advertisement not displaying due to pending approval, and ad campaign impressions/clicks not tracking due to non-operational telemetry |
+| **Date and Time** | 2026-06-17T21:30:00+05:30 |
+| **Severity/Priority** | P1 – Critical |
+| **Current Status** | ✅ Resolved |
+
+### Description
+
+Devotees and temple managers noted that:
+1. The Budhshiv temple-scoped advertisement was not visible on the Malottu temple page.
+2. Ad analytics reports (impressions and click counts) were not updating on either the Superadmin or Temple Manager dashboards.
+
+### Root Cause
+
+1. **Pending Approval State**: The Budhshiv campaign was newly created and left in the `'PENDING'` approval status in the database, excluding it from devotee-facing views (which filter for `'APPROVED'`).
+2. **Non-operational Telemetry utility**: The frontend utility `trackPortalInteraction` inside `portalTelemetry.ts` was implemented as a mock/placeholder function that only logged details to `console.log` and did not invoke the actual API call handlers defined in `telemetryService.ts`.
+
+### Affected Services, Components, or Features
+
+- Devotee public portal layout components (`TemplePublicPortal.tsx`, `SidebarWidgetResolver.tsx`)
+- Frontend telemetry tracking (`portalTelemetry.ts`, `telemetryService.ts`)
+- Backend ad events telemetry endpoint (`/api/v1/public/advertisements/events`)
+- Campaign Health and Analytics Reports dashboards
+
+### Resolution Implemented
+
+1. **Database Approval**: Updated the approval status of the Budhshiv advertisement (ID: `4dcdd82f-8dd0-4276-9e0c-628b876e8f33`) to `'APPROVED'` in the Neon PostgreSQL database.
+2. **Frontend Telemetry Wiring**: Modified [portalTelemetry.ts](file:///C:/Denumrutham/frontend/src/utils/portalTelemetry.ts) to import and invoke the real `logAdImpression`, `logAdClick`, and `logPortalEvent` endpoints from `telemetryService.ts` whenever ad interactions occur.
+
+### Preventive Actions Taken
+
+1. **Auto-Verify Telemetry Delivery**: Ensure all user interaction hooks in the frontend map directly to live async API handlers instead of developer logging mocks.
+2. **Strict Compilation Checks**: Always build the frontend bundle after telemetry updates to check compatibility with TypeScript compiler properties like type-only imports under `verbatimModuleSyntax`.
+
