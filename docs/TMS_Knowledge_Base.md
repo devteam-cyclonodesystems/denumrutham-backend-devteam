@@ -1415,3 +1415,5 @@ Integrated the platform's standard ad placements resolver across all public expl
    - Rendered the `STORE_FOOTER` banner below the Prasad Store items catalogue in [TemplePublicPortal.tsx](file:///c:/Denumrutham/frontend/src/pages/devotee/TemplePublicPortal.tsx).
 3. **Scrollable Audit History Log**:
    - Fixed the timeline logs container in `PlatformAdsGovernance.tsx` to set `max-h-[380px]` and allow independent vertical scrolling of audit trail entries, resolving clipping issues for long histories.
+4. **Build Fix (TS6133)**:
+   - Removed unused variable declaration `oldVal` from `renderLogDelta` in [PlatformAdsGovernance.tsx](file:///c:/Denumrutham/frontend/src/pages/admin/governance/PlatformAdsGovernance.tsx) to resolve strict compiler errors blocking deployment.
