@@ -1697,6 +1697,38 @@ Implemented comprehensive, controls-free, auto-playing video advertisement suppo
    - Modified [PlatformAdsGovernance.tsx](file:///c:/Denumrutham/frontend/src/pages/admin/governance/PlatformAdsGovernance.tsx) (Superadmin Preview Device Simulator).
    - Modified [TempleAdsDashboard.tsx](file:///c:/Denumrutham/frontend/src/pages/manager/TempleAdsDashboard.tsx) (Temple Manager Preview Device Simulator).
 
+---
+
+## FEAT-012: Directory Layout & Text Wrapping Optimization
+
+| Field | Value |
+|-------|-------|
+| **Feature ID** | FEAT-012 |
+| **Feature Title** | Directory Layout & Text Wrapping Optimization |
+| **Date and Time** | 2026-06-18T12:40:00+05:30 |
+| **Status** | ✅ Shipped |
+
+### Description
+
+Optimized the state and district directory grid cards so that long place names (e.g. "THIRUVANANTHAPURAM", "PATHANAMTHITTA") are displayed in full without getting cut off or truncated with ellipsis early.
+
+### Changes Completed
+
+1. **Text Wrapping Support**:
+   - Removed the `truncate` class from card headers in both the state and district listing directories.
+   - Applied `break-words whitespace-normal` classes to allow multi-line rendering for long place names.
+2. **Column Spacing Optimization**:
+   - Modified the grid layout responsive column classes from `grid-cols-1 sm:grid-cols-2 lg:grid-cols-3` to `grid-cols-1 sm:grid-cols-2 lg:grid-cols-3 xl:grid-cols-2 2xl:grid-cols-3`.
+   - On `xl` viewports, the grid drops down to 2 columns to account for the presence of the left and right 300px sidebar rails, preventing horizontal squashing of content.
+3. **Card Spacing Reclaim**:
+   - Squeezed padding from `p-6` to `p-4 sm:p-5`.
+   - Reduced map/location icon sizes from `w-12 h-12` to `w-10 h-10` and outer wrappers accordingly.
+   - Changed gaps from `gap-4` to `gap-3`, successfully reclaiming `28px` of horizontal rendering width for the place labels.
+4. **Affected Files**:
+   - [DistrictDirectory.tsx](file:///c:/Denumrutham/frontend/src/pages/devotee/DistrictDirectory.tsx)
+   - [StateDirectory.tsx](file:///c:/Denumrutham/frontend/src/pages/devotee/StateDirectory.tsx)
+
+
 
 
 
