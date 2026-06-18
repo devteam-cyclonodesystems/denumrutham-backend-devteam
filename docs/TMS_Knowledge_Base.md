@@ -43,6 +43,7 @@
 | FEAT-007 | Campaign Audit Trail Timeline & Details Overview | Feature Delivery |  Shipped | 2026-06-16 |
 | FEAT-008 | Ad Placements Integration & Scrollable Audit Modal | Feature Delivery |  Shipped | 2026-06-17 |
 | FEAT-009 | Impressions and Click Counts in Campaign Audit History | Feature Delivery |  Shipped | 2026-06-18 |
+| FEAT-010 | KPI Card Clicks & Campaign Expiry Metric Adjustments | Feature Delivery |  Shipped | 2026-06-18 |
 
 ---
 
@@ -1638,5 +1639,30 @@ Integrated campaign impressions, click counts, and click-through rate (CTR) metr
 2. **Temple Manager Dashboard Audit Modal**:
    - Modified [TempleAdsDashboard.tsx](file:///c:/Denumrutham/frontend/src/pages/manager/TempleAdsDashboard.tsx) to do matching telemetry lookups inside the Audit History modal.
    - Built the identical glassmorphic statistics display grid showing Impressions, Clicks, and CTR with consistent typography and iconography.
+
+---
+
+## FEAT-010: KPI Card Clicks & Campaign Expiry Metric Adjustments
+
+| Field | Value |
+|-------|-------|
+| **Feature ID** | FEAT-010 |
+| **Feature Title** | KPI Card Clicks & Campaign Expiry Metric Adjustments |
+| **Date and Time** | 2026-06-18T10:30:00+05:30 |
+| **Status** | ✅ Shipped |
+
+### Description
+
+Refined the active campaign logic to exclude expired campaigns and hide the Suspend button for them. Made the Impressions and Clicks KPI overview cards clickable, opening a detailed breakdown modal of all campaigns sorted descending by the clicked metric.
+
+### Changes Completed
+
+1. **Campaign Expiry & Controls**:
+   - Updated the `activeCampaigns` card calculation in [PlatformAdsGovernance.tsx](file:///c:/Denumrutham/frontend/src/pages/admin/governance/PlatformAdsGovernance.tsx) to exclude expired campaigns.
+   - Hidden the **Suspend** and **Resume** buttons on the Campaigns table if a campaign has expired/ended (`isExpired === true`).
+2. **Clickable Telemetry Overview Cards**:
+   - Wired `onClick` props to the Impressions and Clicks `StatCard` elements on both the Superadmin and Temple Manager profiles.
+   - Implemented a scrollable **Campaign Telemetry Breakdown Modal** presenting all campaigns sorted descending by the selected metric (Impressions or Clicks).
+
 
 
