@@ -3,7 +3,7 @@ import logging
 import asyncio
 import time
 from datetime import datetime, timezone, timedelta
-from typing import List, Dict, Any
+from typing import List, Dict, Any, Optional
 from uuid import UUID
 
 import sqlalchemy as sa
