@@ -1,6 +1,7 @@
 from app.core.database import get_db
 from app.core.deps import (
     get_current_user,
+    get_current_user_optional,
     get_current_active_admin,
     get_current_superadmin,
     get_current_devotee,

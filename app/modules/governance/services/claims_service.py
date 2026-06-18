@@ -9,6 +9,8 @@ from sqlalchemy.future import select
 from sqlalchemy import func
 from sqlalchemy.orm import selectinload
 
+import hashlib
+from app.modules.temple_management.models.temple_models import PortalAnalyticsEvent
 from app.models import Temple, User, UserTemple, TempleClaimRequest, TempleOwnershipHistory, Subscription
 from app.modules.governance.schemas.claims import ClaimRequestCreate, ClaimRequestReview
 
@@ -24,7 +26,9 @@ class ClaimsService:
     async def submit_claim(
         db: AsyncSession,
         claimant_id: UUID,
-        schema: ClaimRequestCreate
+        schema: ClaimRequestCreate,
+        visitor_hash: str | None = None,
+        session_id: str | None = None
     ) -> TempleClaimRequest:
         # 1. Fetch Temple and check it is DIRECTORY_ONLY
         temple_res = await db.execute(select(Temple).filter(Temple.id == schema.temple_id))
@@ -87,6 +91,21 @@ class ClaimsService:
         claim.claimant_name = user.name if user else ""
         claim.claimant_email = user.email if user else None
         claim.claimant_phone = user.phone if user else None
+
+        # Telemetry: Log CLAIM_SUBMISSION
+        vh = visitor_hash or hashlib.sha256(str(claimant_id).encode()).hexdigest()
+        telemetry = PortalAnalyticsEvent(
+            temple_id=schema.temple_id,
+            event_name="CLAIM_SUBMISSION",
+            visitor_hash=vh,
+            session_id=session_id,
+            user_id=claimant_id,
+            event_metadata={
+                "target_management_mode": schema.target_management_mode,
+                "target_subscription_plan": schema.target_subscription_plan
+            }
+        )
+        db.add(telemetry)
 
         return claim
 
@@ -267,6 +286,22 @@ class ClaimsService:
         claim.target_management_mode = target_mode
         claim.target_subscription_plan = target_plan
         claim.trial_duration_days = trial_days
+
+        # Telemetry: Log CLAIM_APPROVED
+        vh = hashlib.sha256(str(claim.claimant_id).encode()).hexdigest()
+        telemetry = PortalAnalyticsEvent(
+            temple_id=temple.id,
+            event_name="CLAIM_APPROVED",
+            visitor_hash=vh,
+            user_id=claim.claimant_id,
+            event_metadata={
+                "claim_id": str(claim.id),
+                "reviewer_id": str(reviewer_id),
+                "management_mode": target_mode,
+                "subscription_plan": target_plan
+            }
+        )
+        db.add(telemetry)
 
         await db.flush()
 

@@ -16,6 +16,24 @@ from sqlalchemy import inspect
 
 oauth2_scheme = OAuth2PasswordBearer(tokenUrl=f"{settings.API_V1_STR}/auth/login")
 
+async def get_current_user_optional(request: Request) -> Optional[TokenData]:
+    auth_header = request.headers.get("Authorization")
+    if not auth_header or not auth_header.startswith("Bearer "):
+        return None
+    token = auth_header.split(" ")[1]
+    try:
+        payload = jwt.decode(token, settings.jwt_secret_key, algorithms=[settings.ALGORITHM])
+        return TokenData(
+            sub=payload.get("sub"),
+            temple_id=payload.get("temple_id"),
+            role=payload.get("role"),
+            username=payload.get("username", ""),
+            security_version=payload.get("security_version"),
+            iat=payload.get("iat")
+        )
+    except Exception:
+        return None
+
 async def get_current_user(request: Request, token: str = Depends(oauth2_scheme)) -> TokenData:
     try:
         payload = jwt.decode(token, settings.jwt_secret_key, algorithms=[settings.ALGORITHM])

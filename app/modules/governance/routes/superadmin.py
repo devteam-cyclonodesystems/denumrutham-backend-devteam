@@ -800,4 +800,175 @@ async def get_ad_audit_history(
     ]
 
 
+@router.get("/analytics/search")
+async def get_search_analytics(
+    db: AsyncSession = Depends(get_db),
+    current_user: TokenData = Depends(get_current_superadmin),
+):
+    """SuperAdmin search analytics dashboard."""
+    from datetime import datetime, timezone, timedelta
+    from app.modules.temple_management.models.temple_models import PortalAnalyticsEvent
+    from sqlalchemy import select
+    
+    now = datetime.now(timezone.utc)
+    fourteen_days_ago = now - timedelta(days=14)
+    
+    # Fetch all search and click events from last 14 days
+    events_stmt = select(PortalAnalyticsEvent).filter(
+        PortalAnalyticsEvent.event_name.in_(["HOMEPAGE_SEARCH", "TEMPLE_CARD_CLICK", "TEMPLE_VIEW"]),
+        PortalAnalyticsEvent.created_at >= fourteen_days_ago
+    )
+    events_res = await db.execute(events_stmt)
+    events = events_res.scalars().all()
+    
+    searches = [e for e in events if e.event_name == "HOMEPAGE_SEARCH"]
+    clicks = [e for e in events if e.event_name in ("TEMPLE_CARD_CLICK", "TEMPLE_VIEW")]
+    
+    total_searches = len(searches)
+    
+    # Calculate Success & Abandonment Rates
+    # Group clicks by visitor_hash for fast lookup
+    clicks_by_visitor = {}
+    for c in clicks:
+        clicks_by_visitor.setdefault(c.visitor_hash, []).append(c)
+        if c.session_id:
+            clicks_by_visitor.setdefault(c.session_id, []).append(c)
+            
+    successful_searches_count = 0
+    for s in searches:
+        # Check matching clicks
+        candidate_clicks = []
+        if s.session_id and s.session_id in clicks_by_visitor:
+            candidate_clicks.extend(clicks_by_visitor[s.session_id])
+        if s.visitor_hash in clicks_by_visitor:
+            candidate_clicks.extend(clicks_by_visitor[s.visitor_hash])
+            
+        # Check if any click is within 30 minutes after the search
+        success = False
+        for c in candidate_clicks:
+            if c.created_at >= s.created_at and c.created_at <= s.created_at + timedelta(minutes=30):
+                success = True
+                break
+        if success:
+            successful_searches_count += 1
+            
+    success_rate = (successful_searches_count / total_searches) if total_searches > 0 else 0.0
+    abandonment_rate = (1.0 - success_rate) if total_searches > 0 else 0.0
+    
+    # Top searches
+    query_counts = {}
+    zero_result_counts = {}
+    state_counts = {}
+    
+    # Current period (last 7 days) and prior period (days 8-14)
+    seven_days_ago = now - timedelta(days=7)
+    current_queries = {}
+    prior_queries = {}
+    
+    for s in searches:
+        meta = s.event_metadata or {}
+        q = meta.get("query", "").strip().lower()
+        if not q:
+            continue
+            
+        query_counts[q] = query_counts.get(q, 0) + 1
+        
+        # Zero result count
+        res_count = meta.get("results_count")
+        if res_count == 0 or meta.get("count") == 0:
+            zero_result_counts[q] = zero_result_counts.get(q, 0) + 1
+            
+        # State grouping
+        state = meta.get("state")
+        if state:
+            state = state.strip().title()
+            state_counts[state] = state_counts.get(state, 0) + 1
+            
+        # Period counts for rising searches
+        if s.created_at >= seven_days_ago:
+            current_queries[q] = current_queries.get(q, 0) + 1
+        else:
+            prior_queries[q] = prior_queries.get(q, 0) + 1
+            
+    # Format Top Searches
+    top_searches_list = [{"query": q, "volume": vol} for q, vol in sorted(query_counts.items(), key=lambda x: x[1], reverse=True)[:10]]
+    
+    # Format Zero Result Searches
+    zero_result_list = [{"query": q, "volume": vol} for q, vol in sorted(zero_result_counts.items(), key=lambda x: x[1], reverse=True)[:10]]
+    
+    # Format State Groupings
+    state_searches_list = [{"state": st, "volume": vol} for st, vol in sorted(state_counts.items(), key=lambda x: x[1], reverse=True)]
+    
+    # Format Rising Searches (current volume >= 20)
+    rising_searches_list = []
+    for q, current_vol in current_queries.items():
+        if current_vol >= 20:
+            prior_vol = prior_queries.get(q, 0)
+            if prior_vol == 0:
+                growth_pct = 100.0  # grow from 0
+            else:
+                growth_pct = ((current_vol - prior_vol) / prior_vol) * 100.0
+            rising_searches_list.append({
+                "query": q,
+                "current_volume": current_vol,
+                "prior_volume": prior_vol,
+                "growth_pct": round(growth_pct, 1)
+            })
+            
+    rising_searches_list.sort(key=lambda x: x["growth_pct"], reverse=True)
+    
+    return {
+        "total_searches": total_searches,
+        "search_success_rate": round(success_rate * 100, 2),
+        "search_abandonment_rate": round(abandonment_rate * 100, 2),
+        "top_searches": top_searches_list,
+        "rising_searches": rising_searches_list[:10],
+        "zero_result_searches": zero_result_list,
+        "searches_by_state": state_searches_list
+    }
+
+
+@router.get("/analytics/onboarding")
+async def get_onboarding_funnel(
+    db: AsyncSession = Depends(get_db),
+    current_user: TokenData = Depends(get_current_superadmin),
+):
+    """SuperAdmin claim funnel onboarding analytics dashboard."""
+    from app.modules.temple_management.models.temple_models import PortalAnalyticsEvent
+    from sqlalchemy import select, func
+    
+    event_names = ["CLAIM_CTA_IMPRESSION", "CLAIM_TEMPLE_CLICK", "CLAIM_SUBMISSION", "CLAIM_APPROVED"]
+    stmt = (
+        select(PortalAnalyticsEvent.event_name, func.count(PortalAnalyticsEvent.id))
+        .filter(PortalAnalyticsEvent.event_name.in_(event_names))
+        .group_by(PortalAnalyticsEvent.event_name)
+    )
+    res = await db.execute(stmt)
+    counts = {row[0]: row[1] for row in res.all()}
+    
+    impressions = counts.get("CLAIM_CTA_IMPRESSION", 0)
+    clicks = counts.get("CLAIM_TEMPLE_CLICK", 0)
+    submissions = counts.get("CLAIM_SUBMISSION", 0)
+    approvals = counts.get("CLAIM_APPROVED", 0)
+    
+    ctr = (clicks / impressions * 100.0) if impressions > 0 else 0.0
+    submission_rate = (submissions / clicks * 100.0) if clicks > 0 else 0.0
+    approval_rate = (approvals / submissions * 100.0) if submissions > 0 else 0.0
+    
+    return {
+        "funnel": {
+            "impressions": impressions,
+            "clicks": clicks,
+            "submissions": submissions,
+            "approvals": approvals
+        },
+        "rates": {
+            "ctr": round(ctr, 2),
+            "submission_rate": round(submission_rate, 2),
+            "approval_rate": round(approval_rate, 2)
+        }
+    }
+
+
+
 

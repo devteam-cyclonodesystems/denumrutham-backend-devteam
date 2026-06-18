@@ -13,12 +13,12 @@ from typing import List, Optional
 from datetime import datetime, timezone
 from PIL import Image, ImageOps
 
-from app.api.deps import get_db
+from app.api.deps import get_db, get_current_user_optional
 from app.models.domain import (
     Temple, TempleWebsiteSettingsLive, TempleAdvertisement, PlatformAdvertisement,
     StateMaster, DistrictMaster, TempleSearchIndex
 )
-from app.modules.temple_management.models.temple_models import TempleImage, TempleProfile, TempleFestival
+from app.modules.temple_management.models.temple_models import TempleImage, TempleProfile, TempleFestival, TempleFollower
 from app.modules.inventory.schemas.store import StoreProductResponse
 from app.core.limiter import limiter
 from app.modules.temple_management.services.recommendation_service import RecommendationService
@@ -97,6 +97,10 @@ async def resolve_claim_status(db: AsyncSession, temple: Temple) -> str:
     - Level 2: CLAIMED
     - Level 3: OFFICIAL
     """
+    if temple.management_mode == "SELF_MANAGED":
+        return "CLAIMED"
+    if temple.management_mode == "GOVERNED":
+        return "GOVERNED"
     if temple.verification_level == 3:
         return "OFFICIAL"
     elif temple.verification_level == 2:
@@ -1582,6 +1586,15 @@ async def search_public_temples(
     scored_items = []
     from app.modules.governance.models.operational_states import TempleOperationalState
 
+    # Pre-fetch all StateMaster and DistrictMaster to avoid N+1 queries in the loop
+    states_stmt = select(StateMaster)
+    states_res = await db.execute(states_stmt)
+    states_map = {s.id: s.name.strip() for s in states_res.scalars().all() if s.name}
+
+    districts_stmt = select(DistrictMaster)
+    districts_res = await db.execute(districts_stmt)
+    districts_map = {d.id: d.name.strip() for d in districts_res.scalars().all() if d.name}
+
     for temple in candidates:
         profile = temple.profile
         search_idx = temple.search_index
@@ -1591,15 +1604,11 @@ async def search_public_temples(
         main_deity = profile.main_deity.strip().lower() if (profile and profile.main_deity) else ""
         deities = [d.strip().lower() for d in (profile.deities or [])] if (profile and profile.deities) else []
         
-        state_stmt = select(StateMaster).filter(StateMaster.id == temple.state_id)
-        state_res = await db.execute(state_stmt)
-        state_obj = state_res.scalars().first()
-        state_name = state_obj.name.strip().lower() if state_obj else ""
+        state_name_raw = states_map.get(temple.state_id, "")
+        district_name_raw = districts_map.get(temple.district_id, "")
         
-        dist_stmt = select(DistrictMaster).filter(DistrictMaster.id == temple.district_id)
-        dist_res = await db.execute(dist_stmt)
-        dist_obj = dist_res.scalars().first()
-        district_name = dist_obj.name.strip().lower() if dist_obj else ""
+        state_name = state_name_raw.lower()
+        district_name = district_name_raw.lower()
         
         village = search_idx.village.strip().lower() if (search_idx and search_idx.village) else ""
         keywords = [k.strip().lower() for k in search_idx.keywords.split(",")] if (search_idx and search_idx.keywords) else []
@@ -1644,8 +1653,8 @@ async def search_public_temples(
                     "id": str(temple.id),
                     "name": temple.name,
                     "location": profile.location if profile else "",
-                    "district": dist_obj.name if dist_obj else "",
-                    "state": state_obj.name if state_obj else "",
+                    "district": district_name_raw,
+                    "state": state_name_raw,
                     "slug": temple.domain,
                     "image_url": resolved_img,
                     "hero_image_url": resolved_img,
@@ -1728,6 +1737,11 @@ async def get_public_featured_temples(
         variants = get_image_variants(resolved_img)
         claim_badge = await resolve_claim_status(db, temple)
         
+        # Follower count query
+        follower_stmt = select(sa.func.count(TempleFollower.id)).filter(TempleFollower.temple_id == temple.id)
+        follower_res = await db.execute(follower_stmt)
+        follower_count = follower_res.scalar() or 0
+
         items.append({
             "id": str(temple.id),
             "name": temple.name,
@@ -1742,6 +1756,394 @@ async def get_public_featured_temples(
             "management_mode": temple.management_mode,
             "verification_level": temple.verification_level,
             "is_featured": temple.is_featured,
+            "follower_count": follower_count,
         })
     return items
+
+
+@public_router.get("/upcoming-festivals", response_model=List[dict])
+async def get_upcoming_festivals_endpoint(
+    limit: int = Query(10, ge=1, le=50),
+    db: AsyncSession = Depends(get_db)
+):
+    """
+    Retrieve upcoming festivals across all active temples.
+    """
+    from app.modules.temple_management.services.homepage_service import HomepageService
+    return await HomepageService.get_upcoming_festivals(db, limit)
+
+
+@public_router.get("/homepage", response_model=dict)
+async def get_homepage_bootstrap_endpoint(
+    db: AsyncSession = Depends(get_db)
+):
+    """
+    Retrieve consolidated discovery data for the Google-style homepage.
+    """
+    from app.modules.temple_management.services.homepage_service import HomepageService
+    return await HomepageService.get_homepage_data(db)
+
+
+@public_router.get("/nearby-temples", response_model=List[dict])
+async def get_nearby_temples(
+    latitude: float = Query(...),
+    longitude: float = Query(...),
+    radius: float = Query(50.0, ge=0.0, le=250.0),
+    db: AsyncSession = Depends(get_db)
+):
+    """
+    Retrieve nearest temples within a specified radius (up to 250km) using Python-level Haversine filtering.
+    """
+    if not (-90.0 <= latitude <= 90.0):
+        raise HTTPException(status_code=400, detail="Latitude must be between -90 and 90")
+    if not (-180.0 <= longitude <= 180.0):
+        raise HTTPException(status_code=400, detail="Longitude must be between -180 and 180")
+        
+    radius = min(radius, 250.0)
+
+    stmt = (
+        select(Temple)
+        .join(TempleProfile, Temple.id == TempleProfile.temple_id)
+        .options(
+            selectinload(Temple.profile),
+            selectinload(Temple.website_settings_live),
+            selectinload(Temple.images)
+        )
+        .filter(
+            Temple.is_active == True,
+            Temple.status == "APPROVED",
+            Temple.directory_status == "ACTIVE",
+            TempleProfile.latitude != None,
+            TempleProfile.longitude != None
+        )
+    )
+    result = await db.execute(stmt)
+    temples = result.scalars().all()
+
+    import math
+    def haversine_distance(lat1: float, lon1: float, lat2: float, lon2: float) -> float:
+        R = 6371.0
+        dlat = math.radians(lat2 - lat1)
+        dlon = math.radians(lon2 - lon1)
+        a = (math.sin(dlat / 2) ** 2 +
+             math.cos(math.radians(lat1)) * math.cos(math.radians(lat2)) * math.sin(dlon / 2) ** 2)
+        c = 2 * math.atan2(math.sqrt(a), math.sqrt(1 - a))
+        return R * c
+
+    nearby = []
+    for t in temples:
+        profile = t.profile
+        dist = haversine_distance(latitude, longitude, profile.latitude, profile.longitude)
+        if dist <= radius:
+            resolved_img = resolve_temple_image(t)
+            thumbnail = get_image_variants(resolved_img).get("thumbnail", "/static/default-temple.jpg")
+            nearby.append({
+                "id": str(t.id),
+                "name": t.name,
+                "slug": t.domain,
+                "state": profile.state or "",
+                "district": profile.district or "",
+                "thumbnail": thumbnail,
+                "distance": round(dist, 2)
+            })
+
+    nearby.sort(key=lambda x: x["distance"])
+    return nearby
+
+
+@public_router.get("/recommendations/temples", response_model=List[dict])
+async def get_recommended_temples(
+    request: Request,
+    latitude: Optional[float] = Query(None, alias="latitude"),
+    longitude: Optional[float] = Query(None, alias="longitude"),
+    state: Optional[str] = Query(None),
+    district: Optional[str] = Query(None),
+    limit: int = Query(6, ge=1, le=20),
+    db: AsyncSession = Depends(get_db),
+    current_user = Depends(get_current_user_optional)
+):
+    """
+    Returns rules-based explainable temple recommendations for devotee portal.
+    Target response time: < 150ms.
+    """
+    user_id = UUID(current_user.sub) if current_user else None
+    return await RecommendationService.get_temple_recommendations(
+        db, user_id=user_id, lat=latitude, lon=longitude, state=state, district=district, limit=limit
+    )
+
+
+DEITY_REGISTRY = {
+    "shiva": {
+        "name": "Shiva",
+        "description": "Lord Shiva, the Destroyer and Transformer within the Trimurti, represents the supreme consciousness. He is worshipped in forms such as Mahadeva, Nataraja, and Dakshinamurthy.",
+        "related": ["Parvati", "Ganesha", "Murugan"]
+    },
+    "krishna": {
+        "name": "Krishna",
+        "description": "Lord Krishna, the eighth avatar of Lord Vishnu, is the deity of compassion, tenderness, and love. He is widely worshipped across India as Guruvayurappan, Dwarkadhish, and Jagannath.",
+        "related": ["Vishnu", "Radha", "Balarama"]
+    },
+    "ayyappa": {
+        "name": "Ayyappa",
+        "description": "Lord Ayyappa is the deity of growth and youth, worshipped especially at Sabarimala. Born from the union of Shiva and Mohini (Vishnu), he embodies supreme celibacy and asceticism.",
+        "related": ["Shiva", "Vishnu"]
+    },
+    "devi": {
+        "name": "Devi",
+        "description": "The divine feminine force, Adi Parashakti, is worshipped in multiple powerful forms including Durga, Kali, Lakshmi, Saraswati, and local temple bhagavathis.",
+        "related": ["Shiva", "Parvati", "Lakshmi"]
+    },
+    "murugan": {
+        "name": "Murugan",
+        "description": "Lord Murugan (Kartikeya), the son of Shiva and Parvati, is the Hindu god of war, victory, and wisdom, highly revered across South India and the Tamil diaspora.",
+        "related": ["Shiva", "Parvati", "Ganesha"]
+    },
+    "ganapathi": {
+        "name": "Ganapathi",
+        "description": "Lord Ganesha (Vinayaka), the elephant-headed deity, is the lord of obstacles, beginnings, and wisdom, worshipped before commencing any ritual or work.",
+        "related": ["Shiva", "Parvati", "Murugan"]
+    },
+    "hanuman": {
+        "name": "Hanuman",
+        "description": "Lord Hanuman, the monkey deity, represents supreme devotion (bhakti), strength, and loyalty to Lord Rama. He is believed to be an avatar of Lord Shiva.",
+        "related": ["Rama", "Sita"]
+    }
+}
+
+@public_router.get("/deities", response_model=List[dict])
+async def list_deities(db: AsyncSession = Depends(get_db)):
+    """
+    Returns list of stable deities with associated temple counts.
+    """
+    stmt = (
+        select(TempleProfile.main_deity, sa.func.count(Temple.id))
+        .join(Temple, Temple.id == TempleProfile.temple_id)
+        .filter(Temple.is_active == True, Temple.status == "APPROVED", Temple.directory_status == "ACTIVE")
+        .group_by(TempleProfile.main_deity)
+    )
+    res = await db.execute(stmt)
+    counts = {row[0].strip().lower(): row[1] for row in res.all() if row[0]}
+    
+    result = []
+    for slug, info in DEITY_REGISTRY.items():
+        match_count = 0
+        deity_name = info["name"].lower()
+        for k, v in counts.items():
+            if deity_name in k or k in deity_name:
+                match_count += v
+                
+        result.append({
+            "slug": slug,
+            "name": info["name"],
+            "description": info["description"],
+            "temple_count": match_count
+        })
+    return result
+
+@public_router.get("/deities/{deity_slug}", response_model=dict)
+async def get_deity_details(deity_slug: str, db: AsyncSession = Depends(get_db)):
+    """
+    Returns detailed deity information, associated temples, and upcoming festivals.
+    """
+    slug = deity_slug.strip().lower()
+    if slug not in DEITY_REGISTRY:
+        raise HTTPException(status_code=404, detail="Deity not found")
+        
+    info = DEITY_REGISTRY[slug]
+    deity_name_lower = info["name"].lower()
+    
+    stmt = (
+        select(Temple)
+        .join(TempleProfile, Temple.id == TempleProfile.temple_id)
+        .options(
+            selectinload(Temple.profile),
+            selectinload(Temple.website_settings_live),
+            selectinload(Temple.images)
+        )
+        .filter(
+            Temple.is_active == True,
+            Temple.status == "APPROVED",
+            Temple.directory_status == "ACTIVE",
+            sa.or_(
+                sa.func.lower(TempleProfile.main_deity).like(f"%{deity_name_lower}%"),
+                sa.func.lower(TempleProfile.deities).like(f"%{deity_name_lower}%")
+            )
+        )
+        .limit(10)
+    )
+    res = await db.execute(stmt)
+    temples = res.scalars().all()
+    
+    associated_temples = []
+    temple_ids = []
+    for t in temples:
+        temple_ids.append(t.id)
+        resolved_img = resolve_temple_image(t)
+        variants = get_image_variants(resolved_img)
+        claim_status = await resolve_claim_status(db, t)
+        
+        associated_temples.append({
+            "id": str(t.id),
+            "name": t.name,
+            "slug": t.domain,
+            "location": t.profile.location or "",
+            "district": t.profile.district or "",
+            "state": t.profile.state or "",
+            "image_url": resolved_img,
+            "image_variants": variants,
+            "claim_status": claim_status,
+            "management_mode": t.management_mode,
+            "verification_level": t.verification_level
+        })
+        
+    associated_festivals = []
+    if temple_ids:
+        today = datetime.now(timezone.utc).date()
+        fest_stmt = (
+            select(TempleFestival)
+            .join(Temple, TempleFestival.temple_id == Temple.id)
+            .options(joinedload(TempleFestival.temple))
+            .filter(
+                TempleFestival.is_active == True,
+                TempleFestival.start_date >= today,
+                TempleFestival.temple_id.in_(temple_ids)
+            )
+            .order_by(TempleFestival.start_date.asc())
+            .limit(5)
+        )
+        fest_res = await db.execute(fest_stmt)
+        for f in fest_res.scalars().all():
+            associated_festivals.append({
+                "id": str(f.id),
+                "name": f.name,
+                "description": f.description or "",
+                "start_date": f.start_date.isoformat(),
+                "end_date": f.end_date.isoformat(),
+                "temple_name": f.temple.name if f.temple else "",
+                "temple_slug": f.temple.domain if f.temple else ""
+            })
+            
+    return {
+        "slug": slug,
+        "name": info["name"],
+        "description": info["description"],
+        "related_deities": info["related"],
+        "temples": associated_temples,
+        "festivals": associated_festivals
+    }
+
+
+@public_router.get("/search/suggest", response_model=List[dict])
+async def search_suggestions(
+    q: str = Query("", min_length=1),
+    db: AsyncSession = Depends(get_db)
+):
+    """
+    Returns autocomplete suggestions categorized by type and ranked by prefix matching rules.
+    """
+    clean_q = q.strip().lower()
+    if not clean_q:
+        return []
+
+    exact_temple_stmt = (
+        select(Temple)
+        .outerjoin(TempleProfile, Temple.id == TempleProfile.temple_id)
+        .options(selectinload(Temple.profile))
+        .filter(Temple.is_active == True, Temple.status == "APPROVED", Temple.directory_status == "ACTIVE")
+        .filter(sa.func.lower(Temple.name) == clean_q)
+        .limit(10)
+    )
+    exact_res = await db.execute(exact_temple_stmt)
+    exact_temples = exact_res.scalars().all()
+
+    prefix_temple_stmt = (
+        select(Temple)
+        .outerjoin(TempleProfile, Temple.id == TempleProfile.temple_id)
+        .options(selectinload(Temple.profile))
+        .filter(Temple.is_active == True, Temple.status == "APPROVED", Temple.directory_status == "ACTIVE")
+        .filter(sa.func.lower(Temple.name).like(f"{clean_q}%"))
+        .filter(sa.func.lower(Temple.name) != clean_q)
+        .limit(10)
+    )
+    prefix_res = await db.execute(prefix_temple_stmt)
+    prefix_temples = prefix_res.scalars().all()
+
+    deity_stmt = (
+        select(TempleProfile.main_deity)
+        .join(Temple, TempleProfile.temple_id == Temple.id)
+        .filter(Temple.is_active == True, Temple.status == "APPROVED", Temple.directory_status == "ACTIVE")
+        .filter(sa.func.lower(TempleProfile.main_deity).like(f"%{clean_q}%"))
+        .distinct()
+        .limit(10)
+    )
+    deity_res = await db.execute(deity_stmt)
+    deities = [row[0] for row in deity_res.all() if row[0]]
+
+    festival_stmt = (
+        select(TempleFestival)
+        .join(Temple, TempleFestival.temple_id == Temple.id)
+        .options(joinedload(TempleFestival.temple))
+        .filter(TempleFestival.is_active == True)
+        .filter(Temple.is_active == True, Temple.status == "APPROVED", Temple.directory_status == "ACTIVE")
+        .filter(sa.func.lower(TempleFestival.name).like(f"%{clean_q}%"))
+        .limit(10)
+    )
+    festival_res = await db.execute(festival_stmt)
+    festivals = festival_res.scalars().all()
+
+    state_stmt = (
+        select(StateMaster.name)
+        .filter(sa.func.lower(StateMaster.name).like(f"%{clean_q}%"))
+        .distinct()
+        .limit(10)
+    )
+    state_res = await db.execute(state_stmt)
+    states = [row[0] for row in state_res.all() if row[0]]
+
+    suggestions = []
+
+    for t in exact_temples:
+        suggestions.append({
+            "type": "TEMPLE",
+            "value": t.name,
+            "metadata": {"slug": t.domain, "id": str(t.id), "state": t.profile.state if t.profile else ""}
+        })
+
+    for t in prefix_temples:
+        if len(suggestions) >= 10:
+            break
+        suggestions.append({
+            "type": "TEMPLE",
+            "value": t.name,
+            "metadata": {"slug": t.domain, "id": str(t.id), "state": t.profile.state if t.profile else ""}
+        })
+
+    for d in deities:
+        if len(suggestions) >= 10:
+            break
+        suggestions.append({
+            "type": "DEITY",
+            "value": d.title(),
+            "metadata": {}
+        })
+
+    for f in festivals:
+        if len(suggestions) >= 10:
+            break
+        suggestions.append({
+            "type": "FESTIVAL",
+            "value": f.name,
+            "metadata": {"temple_name": f.temple.name if f.temple else "", "temple_slug": f.temple.domain if f.temple else ""}
+        })
+
+    for s in states:
+        if len(suggestions) >= 10:
+            break
+        suggestions.append({
+            "type": "STATE",
+            "value": s,
+            "metadata": {}
+        })
+
+    return suggestions[:10]
 
