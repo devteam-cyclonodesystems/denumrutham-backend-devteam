@@ -33,6 +33,7 @@
 | INC-022 | HTTP 500 when fetching Advertisement Audit History due to incorrect import path | P1 – Critical | ✅ Resolved | 2026-06-16 |
 | INC-023 | HTTP 500 when approving onboarded temple due to transaction commit & missing tables | P1 – Critical | ✅ Resolved | 2026-06-17 |
 | INC-024 | Bhima Gold advertisement not displaying on temple page due to placement mismatch and missing approval | P2 – High | ✅ Resolved | 2026-06-17 |
+| INC-025 | Budhshiv Campaign Display & Ad Analytics Telemetry Failure | P1 – Critical | ✅ Resolved | 2026-06-17 |
 | FEAT-001 | Phase 1 – Sidebar Spotlight Ad Area & Layout Alignment | Feature Delivery |  Shipped | 2026-06-10 |
 | FEAT-002 | Phase 2 – Layout Responsiveness & Spotlight Ad Rails | Feature Delivery |  Shipped | 2026-06-10 |
 | FEAT-003 | Devotee Registration Hardening & Password Strength Enforcements | Feature Delivery |  Shipped | 2026-06-12 |
@@ -41,6 +42,7 @@
 | FEAT-006 | Platform Audit Dashboard & Log Synchronization | Feature Delivery |  Shipped | 2026-06-16 |
 | FEAT-007 | Campaign Audit Trail Timeline & Details Overview | Feature Delivery |  Shipped | 2026-06-16 |
 | FEAT-008 | Ad Placements Integration & Scrollable Audit Modal | Feature Delivery |  Shipped | 2026-06-17 |
+| FEAT-009 | Impressions and Click Counts in Campaign Audit History | Feature Delivery |  Shipped | 2026-06-18 |
 
 ---
 
@@ -1608,6 +1610,33 @@ Devotees and temple managers noted that:
 
 ### Preventive Actions Taken
 
-1. **Auto-Verify Telemetry Delivery**: Ensure all user interaction hooks in the frontend map directly to live async API handlers instead of developer logging mocks.
-2. **Strict Compilation Checks**: Always build the frontend bundle after telemetry updates to check compatibility with TypeScript compiler properties like type-only imports under `verbatimModuleSyntax`.
+1. Auto-Verify Telemetry Delivery: Ensure all user interaction hooks in the frontend map directly to live async API handlers instead of developer logging mocks.
+2. Strict Compilation Checks: Always build the frontend bundle after telemetry updates to check compatibility with TypeScript compiler properties like type-only imports under `verbatimModuleSyntax`.
+
+---
+
+## FEAT-009: Impressions and Click Counts in Campaign Audit History
+
+| Field | Value |
+|-------|-------|
+| **Feature ID** | FEAT-009 |
+| **Feature Title** | Impressions and Click Counts in Campaign Audit History |
+| **Date and Time** | 2026-06-18T10:00:00+05:30 |
+| **Status** | ✅ Shipped |
+
+### Description
+
+Integrated campaign impressions, click counts, and click-through rate (CTR) metrics directly into the Campaign Audit History timeline modal for both Superadmin (`PlatformAdsGovernance.tsx`) and Temple Manager (`TempleAdsDashboard.tsx`) dashboards.
+
+### Changes Completed
+
+1. **Superadmin Dashboard Audit Modal**:
+   - Modified [PlatformAdsGovernance.tsx](file:///c:/Denumrutham/frontend/src/pages/admin/governance/PlatformAdsGovernance.tsx) to import the `MousePointerClick` icon from `lucide-react`.
+   - Wired the campaign statistics lookups from the local `healthData` state using the active campaign ID.
+   - Built a sleek, glassmorphic telemetry grid display panel highlighting Impressions, Clicks, and Click-Through Rate (CTR) dynamically.
+   - Integrated conditional CTR text coloring thresholds (green $\geq$ 5%, amber $\geq$ 2%, red for low performance) matching the dashboard style.
+2. **Temple Manager Dashboard Audit Modal**:
+   - Modified [TempleAdsDashboard.tsx](file:///c:/Denumrutham/frontend/src/pages/manager/TempleAdsDashboard.tsx) to do matching telemetry lookups inside the Audit History modal.
+   - Built the identical glassmorphic statistics display grid showing Impressions, Clicks, and CTR with consistent typography and iconography.
+
 
