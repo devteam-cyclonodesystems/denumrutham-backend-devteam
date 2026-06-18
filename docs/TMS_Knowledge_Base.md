@@ -1667,6 +1667,37 @@ Refined the active campaign logic to exclude expired campaigns and hide the Susp
    - Implemented a `getCampaignTitle` resolver on the client-side mapping campaign URLs to clean company/merchant titles (e.g. `Bhima Gold`, `Mannarasala`, `Budhshiv Kali Statue`, `Attukal Bhagavathy`).
    - Replaced empty campaign title labels in the main list tables, audit modal headers, and breakdown modal rows with the friendly resolved campaign title.
 
+---
+
+## FEAT-011: Silent Looping Video Campaign Playback (GIF Simulation)
+
+| Field | Value |
+|-------|-------|
+| **Feature ID** | FEAT-011 |
+| **Feature Title** | Silent Looping Video Campaign Playback (GIF Simulation) |
+| **Date and Time** | 2026-06-18T11:40:00+05:30 |
+| **Status** | ✅ Shipped |
+
+### Description
+
+Implemented comprehensive, controls-free, auto-playing video advertisement support across public portals and dashboards. Standard video formats (e.g. YouTube standard, YouTube Shorts, YouTube Embeds, and direct files like `.mp4`) now render as silent, looping background cards simulating `.gif` image files.
+
+### Changes Completed
+
+1. **Autoplay, Mute, and Loop Controls Resolution**:
+   - Programmed a `getAutoplayEmbedUrl` helper function that processes any YouTube video URLs, extracts the video ID, and builds a clean embed URL with autoplay parameters: `autoplay=1&mute=1&loop=1&playlist=VIDEO_ID&controls=0&modestbranding=1&rel=0&iv_load_policy=3&disablekb=1`.
+   - Programmed `isDirectVideoUrl` helper to check for direct video extensions (like `.mp4`, `.webm`, etc.).
+   - Added standard `<video>` tag rendering for direct video files with silent autoplay attributes (`autoPlay`, `muted`, `loop`, `playsInline`).
+   - Integrated `allow="autoplay; encrypted-media"` attribute permissions on all `<iframe>` elements to enable autoplay logic in modern browsers.
+2. **Interactive Redirection Overlay**:
+   - Added a transparent absolute overlay `div` on top of video cards to capture user interactions cleanly. This preserves the clickable redirect links to target landing URLs and fires ad analytics/telemetry click logs without interfering with the underlying iframe element's playback.
+3. **Dashboard & Portal-Wide Updates**:
+   - Modified [TemplePublicPortal.tsx](file:///c:/Denumrutham/frontend/src/pages/devotee/TemplePublicPortal.tsx) (Devotee Page Main Banner Placement).
+   - Modified [SidebarWidgetResolver.tsx](file:///c:/Denumrutham/frontend/src/components/ads/SidebarWidgetResolver.tsx) (Sidebar Widget Resolver).
+   - Modified [PlatformAdsGovernance.tsx](file:///c:/Denumrutham/frontend/src/pages/admin/governance/PlatformAdsGovernance.tsx) (Superadmin Preview Device Simulator).
+   - Modified [TempleAdsDashboard.tsx](file:///c:/Denumrutham/frontend/src/pages/manager/TempleAdsDashboard.tsx) (Temple Manager Preview Device Simulator).
+
+
 
 
 
