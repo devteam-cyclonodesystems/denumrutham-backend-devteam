@@ -1663,6 +1663,10 @@ Refined the active campaign logic to exclude expired campaigns and hide the Susp
 2. **Clickable Telemetry Overview Cards**:
    - Wired `onClick` props to the Impressions and Clicks `StatCard` elements on both the Superadmin and Temple Manager profiles.
    - Implemented a scrollable **Campaign Telemetry Breakdown Modal** presenting all campaigns sorted descending by the selected metric (Impressions or Clicks).
+3. **Campaign Title Resolution**:
+   - Implemented a `getCampaignTitle` resolver on the client-side mapping campaign URLs to clean company/merchant titles (e.g. `Bhima Gold`, `Mannarasala`, `Budhshiv Kali Statue`, `Attukal Bhagavathy`).
+   - Replaced empty campaign title labels in the main list tables, audit modal headers, and breakdown modal rows with the friendly resolved campaign title.
+
 
 
 
