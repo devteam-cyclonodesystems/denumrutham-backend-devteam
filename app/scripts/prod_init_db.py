@@ -1,6 +1,7 @@
 import asyncio
 import logging
-from app.core.database import engine, Base
+from app.core.database import engine
+from app.db.base import Base
 from app.core.config import settings
 from alembic.config import Config
 from alembic import command

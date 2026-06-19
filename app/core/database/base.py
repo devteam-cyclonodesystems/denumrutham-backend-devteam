@@ -9,6 +9,8 @@ from app.models.onboarding import *
 from app.models.archana import *
 from app.models.accounting import *
 from app.models.system import *
+from app.models.hall_booking import *
+from app.models.offering import *
 
 # New models added in stabilization phase:
 # - ChangeRequest (field-level change approval)

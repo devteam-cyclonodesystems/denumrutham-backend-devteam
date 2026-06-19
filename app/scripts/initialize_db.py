@@ -1,5 +1,6 @@
 import asyncio
-from app.core.database import engine, Base, AsyncSessionLocal
+from app.core.database import engine, AsyncSessionLocal
+from app.db.base import Base
 from app.models.domain import User 
 from app.models.rbac import Role, UserRole
 from app.core.config import settings
