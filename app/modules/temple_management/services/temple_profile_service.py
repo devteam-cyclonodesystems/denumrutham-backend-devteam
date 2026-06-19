@@ -38,23 +38,23 @@ class TempleProfileService:
 
     @staticmethod
     async def save_draft(db: AsyncSession, temple_id: UUID, user_id: UUID, data: dict) -> TempleProfileDraft:
-        async with db.begin():
-            # Check if there is an existing pending draft
-            result = await db.execute(
-                select(TempleProfileDraft).filter(
-                    TempleProfileDraft.temple_id == temple_id,
-                    TempleProfileDraft.status == "PENDING"
-                )
+        # Check if there is an existing pending draft
+        result = await db.execute(
+            select(TempleProfileDraft).filter(
+                TempleProfileDraft.temple_id == temple_id,
+                TempleProfileDraft.status == "PENDING"
             )
-            draft = result.scalars().first()
-            
-            if draft:
-                # If a draft already exists and is PENDING, new edits are locked out
-                raise HTTPException(
-                    status_code=409,
-                    detail="A profile draft is already pending approval. Edits are locked."
-                )
-            
+        )
+        draft = result.scalars().first()
+        
+        if draft:
+            # If a draft already exists and is PENDING, new edits are locked out
+            raise HTTPException(
+                status_code=409,
+                detail="A profile draft is already pending approval. Edits are locked."
+            )
+        
+        try:
             draft = TempleProfileDraft(temple_id=temple_id, requested_by=user_id)
             db.add(draft)
             
@@ -77,26 +77,41 @@ class TempleProfileService:
                 action_type="create",
                 new_value=data
             )
-        
-        await db.refresh(draft)
-        return draft
+            
+            await db.commit()
+            await db.refresh(draft)
+            return draft
+        except Exception:
+            await db.rollback()
+            raise
 
     @staticmethod
     async def approve_draft(db: AsyncSession, draft_id: UUID, approver_id: UUID, edits: Optional[dict] = None) -> TempleProfile:
-        async with db.begin():
-            result = await db.execute(
-                select(TempleProfileDraft).filter(TempleProfileDraft.id == draft_id)
-            )
-            draft = result.scalars().first()
-            if not draft or draft.status != "PENDING":
-                raise HTTPException(status_code=404, detail="Pending draft not found")
+        result = await db.execute(
+            select(TempleProfileDraft).filter(TempleProfileDraft.id == draft_id)
+        )
+        draft = result.scalars().first()
+        if not draft or draft.status != "PENDING":
+            raise HTTPException(status_code=404, detail="Pending draft not found")
+
+        try:
+            def make_serializable(d: dict) -> dict:
+                res = {}
+                for k, v in d.items():
+                    if isinstance(v, UUID):
+                        res[k] = str(v)
+                    elif isinstance(v, datetime):
+                        res[k] = v.isoformat()
+                    else:
+                        res[k] = v
+                return res
 
             # Capture original draft state for audit trail
-            original_draft = {
+            original_draft = make_serializable({
                 c.name: getattr(draft, c.name) 
                 for c in TempleProfileDraft.__table__.columns 
                 if c.name not in ["id", "temple_id", "created_at", "updated_at"]
-            }
+            })
 
             # Apply SuperAdmin edits during approval if provided
             if edits:
@@ -105,11 +120,11 @@ class TempleProfileService:
                         setattr(draft, k, v)
                 draft.updated_at = datetime.now(timezone.utc)
 
-            reviewed_draft = {
+            reviewed_draft = make_serializable({
                 c.name: getattr(draft, c.name) 
                 for c in TempleProfileDraft.__table__.columns 
                 if c.name not in ["id", "temple_id", "created_at", "updated_at"]
-            }
+            })
 
             # Update live profile
             profile_result = await db.execute(
@@ -135,11 +150,11 @@ class TempleProfileService:
             draft.status = "APPROVED"
             
             # Capture published profile state
-            published_profile = {
+            published_profile = make_serializable({
                 c.name: getattr(profile, c.name) 
                 for c in TempleProfile.__table__.columns 
                 if c.name not in ["id", "temple_id", "created_at"]
-            }
+            })
 
             # Audit governance metadata overrides
             audit_metadata = {
@@ -162,19 +177,23 @@ class TempleProfileService:
                 details="Approved draft" + (" with edits" if edits else "")
             )
             
-        await db.refresh(profile)
-        return profile
+            await db.commit()
+            await db.refresh(profile)
+            return profile
+        except Exception:
+            await db.rollback()
+            raise
 
     @staticmethod
     async def reject_draft(db: AsyncSession, draft_id: UUID, approver_id: UUID) -> TempleProfileDraft:
-        async with db.begin():
-            result = await db.execute(
-                select(TempleProfileDraft).filter(TempleProfileDraft.id == draft_id)
-            )
-            draft = result.scalars().first()
-            if not draft:
-                raise HTTPException(status_code=404, detail="Draft not found")
-            
+        result = await db.execute(
+            select(TempleProfileDraft).filter(TempleProfileDraft.id == draft_id)
+        )
+        draft = result.scalars().first()
+        if not draft:
+            raise HTTPException(status_code=404, detail="Draft not found")
+        
+        try:
             draft.status = "REJECTED"
             
             from app.services.audit_service import AuditService
@@ -189,25 +208,40 @@ class TempleProfileService:
                 entity_id=str(draft.id)
             )
             
-        await db.refresh(draft)
-        return draft
+            await db.commit()
+            await db.refresh(draft)
+            return draft
+        except Exception:
+            await db.rollback()
+            raise
 
     @staticmethod
     async def direct_update_profile(db: AsyncSession, temple_id: UUID, user_id: UUID, role: str, data: dict) -> TempleProfile:
-        async with db.begin():
-            profile_result = await db.execute(
-                select(TempleProfile).filter(TempleProfile.temple_id == temple_id)
-            )
-            profile = profile_result.scalars().first()
+        profile_result = await db.execute(
+            select(TempleProfile).filter(TempleProfile.temple_id == temple_id)
+        )
+        profile = profile_result.scalars().first()
+        try:
+            def make_serializable(d: dict) -> dict:
+                res = {}
+                for k, v in d.items():
+                    if isinstance(v, UUID):
+                        res[k] = str(v)
+                    elif isinstance(v, datetime):
+                        res[k] = v.isoformat()
+                    else:
+                        res[k] = v
+                return res
+
             if not profile:
                 profile = TempleProfile(temple_id=temple_id)
                 db.add(profile)
             
-            old_value = {
+            old_value = make_serializable({
                 c.name: getattr(profile, c.name) 
                 for c in TempleProfile.__table__.columns 
                 if c.name not in ["id", "temple_id", "created_at"]
-            }
+            })
             
             # Update fields
             for key, value in data.items():
@@ -218,11 +252,11 @@ class TempleProfileService:
             profile.published_at = datetime.now(timezone.utc)
             profile.published_by = user_id
             
-            new_value = {
+            new_value = make_serializable({
                 c.name: getattr(profile, c.name) 
                 for c in TempleProfile.__table__.columns 
                 if c.name not in ["id", "temple_id", "created_at"]
-            }
+            })
             
             from app.services.audit_service import AuditService
             await AuditService.log_action(
@@ -239,8 +273,12 @@ class TempleProfileService:
                 details="Directly updated and published temple profile (bypassed draft workflow)"
             )
             
-        await db.refresh(profile)
-        return profile
+            await db.commit()
+            await db.refresh(profile)
+            return profile
+        except Exception:
+            await db.rollback()
+            raise
 
     @staticmethod
     async def get_profile_completeness(db: AsyncSession, temple_id: UUID) -> dict:

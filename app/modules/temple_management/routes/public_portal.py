@@ -929,7 +929,8 @@ async def get_public_temple_bootstrap(
                 "priority": ann.priority,
                 "display_order": ann.display_order,
                 "start_date": ann.start_date.isoformat() if ann.start_date else None,
-                "expiry_date": ann.expiry_date.isoformat() if ann.expiry_date else None
+                "expiry_date": ann.expiry_date.isoformat() if ann.expiry_date else None,
+                "created_at": ann.created_at.isoformat() if ann.created_at else None
             })
 
     # Fetch active activities
