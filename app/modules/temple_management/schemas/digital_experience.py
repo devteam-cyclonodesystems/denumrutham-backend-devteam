@@ -311,3 +311,31 @@ class TempleFestivalResponse(TempleFestivalBase):
     temple_id: UUID
     created_at: datetime
     updated_at: datetime
+
+
+# ---------- Key Personnel ----------
+class TempleKeyPersonnelBase(BaseModel):
+    name: str
+    designation: str
+    image_url: Optional[str] = None
+    display_order: Optional[int] = 0
+    is_active: Optional[bool] = True
+
+class TempleKeyPersonnelCreate(TempleKeyPersonnelBase):
+    pass
+
+class TempleKeyPersonnelUpdate(BaseModel):
+    name: Optional[str] = None
+    designation: Optional[str] = None
+    image_url: Optional[str] = None
+    display_order: Optional[int] = None
+    is_active: Optional[bool] = None
+
+class TempleKeyPersonnelResponse(TempleKeyPersonnelBase):
+    model_config = ConfigDict(from_attributes=True)
+    id: UUID
+    temple_id: UUID
+    created_at: datetime
+    updated_at: datetime
+    created_by: Optional[UUID] = None
+    updated_by: Optional[UUID] = None

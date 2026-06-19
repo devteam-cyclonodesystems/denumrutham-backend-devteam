@@ -15,6 +15,7 @@ from app.models.domain import (
     ActivityStatus,
     TempleWebsiteSettingsLive,
     Temple,
+    TempleKeyPersonnel,
 )
 from app.modules.audit.services.audit_service import AuditService
 
@@ -1228,4 +1229,227 @@ class DigitalExperienceService:
         await db.commit()
         await db.refresh(draft)
         return draft
+
+    # =========================================================================
+    # KEY PERSONNEL CRUD
+    # =========================================================================
+    @staticmethod
+    async def list_key_personnels(
+        db: AsyncSession,
+        temple_id: UUID,
+        include_inactive: bool = False
+    ) -> List[TempleKeyPersonnel]:
+        stmt = select(TempleKeyPersonnel).filter(TempleKeyPersonnel.temple_id == temple_id)
+        if not include_inactive:
+            stmt = stmt.filter(TempleKeyPersonnel.is_active == True)
+        stmt = stmt.order_by(TempleKeyPersonnel.display_order.asc(), TempleKeyPersonnel.created_at.desc())
+        result = await db.execute(stmt)
+        return result.scalars().all()
+
+    @staticmethod
+    async def create_key_personnel(
+        db: AsyncSession,
+        temple_id: UUID,
+        data: dict,
+        current_user_id: UUID,
+        role: str
+    ) -> TempleKeyPersonnel:
+        # Get the next display_order for this temple
+        order_stmt = select(TempleKeyPersonnel.display_order).filter(TempleKeyPersonnel.temple_id == temple_id).order_by(TempleKeyPersonnel.display_order.desc()).limit(1)
+        order_res = await db.execute(order_stmt)
+        max_order = order_res.scalars().first()
+        next_order = (max_order + 1) if max_order is not None else 0
+
+        personnel = TempleKeyPersonnel(
+            temple_id=temple_id,
+            name=data.get("name"),
+            designation=data.get("designation"),
+            image_url=data.get("image_url"),
+            display_order=data.get("display_order", next_order),
+            is_active=data.get("is_active", True),
+            created_by=current_user_id,
+            updated_by=current_user_id
+        )
+        db.add(personnel)
+        await db.flush()
+
+        new_val = {
+            c.name: getattr(personnel, c.name)
+            for c in TempleKeyPersonnel.__table__.columns
+            if c.name not in ["id", "temple_id", "created_at", "updated_at"]
+        }
+
+        await AuditService.log_action(
+            db=db,
+            temple_id=temple_id,
+            user_id=current_user_id,
+            role=role,
+            module_name="digital_experience",
+            action="CREATE_KEY_PERSONNEL",
+            action_type="CREATE",
+            entity_id=str(personnel.id),
+            new_value=_serialize_for_audit(new_val),
+            details=f"Created key personnel: {personnel.name} ({personnel.designation})"
+        )
+
+        await db.commit()
+        await db.refresh(personnel)
+        return personnel
+
+    @staticmethod
+    async def update_key_personnel(
+        db: AsyncSession,
+        temple_id: UUID,
+        personnel_id: UUID,
+        data: dict,
+        current_user_id: UUID,
+        role: str
+    ) -> TempleKeyPersonnel:
+        result = await db.execute(
+            select(TempleKeyPersonnel).filter(
+                TempleKeyPersonnel.id == personnel_id,
+                TempleKeyPersonnel.temple_id == temple_id
+            )
+        )
+        personnel = result.scalars().first()
+        if not personnel:
+            raise HTTPException(status_code=404, detail="Key personnel not found")
+
+        old_val = {
+            c.name: getattr(personnel, c.name)
+            for c in TempleKeyPersonnel.__table__.columns
+            if c.name not in ["id", "temple_id", "created_at", "updated_at"]
+        }
+
+        for key, value in data.items():
+            if hasattr(personnel, key) and key not in ["id", "temple_id", "created_at", "updated_at", "created_by"]:
+                setattr(personnel, key, value)
+
+        personnel.updated_by = current_user_id
+        personnel.updated_at = datetime.now(timezone.utc)
+
+        new_val = {
+            c.name: getattr(personnel, c.name)
+            for c in TempleKeyPersonnel.__table__.columns
+            if c.name not in ["id", "temple_id", "created_at", "updated_at"]
+        }
+
+        await AuditService.log_action(
+            db=db,
+            temple_id=temple_id,
+            user_id=current_user_id,
+            role=role,
+            module_name="digital_experience",
+            action="UPDATE_KEY_PERSONNEL",
+            action_type="UPDATE",
+            entity_id=str(personnel.id),
+            old_value=_serialize_for_audit(old_val),
+            new_value=_serialize_for_audit(new_val),
+            details=f"Updated key personnel: {personnel.name}"
+        )
+
+        await db.commit()
+        await db.refresh(personnel)
+        return personnel
+
+    @staticmethod
+    async def delete_key_personnel(
+        db: AsyncSession,
+        temple_id: UUID,
+        personnel_id: UUID,
+        current_user_id: UUID,
+        role: str,
+        hard_delete: bool = False
+    ) -> bool:
+        result = await db.execute(
+            select(TempleKeyPersonnel).filter(
+                TempleKeyPersonnel.id == personnel_id,
+                TempleKeyPersonnel.temple_id == temple_id
+            )
+        )
+        personnel = result.scalars().first()
+        if not personnel:
+            raise HTTPException(status_code=404, detail="Key personnel not found")
+
+        old_val = {
+            c.name: getattr(personnel, c.name)
+            for c in TempleKeyPersonnel.__table__.columns
+            if c.name not in ["id", "temple_id", "created_at", "updated_at"]
+        }
+
+        # Elevated permissions verification for hard delete
+        is_elevated = (role in ["SUPERADMIN", "SUPER_ADMIN", "ADMIN"])
+        
+        if hard_delete and is_elevated:
+            await db.delete(personnel)
+            action = "HARD_DELETE_KEY_PERSONNEL"
+            details = f"Hard deleted key personnel: {personnel.name}"
+        else:
+            personnel.is_active = False
+            personnel.updated_by = current_user_id
+            personnel.updated_at = datetime.now(timezone.utc)
+            action = "SOFT_DELETE_KEY_PERSONNEL"
+            details = f"Soft deactivated key personnel: {personnel.name}"
+
+        await AuditService.log_action(
+            db=db,
+            temple_id=temple_id,
+            user_id=current_user_id,
+            role=role,
+            module_name="digital_experience",
+            action=action,
+            action_type="DELETE" if "HARD" in action else "UPDATE",
+            entity_id=str(personnel_id),
+            old_value=_serialize_for_audit(old_val),
+            details=details
+        )
+
+        await db.commit()
+        return True
+
+    @staticmethod
+    async def reorder_key_personnels(
+        db: AsyncSession,
+        temple_id: UUID,
+        ordered_ids: List[UUID],
+        current_user_id: UUID,
+        role: str
+    ) -> List[TempleKeyPersonnel]:
+        # Validate all IDs belong to this temple
+        result = await db.execute(
+            select(TempleKeyPersonnel).filter(
+                TempleKeyPersonnel.id.in_(ordered_ids),
+                TempleKeyPersonnel.temple_id == temple_id
+            )
+        )
+        personnels = {p.id: p for p in result.scalars().all()}
+        
+        # Check if all ordered_ids exist for this temple
+        if len(personnels) != len(ordered_ids):
+            raise HTTPException(status_code=400, detail="One or more key personnel IDs are invalid or belong to another temple.")
+            
+        # Update display order
+        for index, pid in enumerate(ordered_ids):
+            p = personnels[pid]
+            p.display_order = index
+            p.updated_by = current_user_id
+            p.updated_at = datetime.now(timezone.utc)
+            
+        await AuditService.log_action(
+            db=db,
+            temple_id=temple_id,
+            user_id=current_user_id,
+            role=role,
+            module_name="digital_experience",
+            action="REORDER_KEY_PERSONNELS",
+            action_type="UPDATE",
+            new_value={"ordered_ids": [str(pid) for pid in ordered_ids]},
+            details=f"Reordered key personnel list for temple {temple_id}"
+        )
+        
+        await db.commit()
+        # Return sorted list
+        sorted_personnels = sorted(personnels.values(), key=lambda x: x.display_order)
+        return sorted_personnels
+
 

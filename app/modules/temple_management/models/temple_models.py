@@ -154,6 +154,7 @@ class Temple(Base):
     merged_temple = relationship("Temple", remote_side=[id], foreign_keys=[merged_temple_id])
     advertisements = relationship("TempleAdvertisement", back_populates="temple", cascade="all, delete-orphan")
     recommendations = relationship("ServiceRecommendation", back_populates="temple", cascade="all, delete-orphan")
+    key_personnels = relationship("TempleKeyPersonnel", back_populates="temple", cascade="all, delete-orphan")
     
     # Phase 6 relationships
     state_ref = relationship("StateMaster", foreign_keys=[state_id])
@@ -205,6 +206,11 @@ class TempleProfile(Base):
     twitter_url = Column(String, default="")
     website_url = Column(String, default="")
     festivals_description = Column(Text, default="")
+    short_description = Column(Text, default="")
+    meta_title = Column(String, default="")
+    meta_description = Column(Text, default="")
+    published_at = Column(DateTime(timezone=True), nullable=True)
+    published_by = Column(UUID(as_uuid=True), ForeignKey("users.id"), nullable=True)
     created_at = Column(DateTime(timezone=True), default=utcnow)
 
     temple = relationship("Temple", back_populates="profile")
@@ -245,6 +251,9 @@ class TempleProfileDraft(Base):
     twitter_url = Column(String, nullable=True)
     website_url = Column(String, nullable=True)
     festivals_description = Column(Text, nullable=True)
+    short_description = Column(Text, nullable=True)
+    meta_title = Column(String, nullable=True)
+    meta_description = Column(Text, nullable=True)
     
     # Audit
     requested_by = Column(UUID(as_uuid=True), ForeignKey("users.id"), nullable=True)
@@ -273,6 +282,24 @@ class TempleImage(Base):
     def filter_visible(cls, images):
         """Filter out hidden images from public display."""
         return [img for img in images if getattr(img, 'is_visible', True) is not False]
+
+
+class TempleKeyPersonnel(Base):
+    __tablename__ = "temple_key_personnels"
+
+    id = Column(UUID(as_uuid=True), primary_key=True, default=uuid.uuid4)
+    temple_id = Column(UUID(as_uuid=True), ForeignKey("temples.id", ondelete="CASCADE"), nullable=False, index=True)
+    name = Column(String, nullable=False)
+    designation = Column(String, nullable=False)
+    image_url = Column(String, nullable=True)
+    display_order = Column(Integer, nullable=False, default=0)
+    is_active = Column(Boolean, nullable=False, default=True)
+    created_at = Column(DateTime(timezone=True), default=utcnow)
+    updated_at = Column(DateTime(timezone=True), default=utcnow, onupdate=utcnow)
+    created_by = Column(UUID(as_uuid=True), ForeignKey("users.id"), nullable=True)
+    updated_by = Column(UUID(as_uuid=True), ForeignKey("users.id"), nullable=True)
+
+    temple = relationship("Temple", back_populates="key_personnels")
 
 
 class TempleWebsiteSettings(Base):

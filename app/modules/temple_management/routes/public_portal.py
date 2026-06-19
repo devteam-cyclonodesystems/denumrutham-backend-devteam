@@ -62,7 +62,7 @@ def resolve_temple_image(temple: Temple) -> str:
             return logo_url
             
     if temple.images:
-        hero_desktop = next((img for img in temple.images if img.category == 'HERO_DESKTOP' and getattr(img, 'is_visible', True) is not False), None)
+        hero_desktop = next((img for img in temple.images if img.category == 'HERO_DESKTOP'), None)
         if hero_desktop:
             return hero_desktop.image_url
 
@@ -254,19 +254,19 @@ async def get_public_temple_portal(
     profile_db = temple.profile
     images = []
     if temple.images:
-        visible_images = TempleImage.filter_visible(temple.images)
-        for img in visible_images:
-            images.append(
-                TempleImageResponse(
-                    id=img.id,
-                    temple_id=img.temple_id,
-                    image_url=img.image_url,
-                    caption=img.caption or "",
-                    category=img.category or "GALLERY",
-                    is_visible=getattr(img, 'is_visible', True),
-                    created_at=img.created_at
+        for img in temple.images:
+            if img.category in ("HERO_DESKTOP", "HERO_MOBILE") or getattr(img, 'is_visible', True) is not False:
+                images.append(
+                    TempleImageResponse(
+                        id=img.id,
+                        temple_id=img.temple_id,
+                        image_url=img.image_url,
+                        caption=img.caption or "",
+                        category=img.category or "GALLERY",
+                        is_visible=getattr(img, 'is_visible', True),
+                        created_at=img.created_at
+                    )
                 )
-            )
 
     profile = TempleProfileResponse(
         id=temple.id,
@@ -662,7 +662,8 @@ async def get_public_temple_bootstrap(
             selectinload(Temple.profile),
             selectinload(Temple.images),
             joinedload(Temple.website_settings_live),
-            selectinload(Temple.festivals)
+            selectinload(Temple.festivals),
+            selectinload(Temple.key_personnels)
         )
         .filter(Temple.domain == slug, Temple.is_active == True, Temple.status.in_(["APPROVED", "MERGED"]))
     )
@@ -701,6 +702,20 @@ async def get_public_temple_bootstrap(
                 "created_at": img.created_at.isoformat() if img.created_at else None
             })
 
+    # Serialize active key personnel
+    key_personnels = []
+    if temple.key_personnels:
+        active_kp = [kp for kp in temple.key_personnels if kp.is_active]
+        active_kp = sorted(active_kp, key=lambda x: x.display_order)
+        for kp in active_kp:
+            key_personnels.append({
+                "id": str(kp.id),
+                "name": kp.name,
+                "designation": kp.designation,
+                "image_url": kp.image_url,
+                "display_order": kp.display_order
+            })
+
     profile = {
         "id": str(temple.id),
         "name": temple.name,
@@ -731,7 +746,13 @@ async def get_public_temple_bootstrap(
         "twitter_url": profile_db.twitter_url if profile_db else "",
         "website_url": profile_db.website_url if profile_db else "",
         "festivals_description": profile_db.festivals_description if profile_db else "",
-        "images": images
+        "short_description": profile_db.short_description if profile_db else "",
+        "meta_title": profile_db.meta_title if profile_db else "",
+        "meta_description": profile_db.meta_description if profile_db else "",
+        "published_at": profile_db.published_at.isoformat() if (profile_db and profile_db.published_at) else None,
+        "published_by": str(profile_db.published_by) if (profile_db and profile_db.published_by) else None,
+        "images": images,
+        "key_personnels": key_personnels
     }
 
     # 4. Extract settings and featureVisibility from the live snapshot or use defaults
@@ -805,6 +826,35 @@ async def get_public_temple_bootstrap(
 
     raw_section_order = settings_snapshot.get("section_order") or ["hero", "about", "timings", "gallery", "location"]
     section_order = list(raw_section_order)
+
+    # ── Auto-inject missing enabled sections in deterministic priority order ──
+    target_sections = ["hero", "about"]
+    if feature_visibility.get("enableAnnouncements"):
+        target_sections.append("announcements")
+    if feature_visibility.get("enableActivities"):
+        target_sections.append("activities")
+    if settings_snapshot.get("enable_festivals") is not False:
+        target_sections.append("festivals")
+    if feature_visibility.get("enableGallery") is not False:
+        target_sections.append("gallery")
+    # Always include key_personnel section
+    target_sections.append("key_personnel")
+    if settings_snapshot.get("enable_mantras") is not False:
+        target_sections.append("mantras")
+    target_sections.append("contact")
+
+    master_order = ["hero", "about", "announcements", "activities", "festivals", "gallery", "key_personnel", "mantras", "contact"]
+    for sec in master_order:
+        if sec in target_sections and sec not in section_order:
+            inserted = False
+            for target_sec in master_order[master_order.index(sec) + 1:]:
+                if target_sec in section_order:
+                    idx = section_order.index(target_sec)
+                    section_order.insert(idx, sec)
+                    inserted = True
+                    break
+            if not inserted:
+                section_order.append(sec)
     if lifecycle_stage == "DIRECTORY_TEMPLATE":
         # Strip transactional sections
         for sec in ["offerings", "store", "hall_booking"]:

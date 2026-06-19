@@ -12,6 +12,7 @@ from app.modules.temple_management.schemas.digital_experience import (
     TempleActivityCreate, TempleActivityUpdate, TempleActivityResponse,
     TempleImageCreate, TempleImageUpdate, TempleImageResponse,
     TempleFestivalCreate, TempleFestivalUpdate, TempleFestivalResponse,
+    TempleKeyPersonnelCreate, TempleKeyPersonnelUpdate, TempleKeyPersonnelResponse,
 )
 
 router = APIRouter()
@@ -670,3 +671,117 @@ async def admin_revert_website_to_template(
         "status": "success",
         "message": "Website reverted to Stage 1 directory template successfully"
     }
+
+
+# =============================================================================
+# KEY PERSONNEL ROUTES
+# =============================================================================
+@router.get(
+    "/key-personnel",
+    response_model=List[TempleKeyPersonnelResponse],
+    tags=["digital-experience-key-personnel"]
+)
+async def list_key_personnel(
+    db: AsyncSession = Depends(get_db),
+    current_user: TokenData = Depends(require_permission("website", "view")),
+    temple_id: str = Depends(get_current_temple_id),
+):
+    """List all key personnel for the manager's temple."""
+    return await DigitalExperienceService.list_key_personnels(
+        db=db,
+        temple_id=UUID(temple_id),
+        include_inactive=True
+    )
+
+
+@router.post(
+    "/key-personnel",
+    response_model=TempleKeyPersonnelResponse,
+    dependencies=[Depends(enforce_active_subscription)],
+    tags=["digital-experience-key-personnel"]
+)
+async def create_key_personnel(
+    data: TempleKeyPersonnelCreate,
+    db: AsyncSession = Depends(get_db),
+    current_user: TokenData = Depends(require_permission("website", "edit")),
+    temple_id: str = Depends(get_current_temple_id),
+):
+    """Create key personnel for the manager's temple."""
+    return await DigitalExperienceService.create_key_personnel(
+        db=db,
+        temple_id=UUID(temple_id),
+        data=data.model_dump(exclude_unset=True),
+        current_user_id=UUID(current_user.sub),
+        role=current_user.role,
+    )
+
+
+@router.put(
+    "/key-personnel/{personnel_id}",
+    response_model=TempleKeyPersonnelResponse,
+    dependencies=[Depends(enforce_active_subscription)],
+    tags=["digital-experience-key-personnel"]
+)
+async def update_key_personnel(
+    personnel_id: UUID,
+    data: TempleKeyPersonnelUpdate,
+    db: AsyncSession = Depends(get_db),
+    current_user: TokenData = Depends(require_permission("website", "edit")),
+    temple_id: str = Depends(get_current_temple_id),
+):
+    """Update key personnel details."""
+    return await DigitalExperienceService.update_key_personnel(
+        db=db,
+        temple_id=UUID(temple_id),
+        personnel_id=personnel_id,
+        data=data.model_dump(exclude_unset=True),
+        current_user_id=UUID(current_user.sub),
+        role=current_user.role,
+    )
+
+
+@router.delete(
+    "/key-personnel/{personnel_id}",
+    dependencies=[Depends(enforce_active_subscription)],
+    tags=["digital-experience-key-personnel"]
+)
+async def delete_key_personnel(
+    personnel_id: UUID,
+    hard_delete: bool = Query(False, description="Purge completely from database"),
+    db: AsyncSession = Depends(get_db),
+    current_user: TokenData = Depends(require_permission("website", "edit")),
+    temple_id: str = Depends(get_current_temple_id),
+):
+    """Delete (or soft-deactivate by default) key personnel."""
+    await DigitalExperienceService.delete_key_personnel(
+        db=db,
+        temple_id=UUID(temple_id),
+        personnel_id=personnel_id,
+        current_user_id=UUID(current_user.sub),
+        role=current_user.role,
+        hard_delete=hard_delete
+    )
+    return {"status": "success", "message": "Key personnel deleted successfully"}
+
+
+@router.patch(
+    "/key-personnel/reorder",
+    response_model=List[TempleKeyPersonnelResponse],
+    dependencies=[Depends(enforce_active_subscription)],
+    tags=["digital-experience-key-personnel"]
+)
+async def reorder_key_personnel(
+    ordered_ids: List[UUID],
+    db: AsyncSession = Depends(get_db),
+    current_user: TokenData = Depends(require_permission("website", "edit")),
+    temple_id: str = Depends(get_current_temple_id),
+):
+    """Reorder key personnel list."""
+    return await DigitalExperienceService.reorder_key_personnels(
+        db=db,
+        temple_id=UUID(temple_id),
+        ordered_ids=ordered_ids,
+        current_user_id=UUID(current_user.sub),
+        role=current_user.role,
+    )
+

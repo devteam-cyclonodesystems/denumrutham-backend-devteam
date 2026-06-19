@@ -20,9 +20,11 @@ os.makedirs(UPLOAD_DIR, exist_ok=True)
 # --- Strict validation constants ---
 MAX_IMAGE_SIZE = 5 * 1024 * 1024      # 5 MB
 MAX_DOCUMENT_SIZE = 10 * 1024 * 1024   # 10 MB
+MAX_AUDIO_SIZE = 15 * 1024 * 1024       # 15 MB
 
 ALLOWED_IMAGE_EXTENSIONS = {".jpg", ".jpeg", ".png", ".webp"}
 ALLOWED_DOC_EXTENSIONS = {".pdf"}
+ALLOWED_AUDIO_EXTENSIONS = {".mp3", ".wav", ".ogg", ".m4a"}
 
 
 def _verify_content_length(request: Request, max_bytes: int):
@@ -232,3 +234,50 @@ async def upload_document(
         data={"url": f"/static/uploads/{filename}", "filename": filename},
         message="Document uploaded successfully",
     )
+
+
+@router.post("/audio")
+async def upload_audio(
+    request: Request,
+    file: UploadFile = File(...),
+    current_user=Depends(get_current_user),
+):
+    """Upload a temple chanting audio file (MP3, WAV, OGG, M4A). Max 15 MB."""
+    # 1. Immediate Content-Length Header check
+    _verify_content_length(request, MAX_AUDIO_SIZE)
+
+    # 2. Extension check against allowlist
+    ext = os.path.splitext(file.filename or "")[1].lower()
+    if ext not in ALLOWED_AUDIO_EXTENSIONS:
+        logger.error(
+            f"Upload validation failure: Extension '{ext}' is not allowed for audio.",
+            extra={"operation": "UPLOAD_AUDIO_EXTENSION_CHECK", "status": "FAILURE", "extension": ext}
+        )
+        raise HTTPException(
+            status_code=400,
+            detail=f"File extension '{ext}' is not allowed. Supported: {', '.join(ALLOWED_AUDIO_EXTENSIONS)}",
+        )
+
+    # 3. Read content bytes and enforce actual size check
+    content = await _read_and_validate_size(file, MAX_AUDIO_SIZE)
+
+    # 4. Save to local static folder
+    filename = f"{uuid4().hex}{ext}"
+    file_path = os.path.join(UPLOAD_DIR, filename)
+    try:
+        with open(file_path, "wb") as buffer_file:
+            buffer_file.write(content)
+
+        return api_response(
+            data={"url": f"/static/uploads/{filename}", "filename": filename},
+            message="Audio file uploaded successfully",
+        )
+    except Exception as e:
+        logger.error(
+            f"Audio file write failure: {e}",
+            extra={"operation": "UPLOAD_AUDIO_WRITE", "status": "FAILURE", "error": str(e)}
+        )
+        raise HTTPException(
+            status_code=500,
+            detail="Failed to store the uploaded audio file."
+        )

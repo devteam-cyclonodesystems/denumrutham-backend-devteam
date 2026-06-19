@@ -11,7 +11,7 @@ from app.api.routes import (
     booking_history, manager_dashboard, upload, 
     payments, onboarding, admin, staff, offerings
 )
-from app.modules.temple_management.routes import digital_experience, public_portal, recommendations
+from app.modules.temple_management.routes import digital_experience, public_portal, recommendations, profile
 from app.modules.governance.routes.platform_advertisements import router as platform_ads_router
 from app.modules.temple_management.routes.temple_advertisements import router as temple_ads_router
 from app.modules.governance.routes.claims import router as claims_router
@@ -70,6 +70,7 @@ api_router.include_router(staff.router, prefix="/staff", tags=["Staff Management
 api_router.include_router(halls.router, prefix="/manager", tags=["Hall Management"])
 api_router.include_router(offerings.router, prefix="/manager", tags=["Offering Management"])
 api_router.include_router(digital_experience.router, prefix="/manager", tags=["Digital Experience Portal"])
+api_router.include_router(profile.router, prefix="/temple-profile", tags=["Temple Profile Management"])
 api_router.include_router(recommendations.router, prefix="/manager", tags=["Recommendation Management"])
 api_router.include_router(temple_ads_router, prefix="/manager", tags=["Temple Advertisements"])
 api_router.include_router(telemetry_manager_router, prefix="/manager", tags=["Manager Telemetry"])

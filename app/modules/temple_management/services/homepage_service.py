@@ -31,7 +31,7 @@ class HomepageService:
                 return logo_url
                 
         if temple.images:
-            hero_desktop = next((img for img in temple.images if img.category == 'HERO_DESKTOP' and getattr(img, 'is_visible', True) is not False), None)
+            hero_desktop = next((img for img in temple.images if img.category == 'HERO_DESKTOP'), None)
             if hero_desktop:
                 return hero_desktop.image_url
 

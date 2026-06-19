@@ -3,7 +3,7 @@ from app.modules.temple_management.models.temple_models import (
     Temple, TempleProfile, TempleProfileDraft, TempleImage,
     TempleWebsiteSettings, TempleAnnouncement, TempleActivity,
     ImageCategory, ActivityStatus, StateMaster, DistrictMaster,
-    TempleSearchIndex
+    TempleSearchIndex, TempleKeyPersonnel
 )
 from app.modules.bookings.models.booking_models import DevoteeProfile, RefundHistory
 from app.modules.governance.models.governance_models import AuditLog, TempleOwnershipHistory, TempleLead, TempleClaimRequest
@@ -119,4 +119,5 @@ __all__ = [
     "StateMaster",
     "DistrictMaster",
     "TempleSearchIndex",
+    "TempleKeyPersonnel",
 ]
