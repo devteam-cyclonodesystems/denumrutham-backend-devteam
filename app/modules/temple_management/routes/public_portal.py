@@ -10,7 +10,7 @@ from sqlalchemy.future import select
 from sqlalchemy.orm import selectinload, joinedload
 from uuid import UUID
 from typing import List, Optional
-from datetime import datetime, timezone
+from datetime import datetime, timezone, timedelta
 from PIL import Image, ImageOps
 
 from app.api.deps import get_db, get_current_user_optional
@@ -973,6 +973,7 @@ async def get_public_temple_bootstrap(
             })
 
     # 7. Fetch active advertisements
+    from datetime import datetime, timezone, timedelta
     now = datetime.now(timezone.utc)
     advertisements = []
     
@@ -983,8 +984,8 @@ async def get_public_temple_bootstrap(
             TempleAdvertisement.temple_id == temple.id,
             TempleAdvertisement.is_active == True,
             TempleAdvertisement.approval_status == "APPROVED",
-            TempleAdvertisement.start_date <= now,
-            TempleAdvertisement.end_date >= now
+            TempleAdvertisement.start_date <= now + timedelta(hours=14),
+            TempleAdvertisement.end_date >= now - timedelta(hours=14)
         ).order_by(TempleAdvertisement.display_order.asc(), TempleAdvertisement.created_at.desc())
         
         temple_ads_res = await db.execute(temple_ads_stmt)
@@ -994,8 +995,8 @@ async def get_public_temple_bootstrap(
         platform_ads_stmt = select(PlatformAdvertisement).filter(
             PlatformAdvertisement.is_active == True,
             PlatformAdvertisement.approval_status == "PUBLISHED",
-            PlatformAdvertisement.start_date <= now,
-            PlatformAdvertisement.end_date >= now
+            PlatformAdvertisement.start_date <= now + timedelta(hours=14),
+            PlatformAdvertisement.end_date >= now - timedelta(hours=14)
         ).order_by(PlatformAdvertisement.created_at.desc())
         
         platform_ads_res = await db.execute(platform_ads_stmt)
@@ -1430,7 +1431,7 @@ async def list_active_public_advertisements(
     """
     Retrieve all active platform and temple advertisements.
     """
-    from datetime import datetime, timezone
+    from datetime import datetime, timezone, timedelta
     from app.modules.temple_management.models.temple_models import TempleAdvertisement, PlatformAdvertisement
     from sqlalchemy import select
 
@@ -1441,8 +1442,8 @@ async def list_active_public_advertisements(
     platform_ads_stmt = select(PlatformAdvertisement).filter(
         PlatformAdvertisement.is_active == True,
         PlatformAdvertisement.approval_status == "PUBLISHED",
-        PlatformAdvertisement.start_date <= now,
-        PlatformAdvertisement.end_date >= now
+        PlatformAdvertisement.start_date <= now + timedelta(hours=14),
+        PlatformAdvertisement.end_date >= now - timedelta(hours=14)
     ).order_by(PlatformAdvertisement.created_at.desc())
     platform_ads_res = await db.execute(platform_ads_stmt)
     platform_ads = platform_ads_res.scalars().all()
