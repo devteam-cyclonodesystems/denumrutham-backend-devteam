@@ -578,6 +578,7 @@ class OnboardingService:
                 email=temple_req.email or "",
                 status="APPROVED",
                 is_active=True,
+                directory_status="INACTIVE",
                 approved_at=datetime.now(timezone.utc), # Explicit validation field
                 approved_by=approver_id,                # Explicit validation field
             )
