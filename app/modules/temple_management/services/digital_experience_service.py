@@ -42,6 +42,64 @@ def _serialize_for_audit(data: Optional[dict]) -> Optional[dict]:
     return res
 
 
+def _sanitize_section_order(
+    section_order: Optional[list],
+    feature_visibility: dict,
+    enable_store: bool,
+    enable_hall_booking: bool
+) -> list:
+    # Legacy compatibility validation for feature_visibility.hidden_sections
+    if isinstance(feature_visibility, dict) and "hidden_sections" in feature_visibility:
+        raw_hidden = feature_visibility["hidden_sections"]
+        if not isinstance(raw_hidden, list):
+            feature_visibility["hidden_sections"] = []
+        else:
+            feature_visibility["hidden_sections"] = [
+                str(s) for s in raw_hidden if s is not None
+            ]
+
+    if not section_order or not isinstance(section_order, list):
+        section_order = ["hero", "about", "deities", "announcements", "activities", "gallery", "offerings", "location"]
+        
+    updated_order = list(section_order)
+    
+    # Auto-inject notice_board
+    if "notice_board" not in updated_order:
+        updated_order.append("notice_board")
+        
+    # Auto-inject key_personnel
+    if "key_personnel" not in updated_order:
+        if "contact" in updated_order:
+            contact_idx = updated_order.index("contact")
+            updated_order.insert(contact_idx, "key_personnel")
+        else:
+            updated_order.append("key_personnel")
+            
+    # Sync store section based on enable_store
+    if enable_store:
+        if "store" not in updated_order:
+            if "contact" in updated_order:
+                contact_idx = updated_order.index("contact")
+                updated_order.insert(contact_idx, "store")
+            else:
+                updated_order.append("store")
+    else:
+        updated_order = [s for s in updated_order if s != "store"]
+        
+    # Sync hall_booking section based on enable_hall_booking
+    if enable_hall_booking:
+        if "hall_booking" not in updated_order:
+            if "contact" in updated_order:
+                contact_idx = updated_order.index("contact")
+                updated_order.insert(contact_idx, "hall_booking")
+            else:
+                updated_order.append("hall_booking")
+    else:
+        updated_order = [s for s in updated_order if s != "hall_booking"]
+        
+    return updated_order
+
+
 class DigitalExperienceService:
 
     # =========================================================================
@@ -78,6 +136,19 @@ class DigitalExperienceService:
                 db.add(settings)
             await db.commit()
             await db.refresh(settings)
+        
+        # Sanitize section order on retrieval to keep it aligned with backend features
+        sanitized = _sanitize_section_order(
+            settings.section_order,
+            settings.feature_visibility or {},
+            settings.enable_store,
+            settings.enable_hall_booking
+        )
+        if sanitized != settings.section_order:
+            settings.section_order = sanitized
+            settings.updated_at = datetime.now(timezone.utc)
+            await db.commit()
+            await db.refresh(settings)
             
         return settings
 
@@ -100,6 +171,14 @@ class DigitalExperienceService:
         for key, value in data.items():
             if hasattr(settings, key) and key not in ["id", "temple_id", "created_at", "updated_at"]:
                 setattr(settings, key, value)
+                
+        # Run backend sanitization to ensure section_order is aligned with update data
+        settings.section_order = _sanitize_section_order(
+            settings.section_order,
+            settings.feature_visibility or {},
+            settings.enable_store,
+            settings.enable_hall_booking
+        )
                 
         settings.updated_at = datetime.now(timezone.utc)
         

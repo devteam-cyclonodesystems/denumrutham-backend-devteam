@@ -45,6 +45,7 @@ class TempleProfileResponseSchema(BaseModel):
     meta_description: Optional[str] = ""
     published_at: Optional[datetime] = None
     published_by: Optional[UUID] = None
+    domain: Optional[str] = ""
 
     model_config = ConfigDict(from_attributes=True)
 
@@ -83,6 +84,7 @@ class TempleProfileDraftResponseSchema(BaseModel):
     status: str
     created_at: datetime
     updated_at: datetime
+    domain: Optional[str] = ""
 
     model_config = ConfigDict(from_attributes=True)
 
@@ -94,6 +96,16 @@ class ProfileDraftDetailResponse(BaseModel):
 
 class DraftApprovalRequest(BaseModel):
     edits: Optional[dict] = None
+
+
+async def _attach_domain(db: AsyncSession, obj, temple_id: UUID):
+    if not obj:
+        return obj
+    temple_res = await db.execute(select(Temple).filter(Temple.id == temple_id))
+    temple = temple_res.scalar_one_or_none()
+    if temple:
+        obj.domain = temple.domain
+    return obj
 
 
 # ---------- Routes ----------
@@ -111,6 +123,10 @@ async def get_profile_and_draft(
     """Retrieve the active live profile and any pending draft for the manager's temple."""
     live_profile = await TempleProfileService.get_live_profile(db, UUID(temple_id))
     pending_draft = await TempleProfileService.get_draft_profile(db, UUID(temple_id))
+    if live_profile:
+        await _attach_domain(db, live_profile, UUID(temple_id))
+    if pending_draft:
+        await _attach_domain(db, pending_draft, UUID(temple_id))
     return {
         "live_profile": live_profile,
         "pending_draft": pending_draft
@@ -141,12 +157,15 @@ async def submit_profile_draft(
             detail="Unclaimed temples cannot have manager profile submissions."
         )
 
-    return await TempleProfileService.save_draft(
+    draft = await TempleProfileService.save_draft(
         db=db,
         temple_id=UUID(temple_id),
         user_id=UUID(current_user.sub),
         data=data
     )
+    if draft:
+        await _attach_domain(db, draft, UUID(temple_id))
+    return draft
 
 
 @router.get(
@@ -208,6 +227,10 @@ async def get_draft_for_comparison(
         raise HTTPException(status_code=404, detail="Draft not found")
     
     live_profile = await TempleProfileService.get_live_profile(db, draft.temple_id)
+    if live_profile:
+        await _attach_domain(db, live_profile, draft.temple_id)
+    if draft:
+        await _attach_domain(db, draft, draft.temple_id)
     return {
         "live_profile": live_profile,
         "pending_draft": draft
@@ -227,12 +250,15 @@ async def approve_profile_draft(
 ):
     """Approve a profile draft. Supports 'Approve with Edits' overrides with immutable log tracking."""
     edits = req.edits if req else None
-    return await TempleProfileService.approve_draft(
+    profile = await TempleProfileService.approve_draft(
         db=db,
         draft_id=draft_id,
         approver_id=UUID(current_user.sub),
         edits=edits
     )
+    if profile:
+        await _attach_domain(db, profile, profile.temple_id)
+    return profile
 
 
 @router.post(
@@ -246,11 +272,14 @@ async def reject_profile_draft(
     current_user: TokenData = Depends(require_system_permission("REVIEW_PROFILE_DRAFTS")),
 ):
     """Reject a profile draft, locking it from live promotion."""
-    return await TempleProfileService.reject_draft(
+    draft = await TempleProfileService.reject_draft(
         db=db,
         draft_id=draft_id,
         approver_id=UUID(current_user.sub)
     )
+    if draft:
+        await _attach_domain(db, draft, draft.temple_id)
+    return draft
 
 
 @router.put(
@@ -265,10 +294,13 @@ async def direct_update_profile(
     current_user: TokenData = Depends(require_system_permission("MANAGE_TEMPLE_PROFILES")),
 ):
     """Directly update and publish a temple profile, bypassing the draft workflow (e.g. for UNCLAIMED or DIRECTORY_ONLY)."""
-    return await TempleProfileService.direct_update_profile(
+    profile = await TempleProfileService.direct_update_profile(
         db=db,
         temple_id=temple_id,
         user_id=UUID(current_user.sub),
         role=current_user.role,
         data=data
     )
+    if profile:
+        await _attach_domain(db, profile, temple_id)
+    return profile

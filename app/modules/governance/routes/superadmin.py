@@ -443,6 +443,63 @@ class GlobalSettingUpdate(BaseModel):
     value: dict | list | str | int | float | bool
 
 
+class HomepageLayoutUpdateBody(BaseModel):
+    layout: List[dict]
+
+
+class HomepageCarouselUpdateBody(BaseModel):
+    slides: List[dict]
+
+
+def _validate_homepage_layout(layout: list):
+    if not isinstance(layout, list):
+        raise HTTPException(status_code=400, detail="Homepage layout must be a list of sections.")
+    
+    # Check hero is first and visible
+    if len(layout) == 0 or not isinstance(layout[0], dict) or layout[0].get("key") != "hero":
+        raise HTTPException(status_code=400, detail="Hero section must be the first section on the page.")
+    if layout[0].get("is_visible") is False:
+        raise HTTPException(status_code=400, detail="Hero section cannot be hidden.")
+        
+    # Count visible core sections
+    core_sections = {"featured", "trending", "spotlight"}
+    visible_cores = 0
+    visible_keys = []
+    for sec in layout:
+        if not isinstance(sec, dict) or "key" not in sec:
+            raise HTTPException(status_code=400, detail="Invalid section layout configuration format.")
+        sec_key = sec["key"]
+        if sec.get("is_visible", True) is not False:
+            visible_keys.append(sec_key)
+            if sec_key in core_sections:
+                visible_cores += 1
+                
+    if visible_cores < 2:
+        raise HTTPException(
+            status_code=400,
+            detail="Homepage layout validation failed: At least two out of Featured, Trending, and Spotlight sections must remain visible."
+        )
+        
+    # Directory section placement guardrail
+    if "directory" in visible_keys:
+        dir_idx = visible_keys.index("directory")
+        for core in ["featured", "trending", "spotlight"]:
+            if core in visible_keys and visible_keys.index(core) > dir_idx:
+                raise HTTPException(
+                    status_code=400,
+                    detail="Homepage layout validation failed: The National Directory section must be positioned below core discovery sections."
+                )
+
+    # Onboarding banner placement guardrail: claim_cta cannot be immediately after hero
+    if "claim_cta" in visible_keys:
+        claim_idx = visible_keys.index("claim_cta")
+        if claim_idx == 1:
+            raise HTTPException(
+                status_code=400,
+                detail="Homepage layout validation failed: The onboarding banner (claim_cta) cannot be placed immediately after the Hero section."
+            )
+
+
 class AdApproveRequest(BaseModel):
     priority: Optional[str] = "MEDIUM"
     scheduling_rules: Optional[dict] = None
@@ -510,6 +567,9 @@ async def update_global_setting(
     old_val = setting.value if setting else None
     new_val = body.value
     
+    if key == "homepage_layout_draft":
+        _validate_homepage_layout(new_val)
+
     if key == "fcm_credentials":
         if isinstance(new_val, dict):
             private_key = new_val.get("private_key")
@@ -577,12 +637,12 @@ async def publish_global_setting(
     from sqlalchemy import select
     from datetime import datetime, timezone
     
-    if key != "global_website_builder":
-        raise HTTPException(status_code=400, detail="Only global_website_builder can be published")
+    if key not in ["global_website_builder", "homepage_layout"]:
+        raise HTTPException(status_code=400, detail="Only global_website_builder and homepage_layout can be published")
         
     # Fetch draft
     draft_res = await db.execute(
-        select(PlatformGlobalSetting).filter(PlatformGlobalSetting.key == "global_website_builder_draft")
+        select(PlatformGlobalSetting).filter(PlatformGlobalSetting.key == f"{key}_draft")
     )
     draft = draft_res.scalar_one_or_none()
     if not draft or not draft.value:
@@ -590,7 +650,7 @@ async def publish_global_setting(
         
     # Fetch live
     live_res = await db.execute(
-        select(PlatformGlobalSetting).filter(PlatformGlobalSetting.key == "global_website_builder_live")
+        select(PlatformGlobalSetting).filter(PlatformGlobalSetting.key == f"{key}_live")
     )
     live = live_res.scalar_one_or_none()
     
@@ -598,20 +658,20 @@ async def publish_global_setting(
     if live and isinstance(live.value, dict):
         new_version_num = live.value.get("version", 0) + 1
         
-    live_value = dict(draft.value)
+    live_value = dict(draft.value) if isinstance(draft.value, dict) else {"layout": draft.value}
     live_value["version"] = new_version_num
     live_value["published_at"] = datetime.now(timezone.utc).isoformat()
     live_value["published_by"] = str(current_user.sub)
     
     if not live:
-        live = PlatformGlobalSetting(key="global_website_builder_live", value=live_value)
+        live = PlatformGlobalSetting(key=f"{key}_live", value=live_value)
         db.add(live)
     else:
         live.value = live_value
         
     # Save to history list
     history_res = await db.execute(
-        select(PlatformGlobalSetting).filter(PlatformGlobalSetting.key == "global_website_builder_history")
+        select(PlatformGlobalSetting).filter(PlatformGlobalSetting.key == f"{key}_history")
     )
     history = history_res.scalar_one_or_none()
     
@@ -628,7 +688,7 @@ async def publish_global_setting(
     history_list.append(snapshot)
     
     if not history:
-        history = PlatformGlobalSetting(key="global_website_builder_history", value=history_list)
+        history = PlatformGlobalSetting(key=f"{key}_history", value=history_list)
         db.add(history)
     else:
         history.value = history_list
@@ -638,6 +698,16 @@ async def publish_global_setting(
     # Invalidate layouts configuration cache on publish
     GlobalConfigurationCache.invalidate_all()
     
+    # If homepage_layout is published, invalidate homepage cache
+    if key == "homepage_layout":
+        try:
+            from app.services.broadcast_service import BroadcastService
+            redis = await BroadcastService.get_redis()
+            if redis:
+                await redis.delete("homepage_bootstrap")
+        except Exception:
+            pass
+            
     # Audit Governance log
     await AuditService.log_action(
         db=db,
@@ -647,9 +717,10 @@ async def publish_global_setting(
         module_name="governance",
         action="GLOBAL_PUBLISH",
         action_type="CREATE",
-        entity_id="global_website_builder",
-        new_value={"version": new_version_num},
-        details=f"Published global website layout version {new_version_num}"
+        entity_id=key,
+        old_value=None,
+        new_value=live_value,
+        details=f"Published global setting for {key}"
     )
     
     await db.commit()
@@ -968,6 +1039,462 @@ async def get_onboarding_funnel(
             "approval_rate": round(approval_rate, 2)
         }
     }
+
+
+@router.get("/homepage-layout/draft")
+async def get_homepage_layout_draft(
+    db: AsyncSession = Depends(get_db),
+    current_user: TokenData = Depends(get_current_superadmin),
+):
+    """
+    Retrieve the current homepage layout draft.
+    """
+    from app.modules.governance.models.governance_models import PlatformGlobalSetting
+    from sqlalchemy import select
+    
+    result = await db.execute(
+        select(PlatformGlobalSetting).filter(PlatformGlobalSetting.key == "homepage_layout_draft")
+    )
+    setting = result.scalar_one_or_none()
+    
+    DEFAULT_HOMEPAGE_LAYOUT = [
+        {"key": "hero", "is_visible": True, "display_order": 0, "config": {}},
+        {"key": "spotlight", "is_visible": True, "display_order": 1, "config": {}},
+        {"key": "nearby", "is_visible": True, "display_order": 2, "config": {}},
+        {"key": "featured", "is_visible": True, "display_order": 3, "config": {}},
+        {"key": "trending", "is_visible": True, "display_order": 4, "config": {}},
+        {"key": "festivals", "is_visible": True, "display_order": 5, "config": {}},
+        {"key": "claim_cta", "is_visible": True, "display_order": 6, "config": {}},
+        {"key": "recently_added", "is_visible": True, "display_order": 7, "config": {}},
+        {"key": "directory", "is_visible": True, "display_order": 8, "config": {}},
+    ]
+    
+    if not setting or not setting.value:
+        return {"layout": DEFAULT_HOMEPAGE_LAYOUT}
+        
+    return {"layout": setting.value}
+
+
+@router.put("/homepage-layout/draft")
+async def update_homepage_layout_draft(
+    body: HomepageLayoutUpdateBody,
+    db: AsyncSession = Depends(get_db),
+    current_user: TokenData = Depends(get_current_superadmin),
+):
+    """
+    Update the homepage layout draft configuration.
+    """
+    from app.modules.governance.models.governance_models import PlatformGlobalSetting
+    from app.modules.audit.services.audit_service import AuditService
+    from sqlalchemy import select
+    
+    new_val = body.layout
+    _validate_homepage_layout(new_val)
+    
+    result = await db.execute(
+        select(PlatformGlobalSetting).filter(PlatformGlobalSetting.key == "homepage_layout_draft")
+    )
+    setting = result.scalar_one_or_none()
+    
+    old_val = setting.value if setting else None
+    
+    if not setting:
+        setting = PlatformGlobalSetting(key="homepage_layout_draft", value=new_val)
+        db.add(setting)
+    else:
+        setting.value = new_val
+        
+    await db.flush()
+    
+    await AuditService.log_action(
+        db=db,
+        temple_id=None,
+        user_id=UUID(current_user.sub),
+        role=current_user.role,
+        module_name="governance",
+        action="HOMEPAGE_LAYOUT_DRAFT_UPDATE",
+        action_type="UPDATE",
+        entity_id="homepage_layout_draft",
+        old_value=old_val,
+        new_value=new_val,
+        details="Updated global homepage layout draft"
+    )
+    
+    await db.commit()
+    return {"layout": new_val}
+
+
+@router.post("/homepage-layout/publish")
+async def publish_homepage_layout(
+    db: AsyncSession = Depends(get_db),
+    current_user: TokenData = Depends(get_current_superadmin),
+):
+    """
+    Publish draft layout to live, invalidating the Redis cache.
+    """
+    from app.modules.governance.models.governance_models import PlatformGlobalSetting
+    from app.modules.audit.services.audit_service import AuditService
+    from app.core.cache import GlobalConfigurationCache
+    from sqlalchemy import select
+    from datetime import datetime, timezone
+    
+    # Fetch draft
+    draft_res = await db.execute(
+        select(PlatformGlobalSetting).filter(PlatformGlobalSetting.key == "homepage_layout_draft")
+    )
+    draft = draft_res.scalar_one_or_none()
+    if not draft or not draft.value:
+        raise HTTPException(status_code=404, detail="No draft configuration found to publish")
+        
+    # Validate draft layout before publishing
+    _validate_homepage_layout(draft.value)
+        
+    # Fetch live
+    live_res = await db.execute(
+        select(PlatformGlobalSetting).filter(PlatformGlobalSetting.key == "homepage_layout_live")
+    )
+    live = live_res.scalar_one_or_none()
+    
+    new_version_num = 1
+    if live and isinstance(live.value, dict):
+        new_version_num = live.value.get("version", 0) + 1
+        
+    live_value = {"layout": draft.value}
+    live_value["version"] = new_version_num
+    live_value["published_at"] = datetime.now(timezone.utc).isoformat()
+    live_value["published_by"] = str(current_user.sub)
+    
+    if not live:
+        live = PlatformGlobalSetting(key="homepage_layout_live", value=live_value)
+        db.add(live)
+    else:
+        live.value = live_value
+        
+    # Save to history list
+    history_res = await db.execute(
+        select(PlatformGlobalSetting).filter(PlatformGlobalSetting.key == "homepage_layout_history")
+    )
+    history = history_res.scalar_one_or_none()
+    
+    history_list = []
+    if history and isinstance(history.value, list):
+        history_list = list(history.value)
+        
+    snapshot = {
+        "version": new_version_num,
+        "published_at": live_value["published_at"],
+        "published_by": live_value["published_by"],
+        "config": draft.value
+    }
+    history_list.append(snapshot)
+    
+    if not history:
+        history = PlatformGlobalSetting(key="homepage_layout_history", value=history_list)
+        db.add(history)
+    else:
+        history.value = history_list
+        
+    await db.flush()
+    
+    # Invalidate layouts configuration cache on publish
+    GlobalConfigurationCache.invalidate_all()
+    
+    # Invalidate homepage cache
+    try:
+        from app.services.broadcast_service import BroadcastService
+        redis = await BroadcastService.get_redis()
+        if redis:
+            await redis.delete("homepage_bootstrap")
+    except Exception:
+        pass
+        
+    # Audit Governance log
+    await AuditService.log_action(
+        db=db,
+        temple_id=None,
+        user_id=UUID(current_user.sub),
+        role=current_user.role,
+        module_name="governance",
+        action="HOMEPAGE_LAYOUT_PUBLISH",
+        action_type="CREATE",
+        entity_id="homepage_layout",
+        old_value=None,
+        new_value=live_value,
+        details=f"Published global homepage layout version {new_version_num}"
+    )
+    
+    await db.commit()
+    return {"version": new_version_num, "layout": draft.value}
+
+
+async def _validate_homepage_carousel(db: AsyncSession, slides: list):
+    if not isinstance(slides, list):
+        raise HTTPException(status_code=400, detail="Homepage carousel must be a list of slides.")
+    
+    from uuid import UUID
+    from app.models.domain import Temple
+    from app.modules.temple_management.models.temple_models import TempleFestival
+    from sqlalchemy import select
+    
+    VALID_TYPES = {"FEATURED_TEMPLE", "FESTIVAL", "CUSTOM", "AD"}
+    
+    for idx, slide in enumerate(slides):
+        if not isinstance(slide, dict):
+            raise HTTPException(status_code=400, detail=f"Slide at index {idx} must be a dictionary.")
+        
+        slide_type = slide.get("type")
+        if not slide_type or slide_type not in VALID_TYPES:
+            raise HTTPException(
+                status_code=400,
+                detail=f"Slide at index {idx} has invalid type. Must be one of {VALID_TYPES}."
+            )
+            
+        if slide_type == "FEATURED_TEMPLE":
+            temple_id_str = slide.get("temple_id")
+            if not temple_id_str:
+                raise HTTPException(
+                    status_code=400,
+                    detail=f"Slide at index {idx} of type FEATURED_TEMPLE must specify temple_id."
+                )
+            try:
+                temple_id = UUID(str(temple_id_str))
+            except ValueError:
+                raise HTTPException(
+                    status_code=400,
+                    detail=f"Slide at index {idx} has invalid temple_id UUID format."
+                )
+            t_stmt = select(Temple).filter(Temple.id == temple_id, Temple.is_active == True, Temple.status == "APPROVED")
+            t_res = await db.execute(t_stmt)
+            if not t_res.scalar_one_or_none():
+                raise HTTPException(
+                    status_code=400,
+                    detail=f"Slide at index {idx} references temple {temple_id} which does not exist, is inactive, or not approved."
+                )
+                
+        elif slide_type == "FESTIVAL":
+            festival_id_str = slide.get("festival_id")
+            if not festival_id_str:
+                raise HTTPException(
+                    status_code=400,
+                    detail=f"Slide at index {idx} of type FESTIVAL must specify festival_id."
+                )
+            try:
+                festival_id = UUID(str(festival_id_str))
+            except ValueError:
+                raise HTTPException(
+                    status_code=400,
+                    detail=f"Slide at index {idx} has invalid festival_id UUID format."
+                )
+            f_stmt = select(TempleFestival).filter(TempleFestival.id == festival_id, TempleFestival.is_active == True)
+            f_res = await db.execute(f_stmt)
+            if not f_res.scalar_one_or_none():
+                raise HTTPException(
+                    status_code=400,
+                    detail=f"Slide at index {idx} references festival {festival_id} which does not exist or is inactive."
+                )
+                
+        elif slide_type in ("CUSTOM", "AD"):
+            title = slide.get("title")
+            image_url = slide.get("image_url")
+            target_url = slide.get("target_url")
+            
+            if not title or not isinstance(title, str) or not title.strip():
+                raise HTTPException(
+                    status_code=400,
+                    detail=f"Slide at index {idx} of type {slide_type} must have a non-empty string title."
+                )
+            if not image_url or not isinstance(image_url, str) or not image_url.strip():
+                raise HTTPException(
+                    status_code=400,
+                    detail=f"Slide at index {idx} of type {slide_type} must have a non-empty string image_url."
+                )
+            if not target_url or not isinstance(target_url, str) or not target_url.strip():
+                raise HTTPException(
+                    status_code=400,
+                    detail=f"Slide at index {idx} of type {slide_type} must have a non-empty string target_url."
+                )
+
+
+@router.get("/homepage-carousel/draft")
+async def get_homepage_carousel_draft(
+    db: AsyncSession = Depends(get_db),
+    current_user: TokenData = Depends(get_current_superadmin),
+):
+    """
+    Retrieve the current homepage carousel draft.
+    """
+    from app.modules.governance.models.governance_models import PlatformGlobalSetting
+    from sqlalchemy import select
+    
+    result = await db.execute(
+        select(PlatformGlobalSetting).filter(PlatformGlobalSetting.key == "homepage_carousel_draft")
+    )
+    setting = result.scalar_one_or_none()
+    
+    if not setting or not setting.value:
+        return {"slides": []}
+        
+    val = setting.value
+    if isinstance(val, dict) and "slides" in val:
+        return val
+    elif isinstance(val, list):
+        return {"slides": val}
+    return {"slides": []}
+
+
+@router.put("/homepage-carousel/draft")
+async def update_homepage_carousel_draft(
+    body: HomepageCarouselUpdateBody,
+    db: AsyncSession = Depends(get_db),
+    current_user: TokenData = Depends(get_current_superadmin),
+):
+    """
+    Update the homepage carousel draft configuration.
+    """
+    from app.modules.governance.models.governance_models import PlatformGlobalSetting
+    from app.modules.audit.services.audit_service import AuditService
+    from sqlalchemy import select
+    
+    new_val = body.slides
+    await _validate_homepage_carousel(db, new_val)
+    
+    result = await db.execute(
+        select(PlatformGlobalSetting).filter(PlatformGlobalSetting.key == "homepage_carousel_draft")
+    )
+    setting = result.scalar_one_or_none()
+    
+    old_val = setting.value if setting else None
+    stored_val = {"slides": new_val}
+    
+    if not setting:
+        setting = PlatformGlobalSetting(key="homepage_carousel_draft", value=stored_val)
+        db.add(setting)
+    else:
+        setting.value = stored_val
+        
+    await db.flush()
+    
+    await AuditService.log_action(
+        db=db,
+        temple_id=None,
+        user_id=UUID(current_user.sub),
+        role=current_user.role,
+        module_name="governance",
+        action="HOMEPAGE_CAROUSEL_DRAFT_UPDATE",
+        action_type="UPDATE",
+        entity_id="homepage_carousel_draft",
+        old_value=old_val,
+        new_value=stored_val,
+        details="Updated global homepage carousel draft"
+    )
+    
+    await db.commit()
+    return {"slides": new_val}
+
+
+@router.post("/homepage-carousel/publish")
+async def publish_homepage_carousel(
+    db: AsyncSession = Depends(get_db),
+    current_user: TokenData = Depends(get_current_superadmin),
+):
+    """
+    Publish draft carousel to live, invalidating the Redis cache.
+    """
+    from app.modules.governance.models.governance_models import PlatformGlobalSetting
+    from app.modules.audit.services.audit_service import AuditService
+    from app.core.cache import GlobalConfigurationCache
+    from sqlalchemy import select
+    from datetime import datetime, timezone
+    
+    # Fetch draft
+    draft_res = await db.execute(
+        select(PlatformGlobalSetting).filter(PlatformGlobalSetting.key == "homepage_carousel_draft")
+    )
+    draft = draft_res.scalar_one_or_none()
+    if not draft or not draft.value:
+        raise HTTPException(status_code=404, detail="No draft configuration found to publish")
+        
+    draft_slides = []
+    if isinstance(draft.value, dict) and "slides" in draft.value:
+        draft_slides = draft.value["slides"]
+    elif isinstance(draft.value, list):
+        draft_slides = draft.value
+        
+    await _validate_homepage_carousel(db, draft_slides)
+        
+    # Fetch live
+    live_res = await db.execute(
+        select(PlatformGlobalSetting).filter(PlatformGlobalSetting.key == "homepage_carousel_live")
+    )
+    live = live_res.scalar_one_or_none()
+    
+    new_version_num = 1
+    if live and isinstance(live.value, dict):
+        new_version_num = live.value.get("version", 0) + 1
+        
+    live_value = {"slides": draft_slides}
+    live_value["version"] = new_version_num
+    live_value["published_at"] = datetime.now(timezone.utc).isoformat()
+    live_value["published_by"] = str(current_user.sub)
+    
+    if not live:
+        live = PlatformGlobalSetting(key="homepage_carousel_live", value=live_value)
+        db.add(live)
+    else:
+        live.value = live_value
+        
+    # Save to history list
+    history_res = await db.execute(
+        select(PlatformGlobalSetting).filter(PlatformGlobalSetting.key == "homepage_carousel_history")
+    )
+    history = history_res.scalar_one_or_none()
+    
+    history_list = []
+    if history and isinstance(history.value, list):
+        history_list = list(history.value)
+        
+    snapshot = {
+        "version": new_version_num,
+        "published_at": live_value["published_at"],
+        "published_by": live_value["published_by"],
+        "config": draft_slides
+    }
+    history_list.append(snapshot)
+    
+    if not history:
+        history = PlatformGlobalSetting(key="homepage_carousel_history", value=history_list)
+        db.add(history)
+    else:
+        history.value = history_list
+        
+    await db.flush()
+    
+    GlobalConfigurationCache.invalidate_all()
+    
+    try:
+        from app.services.broadcast_service import BroadcastService
+        redis = await BroadcastService.get_redis()
+        if redis:
+            await redis.delete("homepage_bootstrap")
+    except Exception:
+        pass
+        
+    await AuditService.log_action(
+        db=db,
+        temple_id=None,
+        user_id=UUID(current_user.sub),
+        role=current_user.role,
+        module_name="governance",
+        action="HOMEPAGE_CAROUSEL_PUBLISH",
+        action_type="CREATE",
+        entity_id="homepage_carousel",
+        old_value=None,
+        new_value=live_value,
+        details=f"Published global homepage carousel version {new_version_num}"
+    )
+    
+    await db.commit()
+    return {"version": new_version_num, "slides": draft_slides}
 
 
 

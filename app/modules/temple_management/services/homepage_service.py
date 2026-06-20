@@ -477,7 +477,188 @@ class HomepageService:
         states = await cls.get_states_directory(db)
         spotlight = await cls.get_temple_spotlight(db, followers_map=followers_map, trending_scores=trending_scores)
         
+        # Fetch curated homepage layout with fallback protection
+        layout_list = None
+        try:
+            layout_stmt = select(PlatformGlobalSetting).filter(PlatformGlobalSetting.key == "homepage_layout_live")
+            layout_res = await db.execute(layout_stmt)
+            layout_setting = layout_res.scalar_one_or_none()
+            if layout_setting and layout_setting.value:
+                if isinstance(layout_setting.value, dict):
+                    layout_list = layout_setting.value.get("layout")
+                elif isinstance(layout_setting.value, list):
+                    layout_list = layout_setting.value
+        except Exception as e:
+            logger.warning(f"Failed to fetch homepage layout from database: {e}")
+            
+        if not layout_list or not isinstance(layout_list, list) or len(layout_list) == 0:
+            layout_list = [
+                {"key": "hero", "is_visible": True, "display_order": 0, "config": {}},
+                {"key": "spotlight", "is_visible": True, "display_order": 1, "config": {}},
+                {"key": "nearby", "is_visible": True, "display_order": 2, "config": {}},
+                {"key": "featured", "is_visible": True, "display_order": 3, "config": {}},
+                {"key": "trending", "is_visible": True, "display_order": 4, "config": {}},
+                {"key": "festivals", "is_visible": True, "display_order": 5, "config": {}},
+                {"key": "claim_cta", "is_visible": True, "display_order": 6, "config": {}},
+                {"key": "recently_added", "is_visible": True, "display_order": 7, "config": {}},
+                {"key": "directory", "is_visible": True, "display_order": 8, "config": {}}
+            ]
+
+        # Fetch and resolve homepage carousel slides
+        carousel_slides = []
+        try:
+            carousel_stmt = select(PlatformGlobalSetting).filter(PlatformGlobalSetting.key == "homepage_carousel_live")
+            carousel_res = await db.execute(carousel_stmt)
+            carousel_setting = carousel_res.scalar_one_or_none()
+            if carousel_setting and carousel_setting.value:
+                if isinstance(carousel_setting.value, dict):
+                    carousel_slides = carousel_setting.value.get("slides", [])
+                elif isinstance(carousel_setting.value, list):
+                    carousel_slides = carousel_setting.value
+        except Exception as e:
+            logger.warning(f"Failed to fetch homepage carousel from database: {e}")
+
+        resolved_slides = []
+        if carousel_slides:
+            from uuid import uuid4
+            # Gather references
+            temple_ids = set()
+            festival_ids = set()
+            for slide in carousel_slides:
+                if not isinstance(slide, dict):
+                    continue
+                stype = slide.get("type")
+                if stype == "FEATURED_TEMPLE" and slide.get("temple_id"):
+                    try:
+                        temple_ids.add(UUID(str(slide["temple_id"])))
+                    except ValueError:
+                        pass
+                elif stype == "FESTIVAL" and slide.get("festival_id"):
+                    try:
+                        festival_ids.add(UUID(str(slide["festival_id"])))
+                    except ValueError:
+                        pass
+
+            # Bulk fetch temples
+            temples_map = {}
+            if temple_ids:
+                t_stmt = (
+                    select(Temple)
+                    .outerjoin(TempleWebsiteSettingsLive, Temple.id == TempleWebsiteSettingsLive.temple_id)
+                    .outerjoin(TempleProfile, Temple.id == TempleProfile.temple_id)
+                    .options(
+                        selectinload(Temple.profile),
+                        selectinload(Temple.website_settings_live),
+                        selectinload(Temple.images)
+                    )
+                    .filter(Temple.id.in_(temple_ids), Temple.is_active == True, Temple.status == "APPROVED")
+                )
+                t_res = await db.execute(t_stmt)
+                for t in t_res.scalars().all():
+                    temples_map[t.id] = t
+
+            # Bulk fetch festivals
+            festivals_map = {}
+            if festival_ids:
+                f_stmt = (
+                    select(TempleFestival)
+                    .join(Temple, TempleFestival.temple_id == Temple.id)
+                    .options(joinedload(TempleFestival.temple))
+                    .filter(TempleFestival.id.in_(festival_ids), TempleFestival.is_active == True)
+                )
+                f_res = await db.execute(f_stmt)
+                for f in f_res.scalars().all():
+                    festivals_map[f.id] = f
+
+            # Resolve slide by slide
+            for slide in carousel_slides:
+                if not isinstance(slide, dict):
+                    continue
+                stype = slide.get("type")
+                resolved_slide = {
+                    "id": slide.get("id") or str(uuid4()),
+                    "type": stype,
+                    "is_active": slide.get("is_active", True)
+                }
+
+                if not resolved_slide["is_active"]:
+                    continue
+
+                if stype == "FEATURED_TEMPLE":
+                    try:
+                        tid = UUID(str(slide.get("temple_id")))
+                    except (ValueError, TypeError):
+                        continue
+                    temple = temples_map.get(tid)
+                    if not temple:
+                        continue
+
+                    profile = temple.profile
+                    resolved_img = cls.resolve_temple_image(temple)
+                    if not resolved_img:
+                        resolved_img = "/static/default-temple.jpg"
+
+                    location_str = ""
+                    if profile:
+                        parts = [p for p in [profile.district, profile.state] if p]
+                        location_str = ", ".join(parts)
+
+                    resolved_slide.update({
+                        "temple_id": str(temple.id),
+                        "title": temple.name,
+                        "subtitle": location_str or "Divine Temple Experience",
+                        "image_url": resolved_img,
+                        "target_url": f"/{temple.domain}/portal"
+                    })
+
+                elif stype == "FESTIVAL":
+                    try:
+                        fid = UUID(str(slide.get("festival_id")))
+                    except (ValueError, TypeError):
+                        continue
+                    festival = festivals_map.get(fid)
+                    if not festival:
+                        continue
+
+                    temple = festival.temple
+                    resolved_img = festival.banner_image
+                    if not resolved_img and temple:
+                        resolved_img = cls.resolve_temple_image(temple)
+                    if not resolved_img:
+                        resolved_img = "/static/default-temple.jpg"
+
+                    subtitle_str = f"Festival at {temple.name}" if temple else "Sacred Festival Celebration"
+                    if festival.start_date:
+                        subtitle_str += f" starting {festival.start_date.isoformat()}"
+
+                    resolved_slide.update({
+                        "festival_id": str(festival.id),
+                        "temple_id": str(temple.id) if temple else None,
+                        "title": festival.name,
+                        "subtitle": subtitle_str,
+                        "image_url": resolved_img,
+                        "target_url": f"/{temple.domain}/portal" if temple else "/temples"
+                    })
+
+                elif stype in ("CUSTOM", "AD"):
+                    resolved_img = slide.get("image_url")
+                    if not resolved_img:
+                        resolved_img = "/static/default-temple.jpg"
+
+                    resolved_slide.update({
+                        "title": slide.get("title", "Spiritual Curation"),
+                        "subtitle": slide.get("subtitle", ""),
+                        "image_url": resolved_img,
+                        "target_url": slide.get("target_url", "/temples")
+                    })
+                else:
+                    continue
+
+                resolved_slides.append(resolved_slide)
+        
         data = {
+            "layout": layout_list,
+            "carousel": resolved_slides,
             "popular_searches": popular_searches,
             "featured": featured,
             "trending": trending,
