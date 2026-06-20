@@ -614,6 +614,7 @@ class HomepageService:
                         "title": temple.name,
                         "subtitle": location_str or "Divine Temple Experience",
                         "image_url": resolved_img,
+                        "image_urls": slide.get("image_urls") or [resolved_img],
                         "target_url": f"/{temple.domain}/portal"
                     })
 
@@ -643,6 +644,7 @@ class HomepageService:
                         "title": festival.name,
                         "subtitle": subtitle_str,
                         "image_url": resolved_img,
+                        "image_urls": slide.get("image_urls") or [resolved_img],
                         "target_url": f"/{temple.domain}/portal" if temple else "/temples"
                     })
 
@@ -655,8 +657,10 @@ class HomepageService:
                         "title": slide.get("title", "Spiritual Curation"),
                         "subtitle": slide.get("subtitle", ""),
                         "image_url": resolved_img,
-                        "target_url": slide.get("target_url", "/temples")
+                        "image_urls": slide.get("image_urls") or [resolved_img],
+                        "target_url": slide.get("target_url") if slide.get("target_url") else None
                     })
+
                 else:
                     continue
 

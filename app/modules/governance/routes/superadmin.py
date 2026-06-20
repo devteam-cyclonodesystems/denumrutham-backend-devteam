@@ -1308,11 +1308,12 @@ async def _validate_homepage_carousel(db: AsyncSession, slides: list):
                     status_code=400,
                     detail=f"Slide at index {idx} of type {slide_type} must have a non-empty string image_url."
                 )
-            if not target_url or not isinstance(target_url, str) or not target_url.strip():
+            if target_url is not None and not isinstance(target_url, str):
                 raise HTTPException(
                     status_code=400,
-                    detail=f"Slide at index {idx} of type {slide_type} must have a non-empty string target_url."
+                    detail=f"Slide at index {idx} of type {slide_type} has invalid target_url format."
                 )
+
 
 
 @router.get("/homepage-carousel/draft")

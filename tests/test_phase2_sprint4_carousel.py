@@ -135,3 +135,47 @@ async def test_homepage_carousel_publish_and_resolve(client: AsyncClient, supera
     assert slide3["subtitle"] == "Custom Banner Subtitle"
     assert slide3["image_url"] == "https://images.com/custom.png"
     assert slide3["target_url"] == "https://images.com/custom-target"
+
+
+@pytest.mark.anyio
+async def test_homepage_carousel_optional_target_url(client: AsyncClient, superadmin_auth_headers: dict):
+    # 1. Update draft with a CUSTOM slide where target_url is omitted or empty
+    payload = {
+        "slides": [
+            {
+                "type": "CUSTOM",
+                "title": "Optional Link Slide",
+                "subtitle": "Should not have target_url required",
+                "image_url": "https://images.com/custom.png",
+                "target_url": "",
+                "is_active": True
+            },
+            {
+                "type": "CUSTOM",
+                "title": "Omitted Link Slide",
+                "subtitle": "Should not have target_url required",
+                "image_url": "https://images.com/custom.png",
+                "is_active": True
+            }
+        ]
+    }
+    
+    put_res = await client.put("/api/v1/superadmin/homepage-carousel/draft", json=payload, headers=superadmin_auth_headers)
+    assert put_res.status_code == 200
+    
+    # 2. Publish draft
+    pub_res = await client.post("/api/v1/superadmin/homepage-carousel/publish", headers=superadmin_auth_headers)
+    assert pub_res.status_code == 200
+    
+    # 3. Fetch consolidated homepage and verify resolved slides
+    hp_res = await client.get("/api/v1/public/homepage")
+    assert hp_res.status_code == 200
+    carousel = hp_res.json()["carousel"]
+    assert len(carousel) == 2
+    
+    assert carousel[0]["title"] == "Optional Link Slide"
+    assert carousel[0]["target_url"] is None
+    
+    assert carousel[1]["title"] == "Omitted Link Slide"
+    assert carousel[1]["target_url"] is None
+
