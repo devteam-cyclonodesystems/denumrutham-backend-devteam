@@ -1815,7 +1815,7 @@ async def get_public_featured_temples(
 
 @public_router.get("/upcoming-festivals", response_model=List[dict])
 async def get_upcoming_festivals_endpoint(
-    limit: int = Query(10, ge=1, le=50),
+    limit: int = Query(10, ge=1, le=150),
     db: AsyncSession = Depends(get_db)
 ):
     """
