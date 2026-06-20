@@ -280,8 +280,11 @@ class TempleImage(Base):
 
     @classmethod
     def filter_visible(cls, images):
-        """Filter out hidden images from public display."""
-        return [img for img in images if getattr(img, 'is_visible', True) is not False]
+        """Filter out hidden images from public display, but always allow hero banners."""
+        return [
+            img for img in images 
+            if getattr(img, 'is_visible', True) is not False or img.category in ('HERO_DESKTOP', 'HERO_MOBILE')
+        ]
 
 
 class TempleKeyPersonnel(Base):
