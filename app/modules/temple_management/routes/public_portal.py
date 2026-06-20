@@ -879,7 +879,7 @@ async def get_public_temple_bootstrap(
         "enable_donations": settings_snapshot.get("enable_donations") if settings_snapshot.get("enable_donations") is not None else True,
         "enable_hall_booking": settings_snapshot.get("enable_hall_booking") if settings_snapshot.get("enable_hall_booking") is not None else True,
         "enable_store": settings_snapshot.get("enable_store") if settings_snapshot.get("enable_store") is not None else True,
-        "feature_visibility": settings_snapshot.get("feature_visibility") or {},
+        "feature_visibility": feature_visibility,
         "seo_keywords": settings_snapshot.get("seo_keywords"),
         "og_image_url": settings_snapshot.get("og_image_url"),
         "hero_title": settings_snapshot.get("hero_title"),
