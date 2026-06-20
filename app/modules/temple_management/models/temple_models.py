@@ -124,7 +124,7 @@ class Temple(Base):
 
     # Multi-Tier Operating & Subscription Model
     management_mode = Column(String(30), nullable=False, default="SELF_MANAGED")
-    directory_status = Column(String(30), nullable=False, default="ACTIVE")
+    directory_status = Column(String(30), nullable=False, default="INACTIVE")
     subscription_plan = Column(String(40), nullable=False, default="SELF_MANAGED_PRO")
 
     # Phase 6 Additions

@@ -696,6 +696,7 @@ class RegistrationService:
                 raise Exception("Invalid status transition")
 
             temple.status = "APPROVED"
+            temple.directory_status = "INACTIVE"
             
             # Resolve canonical state_id and district_id from state_master and district_master
             from app.modules.temple_management.models.temple_models import StateMaster, DistrictMaster
