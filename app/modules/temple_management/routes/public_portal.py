@@ -1850,7 +1850,14 @@ async def get_homepage_bootstrap_endpoint(
     Retrieve consolidated discovery data for the Google-style homepage.
     """
     from app.modules.temple_management.services.homepage_service import HomepageService
-    return await HomepageService.get_homepage_data(db)
+    try:
+        return await HomepageService.get_homepage_data(db)
+    except Exception as e:
+        import traceback
+        return {
+            "error_debug": str(e),
+            "traceback": traceback.format_exc()
+        }
 
 
 @public_router.get("/nearby-temples", response_model=List[dict])
