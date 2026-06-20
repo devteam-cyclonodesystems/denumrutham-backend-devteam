@@ -548,19 +548,25 @@ async def get_public_states_directory(
     Retrieve a list of active states and the count of published temples in each state.
     """
     from sqlalchemy import func
+    from app.models.domain import StateMaster
+    import sqlalchemy as sa
     
     stmt = (
-        select(TempleProfile.state, func.count(Temple.id).label("temple_count"))
-        .join(Temple, Temple.id == TempleProfile.temple_id)
+        select(
+            sa.func.coalesce(StateMaster.name, TempleProfile.state, Temple.state).label("state_name"),
+            func.count(Temple.id).label("temple_count")
+        )
+        .select_from(Temple)
+        .outerjoin(TempleProfile, Temple.id == TempleProfile.temple_id)
+        .outerjoin(StateMaster, Temple.state_id == StateMaster.id)
         .join(TempleWebsiteSettingsLive, Temple.id == TempleWebsiteSettingsLive.temple_id)
         .filter(Temple.is_active == True, Temple.status == "APPROVED", Temple.directory_status == "ACTIVE")
-        .filter(TempleProfile.state != None, TempleProfile.state != "")
-        .group_by(TempleProfile.state)
-        .order_by(TempleProfile.state.asc())
+        .group_by(sa.text("state_name"))
+        .order_by(sa.text("state_name ASC"))
     )
     result = await db.execute(stmt)
     rows = result.all()
-    return [{"state": r.state, "temple_count": r.temple_count} for r in rows]
+    return [{"state": r.state_name, "temple_count": r.temple_count} for r in rows if r.state_name and r.state_name.strip()]
 
 
 @directory_router.get(
@@ -576,20 +582,31 @@ async def get_public_districts_directory(
     Retrieve a list of districts and temple counts for a specific state.
     """
     from sqlalchemy import func
+    from app.models.domain import StateMaster, DistrictMaster
+    import sqlalchemy as sa
     
     stmt = (
-        select(TempleProfile.district, func.count(Temple.id).label("temple_count"))
-        .join(Temple, Temple.id == TempleProfile.temple_id)
+        select(
+            sa.func.coalesce(DistrictMaster.name, TempleProfile.district, Temple.district).label("district_name"),
+            func.count(Temple.id).label("temple_count")
+        )
+        .select_from(Temple)
+        .outerjoin(TempleProfile, Temple.id == TempleProfile.temple_id)
+        .outerjoin(StateMaster, Temple.state_id == StateMaster.id)
+        .outerjoin(DistrictMaster, Temple.district_id == DistrictMaster.id)
         .join(TempleWebsiteSettingsLive, Temple.id == TempleWebsiteSettingsLive.temple_id)
-        .filter(Temple.is_active == True, Temple.status == "APPROVED", Temple.directory_status == "ACTIVE")
-        .filter(TempleProfile.state.ilike(state))
-        .filter(TempleProfile.district != None, TempleProfile.district != "")
-        .group_by(TempleProfile.district)
-        .order_by(TempleProfile.district.asc())
+        .filter(
+            Temple.is_active == True,
+            Temple.status == "APPROVED",
+            Temple.directory_status == "ACTIVE",
+            sa.func.coalesce(StateMaster.name, TempleProfile.state, Temple.state).ilike(state)
+        )
+        .group_by(sa.text("district_name"))
+        .order_by(sa.text("district_name ASC"))
     )
     result = await db.execute(stmt)
     rows = result.all()
-    return [{"district": r.district, "temple_count": r.temple_count} for r in rows]
+    return [{"district": r.district_name, "temple_count": r.temple_count} for r in rows if r.district_name and r.district_name.strip()]
 
 
 @router.get(

@@ -233,18 +233,24 @@ class HomepageService:
 
     @classmethod
     async def get_states_directory(cls, db: AsyncSession) -> List[Dict[str, Any]]:
+        from app.models.domain import StateMaster
+        
         stmt = (
-            select(TempleProfile.state, sa.func.count(Temple.id).label("temple_count"))
-            .join(Temple, Temple.id == TempleProfile.temple_id)
+            select(
+                sa.func.coalesce(StateMaster.name, TempleProfile.state, Temple.state).label("state_name"),
+                sa.func.count(Temple.id).label("temple_count")
+            )
+            .select_from(Temple)
+            .outerjoin(TempleProfile, Temple.id == TempleProfile.temple_id)
+            .outerjoin(StateMaster, Temple.state_id == StateMaster.id)
             .join(TempleWebsiteSettingsLive, Temple.id == TempleWebsiteSettingsLive.temple_id)
             .filter(Temple.is_active == True, Temple.status == "APPROVED", Temple.directory_status == "ACTIVE")
-            .filter(TempleProfile.state != None, TempleProfile.state != "")
-            .group_by(TempleProfile.state)
-            .order_by(TempleProfile.state.asc())
+            .group_by(sa.text("state_name"))
+            .order_by(sa.text("state_name ASC"))
         )
         result = await db.execute(stmt)
         rows = result.all()
-        return [{"state": r.state, "temple_count": r.temple_count} for r in rows]
+        return [{"state": r.state_name, "temple_count": r.temple_count} for r in rows if r.state_name and r.state_name.strip()]
 
     @classmethod
     async def calculate_trending_scores(cls, db: AsyncSession, followers_map: Dict[UUID, int]) -> Dict[UUID, float]:
