@@ -2,12 +2,14 @@
 Temple Follow Routes — Follow/unfollow temples, re-book from history.
 """
 from fastapi import APIRouter, Depends, HTTPException
+from sqlalchemy import select
 from sqlalchemy.ext.asyncio import AsyncSession
 from uuid import UUID
 from typing import List
 
 from app.core.database import get_db
 from app.core.deps import get_current_user
+from app.models.domain import TempleFollower, TempleFollowerPreference
 from app.schemas.domain import TokenData
 from app.schemas.follow import FollowTempleRequest, FollowedTempleResponse, FollowStatusResponse
 from app.services.follow_service import FollowService
@@ -111,7 +113,6 @@ async def get_follower_preferences(
     if not follower:
         raise HTTPException(status_code=404, detail="Follower record not found")
 
-    from app.models.domain import TempleFollowerPreference
     stmt = select(TempleFollowerPreference).filter(TempleFollowerPreference.follower_id == follower.id)
     res = await db.execute(stmt)
     pref = res.scalars().first()
@@ -163,7 +164,6 @@ async def update_follower_preferences(
     if not follower:
         raise HTTPException(status_code=404, detail="Follower record not found")
 
-    from app.models.domain import TempleFollowerPreference
     stmt = select(TempleFollowerPreference).filter(TempleFollowerPreference.follower_id == follower.id)
     res = await db.execute(stmt)
     pref = res.scalars().first()
