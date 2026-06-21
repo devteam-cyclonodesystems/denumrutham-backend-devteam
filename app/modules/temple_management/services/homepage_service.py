@@ -59,12 +59,10 @@ class HomepageService:
 
     @classmethod
     async def resolve_claim_status(cls, db: AsyncSession, temple: Temple) -> str:
-        if temple.management_mode == "SELF_MANAGED":
-            return "CLAIMED"
-        if temple.management_mode == "GOVERNED":
-            return "GOVERNED"
         if temple.verification_level == 3:
             return "OFFICIAL"
+        if temple.management_mode in ("SELF_MANAGED", "GOVERNED"):
+            return "CLAIMED"
         if temple.verification_level == 2:
             return "CLAIMED"
             

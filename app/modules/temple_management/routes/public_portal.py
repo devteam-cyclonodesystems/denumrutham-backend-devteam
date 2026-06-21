@@ -97,12 +97,10 @@ async def resolve_claim_status(db: AsyncSession, temple: Temple) -> str:
     - Level 2: CLAIMED
     - Level 3: OFFICIAL
     """
-    if temple.management_mode == "SELF_MANAGED":
-        return "CLAIMED"
-    if temple.management_mode == "GOVERNED":
-        return "GOVERNED"
     if temple.verification_level == 3:
         return "OFFICIAL"
+    if temple.management_mode in ("SELF_MANAGED", "GOVERNED"):
+        return "CLAIMED"
     elif temple.verification_level == 2:
         return "CLAIMED"
         
