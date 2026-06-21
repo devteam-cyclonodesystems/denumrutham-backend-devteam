@@ -13,13 +13,13 @@ from typing import List, Optional
 from datetime import datetime, timezone, timedelta
 from PIL import Image, ImageOps
 
-from app.api.deps import get_db, get_current_user_optional
+from app.api.deps import get_db, get_current_user, get_current_user_optional
 from app.models.domain import (
     Temple, TempleWebsiteSettingsLive, TempleAdvertisement, PlatformAdvertisement,
     StateMaster, DistrictMaster, TempleSearchIndex
 )
 from app.modules.temple_management.models.temple_models import TempleImage, TempleProfile, TempleFestival, TempleFollower
-from app.modules.inventory.schemas.store import StoreProductResponse
+from app.modules.inventory.schemas.store import StoreProductResponse, AuctionListingResponse
 from app.core.limiter import limiter
 from app.modules.temple_management.services.recommendation_service import RecommendationService
 from app.modules.temple_management.schemas.recommendation import PublicResolverPayload, PublicRecommendationResponse
@@ -641,11 +641,310 @@ async def list_public_store_products(
     prod_stmt = select(StoreProduct).filter(
         StoreProduct.temple_id == temple.id,
         StoreProduct.is_active == True,
-        StoreProduct.is_archived == False
+        StoreProduct.is_archived == False,
+        StoreProduct.category != "Auction"
     ).order_by(StoreProduct.name)
     
     prod_res = await db.execute(prod_stmt)
     return prod_res.scalars().all()
+
+
+@router.get(
+    "/{slug}/store/auctions",
+    response_model=List[AuctionListingResponse],
+    tags=["public-store"]
+)
+async def list_public_store_auctions(
+    slug: str,
+    db: AsyncSession = Depends(get_db)
+):
+    """
+    Retrieve list of active, unarchived auction listings for a temple by its slug (domain).
+    Does NOT require authentication to view.
+    """
+    if not re.match(r"^[a-z0-9-]+$", slug):
+        raise HTTPException(status_code=400, detail="Invalid temple slug format")
+        
+    result = await db.execute(
+        select(Temple).filter(Temple.domain == slug, Temple.is_active == True, Temple.status.in_(["APPROVED", "MERGED"]))
+    )
+    temple = result.scalars().first()
+    if not temple:
+        raise HTTPException(status_code=404, detail="Temple not found")
+
+    from app.modules.inventory.models.inventory_models import AuctionListing
+    from sqlalchemy.orm import selectinload
+
+    auc_stmt = select(AuctionListing).options(
+        selectinload(AuctionListing.product), 
+        selectinload(AuctionListing.bids)
+    ).filter(
+        AuctionListing.temple_id == temple.id,
+        AuctionListing.is_active == True,
+        AuctionListing.is_archived == False,
+        AuctionListing.status.in_(["AVAILABLE", "RESERVED"])
+    ).order_by(AuctionListing.created_at.desc())
+    
+    auc_res = await db.execute(auc_stmt)
+    return auc_res.scalars().all()
+
+
+@router.post(
+    "/{slug}/store/auctions/{auction_id}/bid",
+    tags=["public-store"]
+)
+async def place_public_auction_bid(
+    slug: str,
+    auction_id: UUID,
+    payload: dict,
+    db: AsyncSession = Depends(get_db),
+    current_user: TokenData = Depends(get_current_user),
+):
+    """
+    Allows a logged-in devotee to place a bid on an active auction.
+    This is concurrency-safe and locks stock reservations.
+    """
+    if not re.match(r"^[a-z0-9-]+$", slug):
+        raise HTTPException(status_code=400, detail="Invalid temple slug format")
+        
+    result = await db.execute(
+        select(Temple).filter(Temple.domain == slug, Temple.is_active == True, Temple.status.in_(["APPROVED", "MERGED"]))
+    )
+    temple = result.scalars().first()
+    if not temple:
+        raise HTTPException(status_code=404, detail="Temple not found")
+
+    from app.modules.inventory.models.inventory_models import AuctionListing, StoreStock, StoreStockReservation, InventoryStockLedger, StoreProduct, AuctionBid
+    from app.modules.inventory.models.inventory_models import InventoryMovementType
+    from app.modules.auth.models.auth_models import User
+    
+    # 1. Load devotee user to get their name
+    user_uuid = UUID(str(current_user.sub)) if current_user.sub else None
+    if not user_uuid:
+        raise HTTPException(status_code=401, detail="Authentication required")
+        
+    user_res = await db.execute(select(User).filter(User.id == user_uuid))
+    db_user = user_res.scalars().first()
+    if not db_user:
+        raise HTTPException(status_code=404, detail="User not found")
+        
+    bidder_name = db_user.name or db_user.email or "Devotee"
+    bid_amount = float(payload.get("bid_amount", 0.0))
+
+    # 2. Load Auction listing
+    auc_res = await db.execute(
+        select(AuctionListing).filter(AuctionListing.id == auction_id, AuctionListing.temple_id == temple.id)
+    )
+    auction = auc_res.scalars().first()
+    if not auction:
+        raise HTTPException(status_code=404, detail="Auction listing not found")
+        
+    if auction.status not in ["AVAILABLE", "RESERVED"]:
+        raise HTTPException(status_code=400, detail="Auction is no longer active")
+        
+    if bid_amount <= auction.current_bid:
+        raise HTTPException(status_code=400, detail=f"Bid must be higher than current bid: {auction.current_bid}")
+
+    # 3. Concurrency-safe Stock check and Reservation
+    from app.core.database.session import utcnow
+    expires_at = utcnow() + timedelta(minutes=10)
+    
+    async with db.begin_nested():
+        reservation = None
+        if auction.status == "AVAILABLE":
+            # Lock stock row
+            stock_res = await db.execute(
+                select(StoreStock)
+                .filter(StoreStock.product_id == auction.product_id, StoreStock.temple_id == temple.id)
+                .with_for_update()
+            )
+            stock = stock_res.scalars().first()
+            if not stock or stock.quantity < auction.quantity:
+                raise HTTPException(status_code=400, detail="Insufficient physical stock in warehouse to lock this auction bid")
+                
+            # Deduct stock and increment version
+            before_stock = stock.quantity
+            after_stock = before_stock - auction.quantity
+            stock.quantity = after_stock
+            stock.version_number += 1
+            
+            # Create StoreStockReservation
+            reservation = StoreStockReservation(
+                temple_id=temple.id,
+                product_id=auction.product_id,
+                quantity_reserved=auction.quantity,
+                reservation_status="RESERVED",
+                expires_at=expires_at,
+                reference_type="AUCTION",
+                reference_id=str(auction.id),
+                location_id=stock.location_id
+            )
+            db.add(reservation)
+            await db.flush()
+            
+            # Record reservation movement in Ledger
+            prod_res = await db.execute(select(StoreProduct).filter(StoreProduct.id == auction.product_id))
+            product = prod_res.scalars().first()
+            
+            ledger = InventoryStockLedger(
+                temple_id=temple.id,
+                domain_type="STORE",
+                store_product_id=auction.product_id,
+                kalavara_item_id=None,
+                item_name=product.name if product else "Product",
+                location_id=stock.location_id,
+                movement_type=InventoryMovementType.AUCTION_RESERVATION,
+                quantity_change=-auction.quantity,
+                before_stock=before_stock,
+                after_stock=after_stock,
+                reference_type="AUCTION_RESERVATION",
+                reference_id=str(reservation.id),
+                performed_by=user_uuid,
+                remarks=f"Auction bid placed by devotee {bidder_name}: Reservation locked for 10 minutes (Expires {expires_at.strftime('%H:%M:%S')})"
+            )
+            db.add(ledger)
+        else:
+            # Auction is already RESERVED, so stock is already locked and reserved.
+            res_res = await db.execute(
+                select(StoreStockReservation)
+                .filter(
+                    StoreStockReservation.reference_type == "AUCTION",
+                    StoreStockReservation.reference_id == str(auction.id),
+                    StoreStockReservation.reservation_status == "RESERVED"
+                )
+            )
+            reservation = res_res.scalars().first()
+            if not reservation:
+                # Re-check stock and lock it
+                stock_res = await db.execute(
+                    select(StoreStock)
+                    .filter(StoreStock.product_id == auction.product_id, StoreStock.temple_id == temple.id)
+                    .with_for_update()
+                )
+                stock = stock_res.scalars().first()
+                if not stock or stock.quantity < auction.quantity:
+                    raise HTTPException(status_code=400, detail="Insufficient physical stock in warehouse to lock this auction bid")
+                
+                # Deduct stock and increment version
+                before_stock = stock.quantity
+                after_stock = before_stock - auction.quantity
+                stock.quantity = after_stock
+                stock.version_number += 1
+
+                reservation = StoreStockReservation(
+                    temple_id=temple.id,
+                    product_id=auction.product_id,
+                    quantity_reserved=auction.quantity,
+                    reservation_status="RESERVED",
+                    expires_at=expires_at,
+                    reference_type="AUCTION",
+                    reference_id=str(auction.id),
+                    location_id=stock.location_id
+                )
+                db.add(reservation)
+                await db.flush()
+
+                # Record reservation movement in Ledger
+                prod_res = await db.execute(select(StoreProduct).filter(StoreProduct.id == auction.product_id))
+                product = prod_res.scalars().first()
+                
+                ledger = InventoryStockLedger(
+                    temple_id=temple.id,
+                    domain_type="STORE",
+                    store_product_id=auction.product_id,
+                    kalavara_item_id=None,
+                    item_name=product.name if product else "Product",
+                    location_id=stock.location_id,
+                    movement_type=InventoryMovementType.AUCTION_RESERVATION,
+                    quantity_change=-auction.quantity,
+                    before_stock=before_stock,
+                    after_stock=after_stock,
+                    reference_type="AUCTION_RESERVATION",
+                    reference_id=str(reservation.id),
+                    performed_by=user_uuid,
+                    remarks=f"Auction bid placed by devotee {bidder_name}: Reservation re-locked for 10 minutes (Expires {expires_at.strftime('%H:%M:%S')})"
+                )
+                db.add(ledger)
+            else:
+                reservation.expires_at = expires_at
+
+        # Update Auction Status & Current Bid
+        auction.current_bid = bid_amount
+        auction.status = "RESERVED"
+        
+        # Create AuctionBid record
+        bid_record = AuctionBid(
+            temple_id=temple.id,
+            auction_id=auction.id,
+            bidder_name=bidder_name,
+            bid_amount=bid_amount,
+            created_at=utcnow()
+        )
+        db.add(bid_record)
+        
+    # Add Audit log
+    from app.modules.audit.services.audit_service import AuditService
+    await AuditService.log_action(
+        db=db,
+        temple_id=temple.id,
+        user_id=user_uuid,
+        role=current_user.role,
+        module_name="STORE",
+        action="AUCTION_BID_PLACED",
+        action_type="CREATE",
+        entity_id=str(bid_record.id),
+        new_value={"bid_amount": float(bid_amount), "bidder_name": bidder_name},
+        details=f"Devotee bid of Rs.{bid_amount} placed on auction '{auction.auction_code}' by {bidder_name}."
+    )
+        
+    await db.commit()
+    return {"status": "success", "current_bid": auction.current_bid, "reservation_id": reservation.id, "expires_at": expires_at}
+
+
+@router.get(
+    "/{slug}/halls",
+    tags=["public-portal"]
+)
+async def list_public_temple_halls(
+    slug: str,
+    db: AsyncSession = Depends(get_db)
+):
+    """
+    Retrieve active, unarchived halls/venues for a temple by its slug.
+    Does NOT require authentication.
+    """
+    if not re.match(r"^[a-z0-9-]+$", slug):
+        raise HTTPException(status_code=400, detail="Invalid temple slug format")
+        
+    result = await db.execute(
+        select(Temple).filter(Temple.domain == slug, Temple.is_active == True, Temple.status.in_(["APPROVED", "MERGED"]))
+    )
+    temple = result.scalars().first()
+    if not temple:
+        raise HTTPException(status_code=404, detail="Temple not found")
+
+    from app.modules.bookings.models.booking_models import Hall
+    hall_stmt = select(Hall).filter(
+        Hall.temple_id == temple.id,
+        Hall.is_active == True,
+        Hall.status == "active"
+    ).order_by(Hall.name)
+    
+    hall_res = await db.execute(hall_stmt)
+    halls = hall_res.scalars().all()
+    
+    return [
+        {
+            "id": str(hall.id),
+            "name": hall.name,
+            "capacity": hall.capacity,
+            "amenities": hall.amenities,
+            "price_per_day": hall.price_per_day,
+            "image_emoji": hall.image_emoji,
+            "photos": hall.photos
+        }
+        for hall in halls
+    ]
 
 
 @router.get(
