@@ -969,19 +969,17 @@ async def system_health_dashboard(
     )
     kalavara_low_count = kalavara_low_res.scalar() or 0
     
-    # Store low stock items (let's check if store stock is below 10, excluding active/upcoming auction products)
-    active_auc_prod_ids = select(AuctionListing.product_id).filter(
+    # Store low stock items (let's check if store stock is below 10, excluding auction products)
+    auc_prod_ids = select(AuctionListing.product_id).filter(
         AuctionListing.temple_id == tid,
-        AuctionListing.is_active == True,
-        AuctionListing.status.notin_(["SOLD", "RELEASED"]),
-        (AuctionListing.end_time == None) | (AuctionListing.end_time > utcnow())
+        AuctionListing.is_archived == False
     )
     
     store_low_res = await db.execute(
         select(func.count(StoreStock.id)).filter(
             StoreStock.temple_id == tid,
             StoreStock.quantity <= 10.0,
-            StoreStock.product_id.notin_(active_auc_prod_ids)
+            StoreStock.product_id.notin_(auc_prod_ids)
         )
     )
     store_low_count = store_low_res.scalar() or 0
