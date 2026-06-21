@@ -76,3 +76,51 @@ async def test_material_request_workflow(client: AsyncClient, auth_headers):
     items = items_resp.json()
     test_item = next(itm for itm in items if itm["id"] == item_id)
     assert test_item["stock"] == 42
+
+    # 6. Partially return items
+    return_resp1 = await client.post(
+        f"/api/v1/inventory/item-requests/{req_id}/returns",
+        json={
+            "items": [{"itemId": item_id, "qty": 3.0}],
+            "remarks": "Returning 3 coconut"
+        },
+        headers=auth_headers
+    )
+    assert return_resp1.status_code == 200
+    assert return_resp1.json()["status"] == "success"
+
+    # Fetch request list to verify updated status
+    list_resp = await client.get("/api/v1/inventory/item-requests", headers=auth_headers)
+    assert list_resp.status_code == 200
+    req_data = next(r for r in list_resp.json() if r["id"] == req_id)
+    assert req_data["status"] == "PARTIALLY RETURNED"
+    assert req_data["items_data"][0]["returnedQty"] == 3.0
+
+    # Stock should go up to 42 + 3 = 45
+    items_resp = await client.get("/api/v1/inventory/items", headers=auth_headers)
+    test_item = next(itm for itm in items_resp.json() if itm["id"] == item_id)
+    assert test_item["stock"] == 45
+
+    # 7. Fully return the remaining items (5 remaining)
+    return_resp2 = await client.post(
+        f"/api/v1/inventory/item-requests/{req_id}/returns",
+        json={
+            "items": [{"itemId": item_id, "qty": 5.0}],
+            "remarks": "Returning remaining 5 coconut"
+        },
+        headers=auth_headers
+    )
+    assert return_resp2.status_code == 200
+    assert return_resp2.json()["status"] == "success"
+
+    # Fetch request list to verify updated status
+    list_resp = await client.get("/api/v1/inventory/item-requests", headers=auth_headers)
+    assert list_resp.status_code == 200
+    req_data = next(r for r in list_resp.json() if r["id"] == req_id)
+    assert req_data["status"] == "RETURNED"
+    assert req_data["items_data"][0]["returnedQty"] == 8.0
+
+    # Stock should go up to 45 + 5 = 50
+    items_resp = await client.get("/api/v1/inventory/items", headers=auth_headers)
+    test_item = next(itm for itm in items_resp.json() if itm["id"] == item_id)
+    assert test_item["stock"] == 50

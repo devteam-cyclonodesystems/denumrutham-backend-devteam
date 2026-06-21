@@ -2186,6 +2186,7 @@ class InventoryService:
         from datetime import datetime
 
         tid = UUID(str(temple_id))
+        uid = UUID(str(user_id)) if user_id else None
        
         # 1. Fetch Request
         req_res = await db.execute(select(InventoryItemRequest).filter(InventoryItemRequest.id == request_id, InventoryItemRequest.temple_id == tid))
@@ -2193,29 +2194,53 @@ class InventoryService:
         if not request:
             raise ValueError("Item request not found")
 
-        # 2. Record stock movements (increase stock for returned items)
+        # 2. Record stock movements (increase stock for returned items) and update request items data
+        returned_map = {str(line.get("itemId") or line.get("item_id")): float(line.get("qty", 0)) for line in items}
+        
         return_details = []
-        for line in items:
-            item_id = line.get("itemId")
-            qty = line.get("qty", 0)
-            if item_id and qty > 0:
+        items_copy = []
+        fully_returned = True
+        any_returned = False
+        
+        for itm in (request.items_data or []):
+            new_itm = dict(itm)
+            iid_str = str(new_itm.get("itemId") or new_itm.get("item_id"))
+            issued = float(new_itm.get("issuedQty") if "issuedQty" in new_itm else new_itm.get("qty", 0.0))
+            current_returned = float(new_itm.get("returnedQty", 0.0))
+            
+            to_return = returned_map.get(iid_str, 0.0)
+            if to_return > 0:
                 await InventoryService.record_movement(
                     db=db,
                     temple_id=tid,
-                    item_id=UUID(str(item_id)),
-                    qty_change=float(qty), # Positive for return
+                    item_id=UUID(iid_str),
+                    qty_change=to_return, # Positive for return
                     movement_type=InventoryMovementType.RETURN,
-                    performed_by=user_id,
+                    performed_by=uid,
                     location_id=None,
                     reference_type="RETURN",
                     reference_id=request.req_code or str(request.id)[:8],
                     remarks=f"Returned from request {request.req_code or str(request.id)[:8]}"
                 )
                 # Find item name
-                item_res = await db.execute(select(InventoryItem).filter(InventoryItem.id == UUID(str(item_id))))
-                itm = item_res.scalars().first()
-                name = itm.name if itm else "Unknown Item"
-                return_details.append(f"{qty}x {name}")
+                item_res = await db.execute(select(InventoryItem).filter(InventoryItem.id == UUID(iid_str)))
+                itm_obj = item_res.scalars().first()
+                name = itm_obj.name if itm_obj else "Unknown Item"
+                return_details.append(f"{to_return}x {name}")
+                
+                current_returned += to_return
+                new_itm["returnedQty"] = current_returned
+
+            if current_returned > 0:
+                any_returned = True
+            if current_returned < issued and issued > 0:
+                fully_returned = False
+                
+            items_copy.append(new_itm)
+
+        request.items_data = items_copy
+        from sqlalchemy.orm.attributes import flag_modified
+        flag_modified(request, "items_data")
 
         # 3. Append to timeline in request remarks
         from datetime import datetime, timedelta, timezone
@@ -2230,7 +2255,8 @@ class InventoryService:
         else:
             request.remarks = return_log
             
-        request.status = "RETURNED"
+        if any_returned:
+            request.status = "RETURNED" if fully_returned else "PARTIALLY RETURNED"
         
         await db.commit()
         await db.refresh(request)
