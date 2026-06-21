@@ -601,10 +601,10 @@ async def update_booking_details(
         booking.payment_mode = payload["payment_mode"]
     if "prasadam_collection" in payload:
         booking.prasadam_collection = payload["prasadam_collection"]
-        if booking.prasadam_collection != "Deliver to home":
+        if booking.prasadam_collection != "Deliver to Temple Devotees":
             booking.delivery_charge = 0.0
     if "delivery_charge" in payload:
-        booking.delivery_charge = float(payload["delivery_charge"]) if booking.prasadam_collection == "Deliver to home" else 0.0
+        booking.delivery_charge = float(payload["delivery_charge"]) if booking.prasadam_collection == "Deliver to Temple Devotees" else 0.0
     if "ritual_time" in payload:
         if payload["ritual_time"]:
             try:

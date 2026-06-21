@@ -176,7 +176,7 @@ class ArchanaService:
         catalog_items = await ArchanaRepository.get_catalog(db, tid, status=CatalogStatus.APPROVED)
         catalog = {str(s.id): s for s in catalog_items}
         
-        delivery_charge = booking_in.delivery_charge if booking_in.prasadam_collection == "Deliver to home" else 0.0
+        delivery_charge = booking_in.delivery_charge if booking_in.prasadam_collection == "Deliver to Temple Devotees" else 0.0
         booking = EnterpriseArchanaBooking(
             temple_id=tid,
             ref_id=ref_id,
