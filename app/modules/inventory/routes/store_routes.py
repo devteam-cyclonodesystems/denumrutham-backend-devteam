@@ -588,22 +588,129 @@ async def place_bid_and_reserve(
 
     # 2. Concurrency-safe Stock check and Reservation
     async with db.begin_nested():
-        # Lock stock row
-        stock_res = await db.execute(
-            select(StoreStock)
-            .filter(StoreStock.product_id == auction.product_id, StoreStock.temple_id == tid)
-            .with_for_update()
-        )
-        stock = stock_res.scalars().first()
-        if not stock or stock.quantity < auction.quantity:
-            raise HTTPException(status_code=400, detail="Insufficient physical stock in warehouse to lock this auction bid")
+        reservation = None
+        if auction.status == "AVAILABLE":
+            # Lock stock row
+            stock_res = await db.execute(
+                select(StoreStock)
+                .filter(StoreStock.product_id == auction.product_id, StoreStock.temple_id == tid)
+                .with_for_update()
+            )
+            stock = stock_res.scalars().first()
+            if not stock or stock.quantity < auction.quantity:
+                raise HTTPException(status_code=400, detail="Insufficient physical stock in warehouse to lock this auction bid")
+                
+            # Deduct stock and increment version
+            before_stock = stock.quantity
+            after_stock = before_stock - auction.quantity
+            stock.quantity = after_stock
+            stock.version_number += 1
             
-        # Deduct stock and increment version
-        before_stock = stock.quantity
-        after_stock = before_stock - auction.quantity
-        stock.quantity = after_stock
-        stock.version_number += 1
-        
+            # Create StoreStockReservation
+            # Set 10-minute expiry for auction reservation locks
+            expires_at = utcnow() + timedelta(minutes=10)
+            
+            reservation = StoreStockReservation(
+                temple_id=tid,
+                product_id=auction.product_id,
+                quantity_reserved=auction.quantity,
+                reservation_status="RESERVED",
+                expires_at=expires_at,
+                reference_type="AUCTION",
+                reference_id=str(auction.id),
+                location_id=stock.location_id
+            )
+            db.add(reservation)
+            await db.flush()
+            
+            # Record reservation movement in Ledger
+            prod_res = await db.execute(select(StoreProduct).filter(StoreProduct.id == auction.product_id))
+            product = prod_res.scalars().first()
+            
+            ledger = InventoryStockLedger(
+                temple_id=tid,
+                domain_type="STORE",
+                store_product_id=auction.product_id,
+                kalavara_item_id=None,
+                item_name=product.name if product else "Product",
+                location_id=stock.location_id,
+                movement_type=InventoryMovementType.AUCTION_RESERVATION,
+                quantity_change=-auction.quantity,
+                before_stock=before_stock,
+                after_stock=after_stock,
+                reference_type="AUCTION_RESERVATION",
+                reference_id=str(reservation.id),
+                performed_by=user_uuid,
+                remarks=f"Auction bid placed by {bidder_name}: Reservation locked for 10 minutes (Expires {expires_at.strftime('%H:%M:%S')})"
+            )
+            db.add(ledger)
+        else:
+            # Auction is already RESERVED, so stock is already locked and reserved.
+            # Retrieve the existing reservation record
+            res_res = await db.execute(
+                select(StoreStockReservation)
+                .filter(
+                    StoreStockReservation.reference_type == "AUCTION",
+                    StoreStockReservation.reference_id == str(auction.id),
+                    StoreStockReservation.reservation_status == "RESERVED"
+                )
+            )
+            reservation = res_res.scalars().first()
+            expires_at = utcnow() + timedelta(minutes=10)
+            if not reservation:
+                # Re-check stock and lock it in case we need to re-create the reservation
+                stock_res = await db.execute(
+                    select(StoreStock)
+                    .filter(StoreStock.product_id == auction.product_id, StoreStock.temple_id == tid)
+                    .with_for_update()
+                )
+                stock = stock_res.scalars().first()
+                if not stock or stock.quantity < auction.quantity:
+                    raise HTTPException(status_code=400, detail="Insufficient physical stock in warehouse to lock this auction bid")
+                
+                # Deduct stock and increment version
+                before_stock = stock.quantity
+                after_stock = before_stock - auction.quantity
+                stock.quantity = after_stock
+                stock.version_number += 1
+
+                reservation = StoreStockReservation(
+                    temple_id=tid,
+                    product_id=auction.product_id,
+                    quantity_reserved=auction.quantity,
+                    reservation_status="RESERVED",
+                    expires_at=expires_at,
+                    reference_type="AUCTION",
+                    reference_id=str(auction.id),
+                    location_id=stock.location_id
+                )
+                db.add(reservation)
+                await db.flush()
+
+                # Record reservation movement in Ledger
+                prod_res = await db.execute(select(StoreProduct).filter(StoreProduct.id == auction.product_id))
+                product = prod_res.scalars().first()
+                
+                ledger = InventoryStockLedger(
+                    temple_id=tid,
+                    domain_type="STORE",
+                    store_product_id=auction.product_id,
+                    kalavara_item_id=None,
+                    item_name=product.name if product else "Product",
+                    location_id=stock.location_id,
+                    movement_type=InventoryMovementType.AUCTION_RESERVATION,
+                    quantity_change=-auction.quantity,
+                    before_stock=before_stock,
+                    after_stock=after_stock,
+                    reference_type="AUCTION_RESERVATION",
+                    reference_id=str(reservation.id),
+                    performed_by=user_uuid,
+                    remarks=f"Auction bid placed by {bidder_name}: Reservation re-locked for 10 minutes (Expires {expires_at.strftime('%H:%M:%S')})"
+                )
+                db.add(ledger)
+            else:
+                reservation.expires_at = expires_at
+
         # Update Auction Status & Current Bid
         auction.current_bid = bid_amount
         auction.status = "RESERVED"
@@ -617,45 +724,6 @@ async def place_bid_and_reserve(
             created_at=utcnow()
         )
         db.add(bid_record)
-
-        # Create StoreStockReservation
-        # Set 10-minute expiry for auction reservation locks
-        expires_at = utcnow() + timedelta(minutes=10)
-        
-        reservation = StoreStockReservation(
-            temple_id=tid,
-            product_id=auction.product_id,
-            quantity_reserved=auction.quantity,
-            reservation_status="RESERVED",
-            expires_at=expires_at,
-            reference_type="AUCTION",
-            reference_id=str(auction.id),
-            location_id=stock.location_id
-        )
-        db.add(reservation)
-        await db.flush()
-        
-        # Record reservation movement in Ledger
-        prod_res = await db.execute(select(StoreProduct).filter(StoreProduct.id == auction.product_id))
-        product = prod_res.scalars().first()
-        
-        ledger = InventoryStockLedger(
-            temple_id=tid,
-            domain_type="STORE",
-            store_product_id=auction.product_id,
-            kalavara_item_id=None,
-            item_name=product.name if product else "Product",
-            location_id=stock.location_id,
-            movement_type=InventoryMovementType.AUCTION_RESERVATION,
-            quantity_change=-auction.quantity,
-            before_stock=before_stock,
-            after_stock=after_stock,
-            reference_type="AUCTION_RESERVATION",
-            reference_id=str(reservation.id),
-            performed_by=user_uuid,
-            remarks=f"Auction bid placed by {bidder_name}: Reservation locked for 10 minutes (Expires {expires_at.strftime('%H:%M:%S')})"
-        )
-        db.add(ledger)
         
     # Add Audit log
     from app.modules.audit.services.audit_service import AuditService

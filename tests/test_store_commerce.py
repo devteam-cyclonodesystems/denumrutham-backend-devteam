@@ -130,6 +130,26 @@ async def test_store_flow_e2e(client: AsyncClient, auth_headers: dict):
         stock = stock_res.scalars().first()
         assert stock.quantity == 5.0
 
+    # Place a second, higher bid - should succeed and NOT double-decrement stock
+    bid_resp2 = await client.post(
+        f"/api/v1/store/auctions/{auction_id}/bid",
+        json={"bid_amount": 8000.0},
+        headers=auth_headers
+    )
+    assert bid_resp2.status_code == 200, bid_resp2.text
+    bid_result2 = bid_resp2.json()
+    assert bid_result2["status"] == "success"
+    assert bid_result2["current_bid"] == 8000.0
+    assert UUID(bid_result2["reservation_id"]) == reservation_id
+
+    # Stock should still be 5.0 (not decremented further)
+    async with AsyncSessionLocal() as session:
+        stock_res = await session.execute(
+            select(StoreStock).filter(StoreStock.product_id == product_id)
+        )
+        stock = stock_res.scalars().first()
+        assert stock.quantity == 5.0
+
     # 5. Settle Auction - Settle confirms reservation and generates sales order
     settle_idempotency = f"key-settle-{uuid4()}"
     settle_resp = await client.post(
@@ -144,7 +164,7 @@ async def test_store_flow_e2e(client: AsyncClient, auth_headers: dict):
     )
     assert settle_resp.status_code == 200, settle_resp.text
     settled_order = settle_resp.json()
-    assert settled_order["total_amount"] == 7500.0
+    assert settled_order["total_amount"] == 8000.0
 
     # Stock remains 5.0 (reservation confirmed, net change is 0 since stock was locked at bid)
     async with AsyncSessionLocal() as session:
