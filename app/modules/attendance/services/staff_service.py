@@ -460,6 +460,9 @@ class StaffService:
             ("button", "inventory:approve_request", "Approve / Reject Material Requests"),
             ("button", "inventory:cancel_request", "Cancel Material Request"),
             ("button", "inventory:return_items", "Return Unused Inventory Items"),
+            ("tab", "inventory:view_price_approvals", "View Price Approvals Dashboard"),
+            ("button", "inventory:approve_price_approval", "Approve / Reject Price Approvals (Sensitive)"),
+
 
             # Temple Store
             ("button", "store:create_sale", "Create Store Sale / POS Checkout"),

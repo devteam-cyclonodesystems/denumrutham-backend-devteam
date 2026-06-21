@@ -401,12 +401,9 @@ async def record_item_return(
 async def list_price_approvals(
     status: Optional[str] = "PENDING_APPROVAL",
     db: AsyncSession = Depends(get_db),
-    current_user: TokenData = Depends(get_current_user),
+    current_user: TokenData = Depends(require_permission("inventory", "view_price_approvals")),
     temple_id: str = Depends(get_current_temple_id),
 ):
-    if current_user.role.upper() not in ("TEMPLE_MANAGER", "TEMPLE_ADMIN", "ADMIN", "SUPERADMIN"):
-        from fastapi import HTTPException
-        raise HTTPException(status_code=403, detail="Only managers or admins can access price approvals.")
     return await InventoryService.get_price_approvals(db=db, temple_id=temple_id, status=status)
 
 
@@ -414,12 +411,9 @@ async def list_price_approvals(
 async def approve_price_approval(
     request_id: UUID,
     db: AsyncSession = Depends(get_db),
-    current_user: TokenData = Depends(get_current_user),
+    current_user: TokenData = Depends(require_permission("inventory", "approve_price_approval")),
     temple_id: str = Depends(get_current_temple_id),
 ):
-    if current_user.role.upper() not in ("TEMPLE_MANAGER", "TEMPLE_ADMIN", "ADMIN", "SUPERADMIN"):
-        from fastapi import HTTPException
-        raise HTTPException(status_code=403, detail="Only managers or admins can approve price changes.")
     return await InventoryService.approve_price_approval(
         db=db,
         request_id=request_id,
@@ -435,12 +429,9 @@ async def reject_price_approval(
     request_id: UUID,
     payload: dict,
     db: AsyncSession = Depends(get_db),
-    current_user: TokenData = Depends(get_current_user),
+    current_user: TokenData = Depends(require_permission("inventory", "approve_price_approval")),
     temple_id: str = Depends(get_current_temple_id),
 ):
-    if current_user.role.upper() not in ("TEMPLE_MANAGER", "TEMPLE_ADMIN", "ADMIN", "SUPERADMIN"):
-        from fastapi import HTTPException
-        raise HTTPException(status_code=403, detail="Only managers or admins can reject price changes.")
     return await InventoryService.reject_price_approval(
         db=db,
         request_id=request_id,
