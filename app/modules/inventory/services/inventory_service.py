@@ -2205,7 +2205,11 @@ class InventoryService:
         for itm in (request.items_data or []):
             new_itm = dict(itm)
             iid_str = str(new_itm.get("itemId") or new_itm.get("item_id"))
-            issued = float(new_itm.get("issuedQty") if "issuedQty" in new_itm else new_itm.get("qty", 0.0))
+            issued = float(new_itm.get("issuedQty") or 0.0)
+            if issued <= 0.0:
+                issued = float(new_itm.get("approvedQty") or 0.0)
+            if issued <= 0.0:
+                issued = float(new_itm.get("qty") or 0.0)
             current_returned = float(new_itm.get("returnedQty", 0.0))
             
             to_return = returned_map.get(iid_str, 0.0)
