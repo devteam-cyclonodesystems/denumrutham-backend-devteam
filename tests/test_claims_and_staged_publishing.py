@@ -314,7 +314,7 @@ async def test_governed_website_publish_workflow(client, superadmin_auth_headers
             name="Governed Temple B",
             domain="temple-b",
             management_mode="GOVERNED",
-            directory_status="ACTIVE",
+            directory_status="INACTIVE",
             subscription_plan="GOVERNED_STANDARD",
             status="APPROVED",
             is_active=True
@@ -433,6 +433,11 @@ async def test_governed_website_publish_workflow(client, superadmin_auth_headers
         live_db = live_res.scalars().first()
         assert live_db is not None
         assert live_db.settings_snapshot["primary_color"] == "#ff6600"
+
+        # Verify that temple directory status became ACTIVE
+        temple_res = await session.execute(select(Temple).filter(Temple.id == temple_id))
+        temple_db = temple_res.scalars().first()
+        assert temple_db.directory_status == "ACTIVE"
 
 
 @pytest.mark.anyio

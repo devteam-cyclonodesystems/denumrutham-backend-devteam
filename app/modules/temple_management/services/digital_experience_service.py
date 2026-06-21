@@ -913,6 +913,9 @@ class DigitalExperienceService:
                     detail="Cannot publish website for an inactive or unapproved temple"
                 )
                 
+            # Update directory status to ACTIVE on publish
+            temple.directory_status = "ACTIVE"
+                
             # Governance checks
             if not bypass_mode_check and temple.management_mode != "SELF_MANAGED":
                 raise HTTPException(
@@ -1060,6 +1063,13 @@ class DigitalExperienceService:
             live = live_res.scalars().first()
             if not live:
                 raise HTTPException(status_code=404, detail="Website is not currently published")
+                
+            # Fetch Temple to update directory status
+            temple_stmt = select(Temple).filter(Temple.id == temple_id)
+            temple_res = await db.execute(temple_stmt)
+            temple = temple_res.scalars().first()
+            if temple:
+                temple.directory_status = "INACTIVE"
                 
             # 2. Delete live snapshot record
             await db.delete(live)
@@ -1242,6 +1252,13 @@ class DigitalExperienceService:
                     published_by=reviewer_id
                 )
                 db.add(live)
+
+            # Update Temple directory status to ACTIVE on approval
+            temple_stmt = select(Temple).filter(Temple.id == temple_id)
+            temple_res = await db.execute(temple_stmt)
+            temple = temple_res.scalars().first()
+            if temple:
+                temple.directory_status = "ACTIVE"
 
             # 4. Update draft status
             draft.approval_status = "APPROVED"
