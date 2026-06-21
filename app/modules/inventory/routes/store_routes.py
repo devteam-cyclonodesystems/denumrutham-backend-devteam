@@ -804,12 +804,28 @@ async def settle_auction(
         auction.status = "SOLD"
         auction.is_active = False
         
+        # Get highest bidder name if customer_name is default or missing
+        winner_name = payload.get("customer_name")
+        if not winner_name or winner_name == "Auction Winner":
+            bid_stmt = (
+                select(AuctionBid)
+                .filter(AuctionBid.auction_id == auction.id)
+                .order_by(AuctionBid.bid_amount.desc())
+                .limit(1)
+            )
+            bid_res = await db.execute(bid_stmt)
+            highest_bid = bid_res.scalars().first()
+            if highest_bid and highest_bid.bidder_name:
+                winner_name = highest_bid.bidder_name
+            else:
+                winner_name = "Auction Winner"
+
         # Generate Sales Order
         order_number = await generate_document_number(db, tid, "SO")
         sales_order = StoreSalesOrder(
             temple_id=tid,
             order_number=order_number,
-            customer_name=payload.get("customer_name", "Auction Winner"),
+            customer_name=winner_name,
             customer_phone=payload.get("customer_phone"),
             total_amount=auction.current_bid,
             payment_mode=payload.get("payment_mode", "UPI"),
