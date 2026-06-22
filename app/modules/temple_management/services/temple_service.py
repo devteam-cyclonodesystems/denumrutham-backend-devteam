@@ -121,4 +121,32 @@ class TempleService:
                 TempleServiceModel.active == True
             )
         )
-        return result.scalars().all()
+        services = result.scalars().all()
+        if not services:
+            from app.models.archana import ArchanaCatalog
+            from app.modules.bookings.models.archana import CatalogStatus
+            from app.modules.bookings.models.booking_models import ServiceType
+            
+            catalog_result = await db.execute(
+                select(ArchanaCatalog).filter(
+                    ArchanaCatalog.temple_id == tid,
+                    ArchanaCatalog.is_active == True,
+                    ArchanaCatalog.status == CatalogStatus.APPROVED
+                )
+            )
+            catalog_items = catalog_result.scalars().all()
+            fallback_services = []
+            for item in catalog_items:
+                srv = TempleServiceModel(
+                    id=item.id,
+                    temple_id=item.temple_id,
+                    service_name=item.name,
+                    service_type=ServiceType.ARCHANA,
+                    price=item.price,
+                    description=item.description or item.remarks or "",
+                    active=item.is_active
+                )
+                fallback_services.append(srv)
+            return fallback_services
+        return services
+

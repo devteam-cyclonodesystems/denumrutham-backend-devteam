@@ -11,6 +11,7 @@ def utcnow():
 
 class QueueStatus(str, enum.Enum):
     WAITING = "WAITING"
+    ACKNOWLEDGED = "ACKNOWLEDGED"
     IN_PROGRESS = "IN_PROGRESS"
     COMPLETED = "COMPLETED"
     CANCELLED = "CANCELLED"
@@ -216,6 +217,7 @@ class ArchanaExecution(Base):
     start_time = Column(DateTime(timezone=True), nullable=True)
     expected_completion_time = Column(DateTime(timezone=True), nullable=True)
     completed_at = Column(DateTime(timezone=True), nullable=True)
+    acknowledged_at = Column(DateTime(timezone=True), nullable=True)
     
     auto_completed = Column(Boolean, default=False)
     completion_mode = Column(Enum(CompletionMode), nullable=True)
@@ -224,17 +226,19 @@ class ArchanaExecution(Base):
     
     started_by_user_id = Column(UUID(as_uuid=True), ForeignKey("users.id", ondelete="SET NULL"), nullable=True)
     completed_by_user_id = Column(UUID(as_uuid=True), ForeignKey("users.id", ondelete="SET NULL"), nullable=True)
+    acknowledged_by_user_id = Column(UUID(as_uuid=True), ForeignKey("users.id", ondelete="SET NULL"), nullable=True)
     
     group = relationship("ArchanaExecutionGroup", back_populates="executions")
     
     created_at = Column(DateTime(timezone=True), default=utcnow)
     updated_at = Column(DateTime(timezone=True), default=utcnow, onupdate=utcnow)
-
+ 
     item = relationship("ArchanaBookingItem", back_populates="execution")
     queue = relationship("RitualQueue", back_populates="executions")
     priest = relationship("Employee")
     started_by = relationship("User", foreign_keys=[started_by_user_id])
     completed_by = relationship("User", foreign_keys=[completed_by_user_id])
+    acknowledged_by = relationship("User", foreign_keys=[acknowledged_by_user_id])
 
 
 class ArchanaBookingPayment(Base):

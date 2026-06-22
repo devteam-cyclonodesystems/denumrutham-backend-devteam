@@ -319,6 +319,26 @@ async def start_selected_executions(
         logger.error(f"Failed to start grouped rituals {execution_ids}: {str(e)}", exc_info=True)
         raise e
 
+@router.post("/executions/{execution_id}/acknowledge")
+async def acknowledge_execution(
+    execution_id: UUID,
+    db: AsyncSession = Depends(get_db),
+    current_user: TokenData = Depends(require_permission("archana", "start_ritual")),
+):
+    import logging
+    logger = logging.getLogger("tms.api.archana")
+    logger.info(f"User {current_user.sub} attempting to ACKNOWLEDGE execution {execution_id}")
+    
+    from app.services.archana_lifecycle_service import ArchanaLifecycleService
+    try:
+        data = await ArchanaLifecycleService.acknowledge_ritual(
+            db, execution_id, UUID(current_user.sub)
+        )
+        return api_response(data=data, message="Ritual acknowledged.")
+    except Exception as e:
+        logger.error(f"Failed to acknowledge ritual {execution_id}: {str(e)}", exc_info=True)
+        raise e
+
 @router.post("/executions/{execution_id}/complete")
 async def complete_execution(
     execution_id: UUID,

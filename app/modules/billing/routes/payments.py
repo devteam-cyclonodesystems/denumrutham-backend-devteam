@@ -45,6 +45,7 @@ async def process_payment_success(db: AsyncSession, payment: Payment, transactio
     sb = sb_res.scalar_one_or_none()
     if sb:
         sb.status = ServiceBookingStatus.PAID
+        await create_execution_for_devotee_booking(db, sb)
         
     # 2. Update GuestBooking if exists
     gb_stmt = select(GuestBooking).filter(GuestBooking.id == payment.reference_id)
@@ -228,4 +229,151 @@ async def verify_payment(
         },
         message="Payment verified and records confirmed",
     )
+
+
+async def create_execution_for_devotee_booking(db: AsyncSession, sb: ServiceBooking):
+    from app.models.archana import (
+        EnterpriseArchanaBooking, ArchanaBookingMember, ArchanaBookingItem,
+        RitualQueue, ArchanaExecution, ArchanaStatus, QueueStatus
+    )
+    import uuid
+    from datetime import datetime, timezone
+    
+    # 1. EnterpriseArchanaBooking
+    ref_id = f"AR{sb.id.hex[:6].upper()}"
+    eb = EnterpriseArchanaBooking(
+        id=sb.id,
+        temple_id=sb.temple_id,
+        ref_id=ref_id,
+        primary_devotee_id=sb.devotee_user_id,
+        primary_devotee_name=sb.devotee_name,
+        phone_number=sb.devotee_phone,
+        total_amount=sb.amount,
+        dakshina=sb.dakshina_amount,
+        grand_total=sb.amount + sb.dakshina_amount,
+        booking_mode="Online",
+        status=ArchanaStatus.CONFIRMED,
+        created_at=sb.created_at
+    )
+    db.add(eb)
+    
+    # 2. RitualQueue
+    # Get sequential token number for this temple today
+    from sqlalchemy import func
+    today = datetime.now(timezone.utc).date()
+    token_stmt = select(func.count(RitualQueue.id)).filter(
+        RitualQueue.temple_id == sb.temple_id,
+        func.date(RitualQueue.estimated_start_time) == today
+    )
+    token_res = await db.execute(token_stmt)
+    token_seq = (token_res.scalar() or 0) + 1
+    token_number = f"T-{token_seq:03d}"
+    
+    queue = RitualQueue(
+        id=uuid.uuid4(),
+        temple_id=sb.temple_id,
+        booking_id=sb.id,
+        token_number=token_number,
+        status=QueueStatus.WAITING,
+        estimated_start_time=sb.booking_date
+    )
+    db.add(queue)
+    
+    # 3. Add members & items
+    family_members = sb.booking_metadata.get("family_members", []) if isinstance(sb.booking_metadata, dict) else []
+    
+    # Primary member
+    primary_nakshatra = sb.booking_metadata.get("nakshatra") if isinstance(sb.booking_metadata, dict) else None
+    if not primary_nakshatra:
+        primary_nakshatra = "Unknown Star"
+        
+    primary_member = ArchanaBookingMember(
+        id=uuid.uuid4(),
+        booking_id=sb.id,
+        name=sb.devotee_name,
+        nakshatra=primary_nakshatra,
+        is_primary=True
+    )
+    db.add(primary_member)
+    
+    # Primary item
+    from app.modules.temple_management.models.temple_models import TempleService as TempleServiceModel
+    srv_res = await db.execute(select(TempleServiceModel).filter(TempleServiceModel.id == sb.service_id))
+    srv = srv_res.scalars().first()
+    srv_name = srv.service_name if srv else "Unknown Ritual"
+    
+    primary_item = ArchanaBookingItem(
+        id=uuid.uuid4(),
+        member_id=primary_member.id,
+        service_id=sb.service_id,
+        quantity=1,
+        price_at_booking=sb.amount,
+        total_price=sb.amount,
+        ritual_name_snapshot=srv_name,
+        ritual_duration_snapshot=5
+    )
+    db.add(primary_item)
+    
+    # Primary execution
+    primary_execution = ArchanaExecution(
+        id=uuid.uuid4(),
+        temple_id=sb.temple_id,
+        booking_item_id=primary_item.id,
+        queue_id=queue.id,
+        status=QueueStatus.WAITING
+    )
+    db.add(primary_execution)
+    
+    # Add family members if any
+    for fm in family_members:
+        fm_name = fm.get("name")
+        fm_nakshatra = fm.get("nakshatra", "Unknown Star")
+        if not fm_name:
+            continue
+        fm_member = ArchanaBookingMember(
+            id=uuid.uuid4(),
+            booking_id=sb.id,
+            name=fm_name,
+            nakshatra=fm_nakshatra,
+            is_primary=False
+        )
+        db.add(fm_member)
+        
+        # Check if they have a specific service, else use primary service
+        fm_service_id = fm.get("service_id")
+        if fm_service_id:
+            try:
+                fm_service_uuid = uuid.UUID(fm_service_id)
+            except ValueError:
+                fm_service_uuid = sb.service_id
+        else:
+            fm_service_uuid = sb.service_id
+            
+        fm_srv_res = await db.execute(select(TempleServiceModel).filter(TempleServiceModel.id == fm_service_uuid))
+        fm_srv = fm_srv_res.scalars().first()
+        fm_srv_name = fm_srv.service_name if fm_srv else srv_name
+        fm_price = fm_srv.price if fm_srv else sb.amount
+        
+        fm_item = ArchanaBookingItem(
+            id=uuid.uuid4(),
+            member_id=fm_member.id,
+            service_id=fm_service_uuid,
+            quantity=1,
+            price_at_booking=fm_price,
+            total_price=fm_price,
+            ritual_name_snapshot=fm_srv_name,
+            ritual_duration_snapshot=5
+        )
+        db.add(fm_item)
+        
+        # Add execution tracker for this family member
+        fm_execution = ArchanaExecution(
+            id=uuid.uuid4(),
+            temple_id=sb.temple_id,
+            booking_item_id=fm_item.id,
+            queue_id=queue.id,
+            status=QueueStatus.WAITING
+        )
+        db.add(fm_execution)
+
 

@@ -198,7 +198,7 @@ class ArchanaRepository:
         result = await db.execute(
             select(RitualQueue)
             .filter(RitualQueue.temple_id == temple_id)
-            .filter(RitualQueue.status.in_([QueueStatus.WAITING, QueueStatus.IN_PROGRESS]))
+            .filter(RitualQueue.status.in_([QueueStatus.WAITING, QueueStatus.ACKNOWLEDGED, QueueStatus.IN_PROGRESS]))
             .options(
                 selectinload(RitualQueue.executions)
                     .selectinload(ArchanaExecution.item)
@@ -230,6 +230,8 @@ class ArchanaRepository:
                     "status": ex.status.value,
                     "start_time": ex.start_time.isoformat() if ex.start_time else None,
                     "expected_completion_time": ex.expected_completion_time.isoformat() if ex.expected_completion_time else None,
+                    "completed_at": ex.completed_at.isoformat() if ex.completed_at else None,
+                    "acknowledged_at": ex.acknowledged_at.isoformat() if ex.acknowledged_at else None,
                     "ritual_name": ex.item.ritual_name_snapshot if ex.item else "Unknown Archana",
                     "devotee": ex.item.member.name if ex.item and ex.item.member else "Guest",
                     "star": ex.item.member.nakshatra if ex.item and ex.item.member else "Unknown Star",

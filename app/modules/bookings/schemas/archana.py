@@ -6,6 +6,7 @@ from app.utils.timezone_utils import utc_to_ist
 
 class QueueStatus(str, Enum):
     WAITING = "WAITING"
+    ACKNOWLEDGED = "ACKNOWLEDGED"
     IN_PROGRESS = "IN_PROGRESS"
     COMPLETED = "COMPLETED"
     CANCELLED = "CANCELLED"

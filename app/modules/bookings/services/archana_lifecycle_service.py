@@ -76,9 +76,9 @@ class ArchanaLifecycleService:
         if execution.status == QueueStatus.IN_PROGRESS:
             return execution
         
-        if execution.status != QueueStatus.WAITING:
+        if execution.status not in [QueueStatus.WAITING, QueueStatus.ACKNOWLEDGED]:
             logger.warning(f"Failed to start ritual {execution_id}: Invalid state {execution.status}")
-            raise ServiceException(f"Cannot start ritual in {execution.status} state. Only WAITING rituals can be started.", "INVALID_STATE")
+            raise ServiceException(f"Cannot start ritual in {execution.status} state. Only WAITING or ACKNOWLEDGED rituals can be started.", "INVALID_STATE")
 
         now = datetime.now(timezone.utc)
         duration = execution.item.ritual_duration_snapshot or 5 # Default 5 mins
@@ -133,6 +133,58 @@ class ArchanaLifecycleService:
         return execution
 
     @staticmethod
+    async def acknowledge_ritual(
+        db: AsyncSession,
+        execution_id: UUID,
+        actor_id: UUID
+    ) -> ArchanaExecution:
+        from sqlalchemy.orm import joinedload
+        result = await db.execute(
+            select(ArchanaExecution).filter(ArchanaExecution.id == execution_id)
+            .options(
+                joinedload(ArchanaExecution.item)
+                .joinedload(ArchanaBookingItem.member)
+            ).execution_options(populate_existing=True)
+        )
+        execution = result.scalar_one_or_none()
+        if not execution:
+            raise ServiceException("Execution not found", "NOT_FOUND", status_code=404)
+        
+        if execution.status in [QueueStatus.ACKNOWLEDGED, QueueStatus.IN_PROGRESS, QueueStatus.COMPLETED]:
+            return execution
+        
+        if execution.status != QueueStatus.WAITING:
+            logger.warning(f"Failed to acknowledge ritual {execution_id}: Invalid state {execution.status}")
+            raise ServiceException(f"Cannot acknowledge ritual in {execution.status} state. Only WAITING rituals can be acknowledged.", "INVALID_STATE")
+
+        now = datetime.now(timezone.utc)
+        execution.status = QueueStatus.ACKNOWLEDGED
+        execution.acknowledged_at = now
+        execution.acknowledged_by_user_id = actor_id
+        execution.version_number = (execution.version_number or 1) + 1
+        
+        # Update aggregate queue status if needed
+        await db.execute(
+            update(RitualQueue).where(RitualQueue.id == execution.queue_id)
+            .values(status=QueueStatus.ACKNOWLEDGED)
+        )
+
+        audit = ArchanaBookingAudit(
+            booking_id=execution.item.member.booking_id,
+            action="RITUAL_ACKNOWLEDGE",
+            actor_id=actor_id,
+            new_state={
+                "execution_id": str(execution_id),
+                "item": execution.item.ritual_name_snapshot,
+                "acknowledge_time": now.isoformat(),
+            }
+        )
+        db.add(audit)
+        await db.commit()
+        await db.refresh(execution)
+        return execution
+
+    @staticmethod
     async def start_grouped_rituals(
         db: AsyncSession,
         execution_ids: List[UUID],
@@ -181,7 +233,7 @@ class ArchanaLifecycleService:
 
         started_rituals = []
         for ex in executions:
-            if ex.status != QueueStatus.WAITING:
+            if ex.status not in [QueueStatus.WAITING, QueueStatus.ACKNOWLEDGED]:
                 continue
                 
             ex.status = QueueStatus.IN_PROGRESS

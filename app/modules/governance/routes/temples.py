@@ -44,4 +44,5 @@ async def get_temple(temple_id: str, db: AsyncSession = Depends(get_db)):
 async def get_temple_services(temple_id: str, db: AsyncSession = Depends(get_db)):
     """Get active services for a temple. Public endpoint."""
     services = await TempleService.get_temple_services(db, temple_id)
-    return api_response(data=[s.model_dump() for s in services], message="Temple services retrieved")
+    return api_response(data=[TempleServiceResponse.model_validate(s).model_dump() for s in services], message="Temple services retrieved")
+

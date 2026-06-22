@@ -91,6 +91,23 @@ class DevoteeBookingService:
             if tmpl_obj:
                 temple_name = tmpl_obj.name
 
+            # Query execution details if execution exists
+            from app.models.archana import ArchanaExecution, ArchanaBookingItem, ArchanaBookingMember, EnterpriseArchanaBooking
+            exec_stmt = select(ArchanaExecution).join(ArchanaBookingItem).join(ArchanaBookingMember).join(EnterpriseArchanaBooking).filter(EnterpriseArchanaBooking.id == b.id)
+            exec_res = await db.execute(exec_stmt)
+            execution = exec_res.scalars().first()
+            
+            acknowledged_at = None
+            start_time = None
+            completed_at = None
+            execution_status = None
+            
+            if execution:
+                acknowledged_at = execution.acknowledged_at
+                start_time = execution.start_time
+                completed_at = execution.completed_at
+                execution_status = execution.status.value
+
             enriched.append({
                 "id": b.id,
                 "temple_id": b.temple_id,
@@ -104,6 +121,10 @@ class DevoteeBookingService:
                 "created_at": b.created_at,
                 "service_name": service_name,
                 "temple_name": temple_name,
+                "acknowledged_at": acknowledged_at,
+                "start_time": start_time,
+                "completed_at": completed_at,
+                "execution_status": execution_status,
             })
         return enriched
 

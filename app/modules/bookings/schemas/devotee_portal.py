@@ -143,6 +143,11 @@ class ServiceBookingResponse(BaseModel):
     # Enriched fields (set in the API)
     service_name: Optional[str] = None
     temple_name: Optional[str] = None
+    acknowledged_at: Optional[datetime] = None
+    start_time: Optional[datetime] = None
+    completed_at: Optional[datetime] = None
+    execution_status: Optional[str] = None
+
 
 
 # ---------- Payment ----------
