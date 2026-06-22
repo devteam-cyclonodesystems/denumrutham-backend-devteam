@@ -165,7 +165,18 @@ class DevoteeBookingService:
         )
         profile = result.scalars().first()
         if not profile:
-            raise HTTPException(status_code=404, detail="Devotee profile not found")
+            from app.modules.auth.models.auth_models import User
+            user_res = await db.execute(select(User).filter(User.id == uid))
+            user = user_res.scalars().first()
+            if not user:
+                raise HTTPException(status_code=404, detail="Devotee user not found")
+            profile = DevoteeProfile(
+                user_id=uid,
+                name=user.name or ""
+            )
+            db.add(profile)
+            await db.commit()
+            await db.refresh(profile)
         return profile
 
     @staticmethod
@@ -176,15 +187,34 @@ class DevoteeBookingService:
         )
         profile = result.scalars().first()
         if not profile:
-            raise HTTPException(status_code=404, detail="Devotee profile not found")
+            from app.modules.auth.models.auth_models import User
+            user_res = await db.execute(select(User).filter(User.id == uid))
+            user = user_res.scalars().first()
+            if not user:
+                raise HTTPException(status_code=404, detail="Devotee user not found")
+            profile = DevoteeProfile(
+                user_id=uid,
+                name=user.name or ""
+            )
+            db.add(profile)
+            await db.flush()
 
         update_data = data.model_dump(exclude_unset=True)
         for field, value in update_data.items():
             setattr(profile, field, value)
 
+        # Sync profile name to User table
+        if "name" in update_data and update_data["name"]:
+            from app.modules.auth.models.auth_models import User
+            user_res = await db.execute(select(User).filter(User.id == uid))
+            user = user_res.scalars().first()
+            if user:
+                user.name = update_data["name"]
+
         await db.commit()
         await db.refresh(profile)
         return profile
+
 
     @staticmethod
     async def get_devotee_notifications(db: AsyncSession, user_id: str, limit: int = 50):
