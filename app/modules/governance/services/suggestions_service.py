@@ -339,7 +339,9 @@ class SuggestionsService:
             .options(
                 selectinload(TempleSuggestion.contacts),
                 selectinload(TempleSuggestion.images),
-                selectinload(TempleSuggestion.submitter)
+                selectinload(TempleSuggestion.submitter),
+                selectinload(TempleSuggestion.state),
+                selectinload(TempleSuggestion.district)
             )
             .filter(TempleSuggestion.id == id)
         )
@@ -522,6 +524,8 @@ class SuggestionsService:
                 temple_id=new_temple.id,
                 description=suggestion.description or "",
                 location=suggestion.village_town or "",
+                district=suggestion.district.name if suggestion.district else "",
+                state=suggestion.state.name if suggestion.state else "",
                 contact_number=suggestion.office_phone or "",
                 latitude=suggestion.latitude,
                 longitude=suggestion.longitude,
