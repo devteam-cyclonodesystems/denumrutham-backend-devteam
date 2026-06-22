@@ -178,6 +178,12 @@ class DevoteeProfile(Base):
     nakshatra = Column(String, default="")
     gothram = Column(String, default="")
     address = Column(Text, default="")
+    date_of_birth = Column(String, default="")
+    hindu_month = Column(String, default="")
+    hindu_star = Column(String, default="")
+    family_members = Column(JSONB_VARIANT, nullable=True, default=list)
+    favorite_gods = Column(JSONB_VARIANT, nullable=True, default=list)
+    favorite_temples = Column(JSONB_VARIANT, nullable=True, default=list)
     created_at = Column(DateTime(timezone=True), default=utcnow)
 
 

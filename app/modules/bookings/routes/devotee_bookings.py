@@ -93,3 +93,16 @@ async def update_devotee_profile(
 ):
     """Update the current devotee's profile."""
     return await DevoteeBookingService.update_devotee_profile(db, current_user.sub, data)
+
+
+from app.modules.temple_management.routes.notifications import NotificationResponse
+
+@router.get("/notifications", response_model=List[NotificationResponse])
+async def get_devotee_notifications(
+    limit: int = 50,
+    current_user: TokenData = Depends(get_current_user),
+    db: AsyncSession = Depends(get_db),
+):
+    """Get the current devotee's notifications (direct, role-based, or followed temples)."""
+    notifs = await DevoteeBookingService.get_devotee_notifications(db, current_user.sub, limit)
+    return [NotificationResponse.model_validate(n) for n in notifs]

@@ -291,3 +291,63 @@ async def get_me(
             
     return api_response(data=response_data, message="Profile retrieved successfully")
 
+
+from pydantic import BaseModel
+from typing import Optional
+
+class UpdateCredentialsRequest(BaseModel):
+    email: Optional[str] = None
+    phone: Optional[str] = None
+    current_password: Optional[str] = None
+    new_password: Optional[str] = None
+
+@router.put("/me/credentials")
+async def update_my_credentials(
+    data: UpdateCredentialsRequest,
+    db: AsyncSession = Depends(get_db),
+    current_user: TokenData = Depends(get_current_user),
+):
+    """Update user's email, phone, or password with validation."""
+    from sqlalchemy.future import select
+    from app.modules.auth.models.auth_models import User
+    from app.core.security.security import get_password_hash, verify_password
+    
+    stmt = select(User).filter(User.id == UUID(current_user.sub))
+    res = await db.execute(stmt)
+    user = res.scalars().first()
+    if not user:
+        raise HTTPException(status_code=404, detail="User not found")
+        
+    # Security requirement: check current password if any sensitive credentials are changing
+    if data.new_password or data.email or data.phone:
+        if not data.current_password:
+            raise HTTPException(status_code=400, detail="Current password is required to update credentials")
+        if not verify_password(data.current_password, user.password_hash):
+            raise HTTPException(status_code=400, detail="Incorrect current password")
+            
+    if data.email:
+        # Check unique constraint
+        email_check = await db.execute(select(User).filter(User.email == data.email, User.id != user.id))
+        if email_check.scalars().first():
+            raise HTTPException(status_code=400, detail="Email is already in use")
+        user.email = data.email
+        
+    if data.phone:
+        # Check unique constraint
+        phone_check = await db.execute(select(User).filter(User.phone == data.phone, User.id != user.id))
+        if phone_check.scalars().first():
+            raise HTTPException(status_code=400, detail="Phone is already in use")
+        user.phone = data.phone
+        # Sync user_id identifier if it matches the phone or email
+        if user.user_id == user.phone or user.user_id == user.email:
+            user.user_id = data.phone
+            
+    if data.new_password:
+        if len(data.new_password) < 8:
+            raise HTTPException(status_code=400, detail="New password must be at least 8 characters long")
+        user.password_hash = get_password_hash(data.new_password)
+        
+    await db.commit()
+    await db.refresh(user)
+    return api_response(message="Credentials updated successfully")
+

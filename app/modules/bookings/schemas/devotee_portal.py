@@ -26,6 +26,12 @@ class DevoteeProfileUpdate(BaseModel):
     nakshatra: Optional[str] = None
     gothram: Optional[str] = None
     address: Optional[str] = None
+    date_of_birth: Optional[str] = None
+    hindu_month: Optional[str] = None
+    hindu_star: Optional[str] = None
+    family_members: Optional[List[dict]] = None
+    favorite_gods: Optional[List[str]] = None
+    favorite_temples: Optional[List[str]] = None
 
 
 class DevoteeProfileResponse(BaseModel):
@@ -36,6 +42,12 @@ class DevoteeProfileResponse(BaseModel):
     nakshatra: Optional[str] = ""
     gothram: Optional[str] = ""
     address: Optional[str] = ""
+    date_of_birth: Optional[str] = ""
+    hindu_month: Optional[str] = ""
+    hindu_star: Optional[str] = ""
+    family_members: Optional[List[dict]] = []
+    favorite_gods: Optional[List[str]] = []
+    favorite_temples: Optional[List[str]] = []
     created_at: datetime
 
 

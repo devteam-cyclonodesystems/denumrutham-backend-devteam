@@ -185,3 +185,32 @@ class DevoteeBookingService:
         await db.commit()
         await db.refresh(profile)
         return profile
+
+    @staticmethod
+    async def get_devotee_notifications(db: AsyncSession, user_id: str, limit: int = 50):
+        uid = UUID(user_id)
+        # 1. Fetch temples followed by the devotee
+        from app.modules.temple_management.models.temple_models import TempleFollower
+        follower_stmt = select(TempleFollower.temple_id).filter(TempleFollower.user_id == uid)
+        follower_res = await db.execute(follower_stmt)
+        followed_temple_ids = [row[0] for row in follower_res.all()]
+        
+        # 2. Query notifications
+        from app.modules.governance.models.governance_models import Notification
+        from sqlalchemy import or_, desc
+        
+        conditions = [
+            Notification.user_id == uid,
+            Notification.role == "DEVOTEE"
+        ]
+        if followed_temple_ids:
+            conditions.append(Notification.temple_id.in_(followed_temple_ids))
+            
+        stmt = (
+            select(Notification)
+            .filter(or_(*conditions))
+            .order_by(desc(Notification.created_at))
+            .limit(limit)
+        )
+        result = await db.execute(stmt)
+        return result.scalars().all()
