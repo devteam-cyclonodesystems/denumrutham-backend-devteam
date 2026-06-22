@@ -78,6 +78,18 @@ class TempleService:
         profile = temple.profile
         images = temple.images or []
 
+        # Fetch active deities from DeityMaster table
+        from app.models.archana import DeityMaster, DeityStatus
+        deity_stmt = select(DeityMaster.deity_name).filter(
+            DeityMaster.tenant_id == tid,
+            DeityMaster.status == DeityStatus.ACTIVE
+        )
+        deity_res = await db.execute(deity_stmt)
+        active_deities = [row[0] for row in deity_res.all()]
+
+        profile_deities = profile.deities if profile else []
+        deities_list = active_deities if active_deities else profile_deities
+
         return {
             "id": temple.id,
             "name": temple.name,
@@ -98,7 +110,7 @@ class TempleService:
             "upi_id": profile.upi_id if profile else "",
             "image_url": profile.image_url if profile else "",
             "main_deity": profile.main_deity if profile else "",
-            "deities": profile.deities if profile else [],
+            "deities": deities_list,
             "facebook_url": profile.facebook_url if profile else "",
             "instagram_url": profile.instagram_url if profile else "",
             "youtube_url": profile.youtube_url if profile else "",

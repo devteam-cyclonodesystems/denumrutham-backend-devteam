@@ -251,6 +251,18 @@ async def get_public_temple_portal(
 
     # 3. Direct Mapping of Profile & Images
     profile_db = temple.profile
+    
+    # Fetch active deities from DeityMaster table
+    from app.models.archana import DeityMaster, DeityStatus
+    deity_stmt = select(DeityMaster.deity_name).filter(
+        DeityMaster.tenant_id == temple.id,
+        DeityMaster.status == DeityStatus.ACTIVE
+    )
+    deity_res = await db.execute(deity_stmt)
+    active_deities = [row[0] for row in deity_res.all()]
+    profile_deities = profile_db.deities if profile_db else []
+    deities_list = active_deities if active_deities else profile_deities
+
     images = []
     if temple.images:
         for img in temple.images:
@@ -287,7 +299,7 @@ async def get_public_temple_portal(
         upi_id=profile_db.upi_id if profile_db else "",
         image_url=profile_db.image_url if profile_db else "",
         main_deity=profile_db.main_deity if profile_db else "",
-        deities=profile_db.deities if profile_db else [],
+        deities=deities_list,
         facebook_url=profile_db.facebook_url if profile_db else "",
         instagram_url=profile_db.instagram_url if profile_db else "",
         youtube_url=profile_db.youtube_url if profile_db else "",
@@ -1003,6 +1015,18 @@ async def get_public_temple_bootstrap(
 
     # 3. Direct Mapping of Profile & Images
     profile_db = temple.profile
+    
+    # Fetch active deities from DeityMaster table
+    from app.models.archana import DeityMaster, DeityStatus
+    deity_stmt = select(DeityMaster.deity_name).filter(
+        DeityMaster.tenant_id == temple.id,
+        DeityMaster.status == DeityStatus.ACTIVE
+    )
+    deity_res = await db.execute(deity_stmt)
+    active_deities = [row[0] for row in deity_res.all()]
+    profile_deities = profile_db.deities if profile_db else []
+    deities_list = active_deities if active_deities else profile_deities
+
     images = []
     if temple.images:
         visible_images = TempleImage.filter_visible(temple.images)
@@ -1054,7 +1078,7 @@ async def get_public_temple_bootstrap(
         "upi_id": profile_db.upi_id if profile_db else "",
         "image_url": profile_db.image_url if profile_db else "",
         "main_deity": profile_db.main_deity if profile_db else "",
-        "deities": profile_db.deities if profile_db else [],
+        "deities": deities_list,
         "facebook_url": profile_db.facebook_url if profile_db else "",
         "instagram_url": profile_db.instagram_url if profile_db else "",
         "youtube_url": profile_db.youtube_url if profile_db else "",
