@@ -700,6 +700,10 @@ async def cancel_booking(
     queue_entry = queue_res.scalar_one_or_none()
     if queue_entry:
         queue_entry.status = QueueStatus.CANCELLED
+
+    if booking.booking_channel == "ONLINE":
+        from app.services.devotee_booking_service import DevoteeBookingService
+        await DevoteeBookingService.initiate_online_refund(db, booking, UUID(current_user.sub))
         
     audit = ArchanaBookingAudit(
         booking_id=booking.id,

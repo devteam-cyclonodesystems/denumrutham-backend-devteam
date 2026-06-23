@@ -1,6 +1,7 @@
 import pytest
 import uuid
 from sqlalchemy.future import select
+from sqlalchemy import or_
 from app.models.domain import (
     Temple, StateMaster, DistrictMaster, TempleSearchIndex, User, TempleClaimRequest
 )
@@ -38,26 +39,32 @@ async def test_directory_hierarchy_and_slugs(client):
        and /public/states/{state_slug}/districts/{district_slug}/temples endpoints.
     """
     async with TestSessionLocal() as session:
-        # Create State
-        state = StateMaster(
-            id=uuid.uuid4(),
-            name="Kerala State",
-            slug="kerala-state",
-            code="KL"
-        )
-        session.add(state)
-        await session.flush()
+        # Create State with get-or-create to avoid UNIQUE constraint clashes
+        state_res = await session.execute(select(StateMaster).filter(or_(StateMaster.code == "KL", StateMaster.slug == "kerala-state")))
+        state = state_res.scalars().first()
+        if not state:
+            state = StateMaster(
+                id=uuid.uuid4(),
+                name="Kerala State",
+                slug="kerala-state",
+                code="KL"
+            )
+            session.add(state)
+            await session.flush()
 
-        # Create District
-        district = DistrictMaster(
-            id=uuid.uuid4(),
-            state_id=state.id,
-            name="Wayanad District",
-            slug="wayanad-district",
-            code="WYD"
-        )
-        session.add(district)
-        await session.flush()
+        # Create District with get-or-create
+        dist_res = await session.execute(select(DistrictMaster).filter(DistrictMaster.slug == "wayanad-district"))
+        district = dist_res.scalars().first()
+        if not district:
+            district = DistrictMaster(
+                id=uuid.uuid4(),
+                state_id=state.id,
+                name="Wayanad District",
+                slug="wayanad-district",
+                code="WYD"
+            )
+            session.add(district)
+            await session.flush()
 
         # Create Temple
         temple = Temple(
@@ -85,17 +92,18 @@ async def test_directory_hierarchy_and_slugs(client):
         )
         session.add(profile)
         await session.commit()
+        state_slug = state.slug
 
     # 1. Test /public/states
     resp = await client.get("/api/v1/public/states")
     assert resp.status_code == 200
     states_data = resp.json()
-    assert any(s["slug"] == "kerala-state" for s in states_data)
-    kerala_state = next(s for s in states_data if s["slug"] == "kerala-state")
+    assert any(s["slug"] == state_slug for s in states_data)
+    kerala_state = next(s for s in states_data if s["slug"] == state_slug)
     assert kerala_state["temple_count"] >= 1
 
     # 2. Test /public/states/{state_slug}/districts
-    resp = await client.get("/api/v1/public/states/kerala-state/districts")
+    resp = await client.get(f"/api/v1/public/states/{state_slug}/districts")
     assert resp.status_code == 200
     districts_data = resp.json()
     assert any(d["slug"] == "wayanad-district" for d in districts_data)
@@ -103,7 +111,7 @@ async def test_directory_hierarchy_and_slugs(client):
     assert wayanad_dist["temple_count"] >= 1
 
     # 3. Test /public/states/{state_slug}/districts/{district_slug}/temples
-    resp = await client.get("/api/v1/public/states/kerala-state/districts/wayanad-district/temples")
+    resp = await client.get(f"/api/v1/public/states/{state_slug}/districts/wayanad-district/temples")
     assert resp.status_code == 200
     temples_data = resp.json()
     assert len(temples_data) >= 1
@@ -125,13 +133,21 @@ async def test_ranked_search_queries_with_bonuses(client):
     Bonuses: Active (+15), Official (+10), Featured (+5)
     """
     async with TestSessionLocal() as session:
-        # Create State
-        state = StateMaster(id=uuid.uuid4(), name="Karnataka", slug="karnataka", code="KA")
-        session.add(state)
-        # Create District
-        district = DistrictMaster(id=uuid.uuid4(), state_id=state.id, name="Mysuru", slug="mysuru", code="MYS")
-        session.add(district)
-        await session.flush()
+        # Create State with get-or-create to avoid UNIQUE constraint clashes
+        state_res = await session.execute(select(StateMaster).filter(StateMaster.slug == "karnataka"))
+        state = state_res.scalars().first()
+        if not state:
+            state = StateMaster(id=uuid.uuid4(), name="Karnataka", slug="karnataka", code="KA")
+            session.add(state)
+            await session.flush()
+        
+        # Create District with get-or-create
+        dist_res = await session.execute(select(DistrictMaster).filter(DistrictMaster.slug == "mysuru"))
+        district = dist_res.scalars().first()
+        if not district:
+            district = DistrictMaster(id=uuid.uuid4(), state_id=state.id, name="Mysuru", slug="mysuru", code="MYS")
+            session.add(district)
+            await session.flush()
 
         # 1. Exact Match Temple + Active (+15) = 115
         t1 = Temple(

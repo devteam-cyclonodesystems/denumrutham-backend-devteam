@@ -119,6 +119,10 @@ class ArchanaCatalog(Base):
     created_at = Column(DateTime(timezone=True), default=utcnow)
     updated_at = Column(DateTime(timezone=True), default=utcnow, onupdate=utcnow)
 
+    is_online_enabled = Column(Boolean, default=False, nullable=False, server_default=text("false"))
+    available_prasadam_modes = Column(JSON, default=list)  # Defaults to ["COLLECT", "NONE"] at app level
+    completion_mode = Column(String(30), default="AUTO_WITH_OVERRIDE")
+
     deity = relationship("DeityMaster")
 
 class CatalogVersion(Base):
@@ -161,6 +165,13 @@ class EnterpriseArchanaBooking(Base):
     created_at = Column(DateTime(timezone=True), default=utcnow)
     updated_at = Column(DateTime(timezone=True), default=utcnow, onupdate=utcnow)
     idempotency_key = Column(String, nullable=True, index=True)
+
+    devotee_user_id = Column(UUID(as_uuid=True), ForeignKey("users.id"), nullable=True)
+    online_status = Column(String(30), default="INITIATED")
+    booking_channel = Column(String(20), default="COUNTER")
+    gateway_order_id = Column(String(100), unique=True, nullable=True)
+    payment_expiry_at = Column(DateTime(timezone=True), nullable=True)
+    total_payable = Column(Float, nullable=True)
 
     __table_args__ = (
         UniqueConstraint("temple_id", "ref_id", name="uq_archana_booking_ref_id"),
@@ -251,6 +262,18 @@ class ArchanaBookingPayment(Base):
     transaction_ref = Column(String, nullable=True)
     status = Column(String, default="SUCCESS")
     created_at = Column(DateTime(timezone=True), default=utcnow)
+    
+    gateway_payment_id = Column(String(100), unique=True, nullable=True)
+    gateway_order_id = Column(String(100), nullable=True)
+    gateway_method = Column(String(30), nullable=True)
+    gateway_fee = Column(Float, default=0.0)
+    gateway_tax = Column(Float, default=0.0)
+    archana_amount = Column(Float, nullable=True)
+    convenience_fee = Column(Float, default=0.0)
+    total_amount_charged = Column(Float, nullable=True)
+    webhook_payload = Column(JSON, nullable=True)
+    webhook_received_at = Column(DateTime(timezone=True), nullable=True)
+    settlement_status = Column(String(30), default="PENDING")
 
     booking = relationship("EnterpriseArchanaBooking", back_populates="payments")
 
@@ -259,7 +282,7 @@ class RitualQueue(Base):
     __tablename__ = "ritual_queue"
     id = Column(UUID(as_uuid=True), primary_key=True, default=uuid.uuid4)
     temple_id = Column(UUID(as_uuid=True), ForeignKey("temples.id"), nullable=False, index=True)
-    booking_id = Column(UUID(as_uuid=True), ForeignKey("enterprise_archana_bookings.id"), nullable=False)
+    booking_id = Column(UUID(as_uuid=True), ForeignKey("enterprise_archana_bookings.id"), nullable=False, unique=True)
     token_number = Column(String, nullable=False)
     status = Column(Enum(QueueStatus), default=QueueStatus.WAITING)
     priest_id = Column(UUID(as_uuid=True), ForeignKey("employees.id"), nullable=True)
@@ -308,10 +331,157 @@ class ArchanaRefund(Base):
     approved_by = Column(UUID(as_uuid=True), ForeignKey("users.id"), nullable=True)
     created_at = Column(DateTime(timezone=True), default=utcnow)
     updated_at = Column(DateTime(timezone=True), default=utcnow, onupdate=utcnow)
+    
+    gateway_refund_id = Column(String(100), unique=True, nullable=True)
+    gateway_refund_status = Column(String(50), nullable=True)
+    refund_initiated_at = Column(DateTime(timezone=True), nullable=True)
+    refund_settled_at = Column(DateTime(timezone=True), nullable=True)
+    archana_refund_amount = Column(Float, nullable=True)
+    fee_refund_amount = Column(Float, nullable=True)
+    total_refund_amount = Column(Float, nullable=True)
 
     __table_args__ = (
         UniqueConstraint("temple_id", "ref_id", name="uq_archana_refund_ref_id"),
     )
 
     booking = relationship("EnterpriseArchanaBooking")
+
+
+class OnlineSettlementLedger(Base):
+    __tablename__ = "online_settlement_ledger"
+    
+    __table_args__ = (
+        Index(
+            "uq_ledger_credit_booking",
+            "booking_id",
+            unique=True,
+            postgresql_where=text("entry_type = 'CREDIT'"),
+            sqlite_where=text("entry_type = 'CREDIT'")
+        ),
+    )
+    
+    id = Column(UUID(as_uuid=True), primary_key=True, default=uuid.uuid4)
+    temple_id = Column(UUID(as_uuid=True), ForeignKey("temples.id"), nullable=False, index=True)
+    booking_id = Column(UUID(as_uuid=True), ForeignKey("enterprise_archana_bookings.id"), nullable=False)
+    payment_id = Column(UUID(as_uuid=True), ForeignKey("archana_booking_payments.id"), nullable=False)
+    entry_type = Column(String(30), nullable=False)  # 'CREDIT', 'REFUND_DEBIT', 'ADJUSTMENT_DEBIT', 'ADJUSTMENT_CREDIT'
+    
+    archana_amount = Column(Float, nullable=False)
+    temple_net_amount = Column(Float, nullable=False)  # always equal to archana_amount
+    
+    gross_convenience_fee = Column(Float, nullable=False)
+    taxable_fee = Column(Float, nullable=False)
+    gst_component = Column(Float, nullable=False)
+    cgst_component = Column(Float, nullable=False)
+    sgst_component = Column(Float, nullable=False)
+    
+    gateway_fee = Column(Float, default=0.0)
+    gateway_tax = Column(Float, default=0.0)
+    
+    net_platform_revenue = Column(Float, nullable=False)
+    total_charged_to_devotee = Column(Float, nullable=False)
+    
+    settlement_batch_id = Column(UUID(as_uuid=True), ForeignKey("settlement_batches.id"), nullable=True, index=True)
+    is_settled = Column(Boolean, nullable=False, default=False, index=True)
+    settled_at = Column(DateTime(timezone=True), nullable=True)
+    
+    gateway_payment_id = Column(String(100), nullable=True)
+    created_at = Column(DateTime(timezone=True), default=utcnow, nullable=False)
+    notes = Column(Text, nullable=True)
+
+
+class TempleBankAccount(Base):
+    __tablename__ = "temple_bank_accounts"
+    id = Column(UUID(as_uuid=True), primary_key=True, default=uuid.uuid4)
+    temple_id = Column(UUID(as_uuid=True), ForeignKey("temples.id"), nullable=False, index=True)
+    account_holder_name = Column(String(255), nullable=False)
+    bank_name = Column(String(150), nullable=False)
+    account_number_enc = Column(Text, nullable=False)  # AES-256 encrypted account number
+    ifsc_code = Column(String(11), nullable=False)
+    account_type = Column(String(30), nullable=False, default="SAVINGS")  # 'SAVINGS', 'CURRENT'
+    cancelled_cheque_url = Column(Text, nullable=True)
+    proof_uploaded_at = Column(DateTime(timezone=True), nullable=True)
+    
+    verification_status = Column(String(30), nullable=False, default="PENDING")  # 'PENDING', 'UNDER_REVIEW', 'VERIFIED', 'REJECTED'
+    verified_by = Column(UUID(as_uuid=True), ForeignKey("users.id"), nullable=True)
+    verified_at = Column(DateTime(timezone=True), nullable=True)
+    rejection_reason = Column(Text, nullable=True)
+    
+    is_active = Column(Boolean, nullable=False, default=False)
+    is_primary = Column(Boolean, nullable=False, default=False)
+    submitted_by = Column(UUID(as_uuid=True), ForeignKey("users.id"), nullable=False)
+    created_at = Column(DateTime(timezone=True), default=utcnow, nullable=False)
+    updated_at = Column(DateTime(timezone=True), default=utcnow, onupdate=utcnow, nullable=False)
+
+
+class SettlementBatch(Base):
+    __tablename__ = "settlement_batches"
+    id = Column(UUID(as_uuid=True), primary_key=True, default=uuid.uuid4)
+    temple_id = Column(UUID(as_uuid=True), ForeignKey("temples.id"), nullable=False, index=True)
+    batch_ref = Column(String(100), unique=True, nullable=False)
+    period_start = Column(DateTime(timezone=True), nullable=False)
+    period_end = Column(DateTime(timezone=True), nullable=False)
+    
+    transaction_count = Column(Integer, nullable=False, default=0)
+    total_archana_amount = Column(Float, nullable=False, default=0.0)
+    total_refunds = Column(Float, nullable=False, default=0.0)
+    net_payout_amount = Column(Float, nullable=False)  # total_archana_amount - total_refunds
+    
+    status = Column(String(30), nullable=False, default="PENDING")  # 'PENDING', 'APPROVED', 'PROCESSING', 'COMPLETED', 'FAILED', 'CANCELLED'
+    
+    approved_by = Column(UUID(as_uuid=True), ForeignKey("users.id"), nullable=True)
+    approved_at = Column(DateTime(timezone=True), nullable=True)
+    
+    payout_method = Column(String(20), default="NEFT")
+    payout_reference = Column(String(100), nullable=True)  # Bank UTR / Transaction Reference
+    bank_account_id = Column(UUID(as_uuid=True), ForeignKey("temple_bank_accounts.id"), nullable=True)
+    payout_initiated_at = Column(DateTime(timezone=True), nullable=True)
+    settled_at = Column(DateTime(timezone=True), nullable=True)
+    
+    created_by = Column(UUID(as_uuid=True), ForeignKey("users.id"), nullable=False)
+    created_at = Column(DateTime(timezone=True), default=utcnow, nullable=False)
+    updated_at = Column(DateTime(timezone=True), default=utcnow, onupdate=utcnow, nullable=False)
+    notes = Column(Text, nullable=True)
+    
+    __table_args__ = (
+        UniqueConstraint("temple_id", "period_start", "period_end", name="uq_temple_period"),
+    )
+
+
+class SettlementBatchItem(Base):
+    __tablename__ = "settlement_batch_items"
+    id = Column(UUID(as_uuid=True), primary_key=True, default=uuid.uuid4)
+    batch_id = Column(UUID(as_uuid=True), ForeignKey("settlement_batches.id", ondelete="CASCADE"), nullable=False)
+    ledger_entry_id = Column(UUID(as_uuid=True), ForeignKey("online_settlement_ledger.id"), unique=True, nullable=False)
+
+
+class NotificationTemplate(Base):
+    __tablename__ = "notification_templates"
+    id = Column(UUID(as_uuid=True), primary_key=True, default=uuid.uuid4)
+    temple_id = Column(UUID(as_uuid=True), ForeignKey("temples.id"), nullable=True)  # NULL means global fallback template
+    event_code = Column(String(100), nullable=False)
+    channel = Column(String(20), nullable=False)  # 'PUSH', 'SMS', 'EMAIL'
+    title_template = Column(String(255), nullable=True)
+    body_template = Column(Text, nullable=False)
+    language = Column(String(5), nullable=False, default="en")
+    is_active = Column(Boolean, nullable=False, default=True)
+    created_at = Column(DateTime(timezone=True), default=utcnow, nullable=False)
+    updated_at = Column(DateTime(timezone=True), default=utcnow, onupdate=utcnow, nullable=False)
+    
+    __table_args__ = (
+        UniqueConstraint("temple_id", "event_code", "channel", "language", name="uq_notification_template"),
+    )
+
+
+class NotificationDeliveryLog(Base):
+    __tablename__ = "notification_delivery_logs"
+    id = Column(UUID(as_uuid=True), primary_key=True, default=uuid.uuid4)
+    temple_id = Column(UUID(as_uuid=True), ForeignKey("temples.id"), nullable=False, index=True)
+    outbox_event_id = Column(UUID(as_uuid=True), nullable=False, index=True)  # Corresponds to ActivityOutbox.id
+    recipient_user_id = Column(UUID(as_uuid=True), ForeignKey("users.id"), nullable=True)
+    channel = Column(String(20), nullable=False)
+    recipient_address = Column(String(150), nullable=False)
+    status = Column(String(20), nullable=False, default="SENT")  # 'SENT', 'FAILED'
+    failure_reason = Column(Text, nullable=True)
+    sent_at = Column(DateTime(timezone=True), default=utcnow, nullable=False)
 

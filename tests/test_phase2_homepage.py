@@ -27,11 +27,11 @@ async def test_trending_engine_scores(client: AsyncClient, db):
 
     # Create Temples
     temple1 = Temple(
-        id=uuid4(), name="Golden Temple A", domain="temple-a", is_active=True, status="APPROVED",
+        id=uuid4(), name="Golden Temple A", domain="trending-temple-a", is_active=True, status="APPROVED",
         directory_status="ACTIVE", state_id=state.id, district_id=district.id, verification_level=3, is_featured=True
     )
     temple2 = Temple(
-        id=uuid4(), name="Golden Temple B", domain="temple-b", is_active=True, status="APPROVED",
+        id=uuid4(), name="Golden Temple B", domain="trending-temple-b", is_active=True, status="APPROVED",
         directory_status="ACTIVE", state_id=state.id, district_id=district.id, verification_level=2, is_featured=False
     )
     db.add(temple1)
@@ -86,11 +86,20 @@ async def test_trending_engine_scores(client: AsyncClient, db):
 @pytest.mark.anyio
 async def test_nearby_temples_api(client: AsyncClient, db):
     # Setup state/district
-    state = StateMaster(id=uuid4(), name="Karnataka", slug="karnataka", code="KA", created_at=datetime.now(timezone.utc))
-    district = DistrictMaster(id=uuid4(), state_id=state.id, name="Bangalore", slug="bangalore", code="BLR", created_at=datetime.now(timezone.utc))
-    db.add(state)
-    db.add(district)
-    await db.commit()
+    # Setup state/district with get-or-create to avoid UNIQUE constraint clashes
+    state_res = await db.execute(select(StateMaster).filter(StateMaster.slug == "karnataka"))
+    state = state_res.scalars().first()
+    if not state:
+        state = StateMaster(id=uuid4(), name="Karnataka", slug="karnataka", code="KA", created_at=datetime.now(timezone.utc))
+        db.add(state)
+        await db.commit()
+    
+    dist_res = await db.execute(select(DistrictMaster).filter(DistrictMaster.slug == "bangalore"))
+    district = dist_res.scalars().first()
+    if not district:
+        district = DistrictMaster(id=uuid4(), state_id=state.id, name="Bangalore", slug="bangalore", code="BLR", created_at=datetime.now(timezone.utc))
+        db.add(district)
+        await db.commit()
 
     # Create Temples
     # Temple 1: Bangalore center (12.9716, 77.5946)
@@ -126,11 +135,20 @@ async def test_nearby_temples_api(client: AsyncClient, db):
 @pytest.mark.anyio
 async def test_search_suggestions_api(client: AsyncClient, db):
     # Setup state/district
-    state = StateMaster(id=uuid4(), name="Kerala", slug="kerala", code="KL", created_at=datetime.now(timezone.utc))
-    district = DistrictMaster(id=uuid4(), state_id=state.id, name="Thrissur", slug="thrissur", code="TCR", created_at=datetime.now(timezone.utc))
-    db.add(state)
-    db.add(district)
-    await db.commit()
+    # Setup state/district with get-or-create to avoid UNIQUE constraint clashes
+    state_res = await db.execute(select(StateMaster).filter(sa.or_(StateMaster.code == "KL", StateMaster.slug == "kerala")))
+    state = state_res.scalars().first()
+    if not state:
+        state = StateMaster(id=uuid4(), name="Kerala", slug="kerala", code="KL", created_at=datetime.now(timezone.utc))
+        db.add(state)
+        await db.commit()
+    
+    dist_res = await db.execute(select(DistrictMaster).filter(DistrictMaster.slug == "thrissur"))
+    district = dist_res.scalars().first()
+    if not district:
+        district = DistrictMaster(id=uuid4(), state_id=state.id, name="Thrissur", slug="thrissur", code="TCR", created_at=datetime.now(timezone.utc))
+        db.add(district)
+        await db.commit()
 
     # Create temples and festivals
     t1 = Temple(id=uuid4(), name="Sabarimala Sree Ayyappa Temple", domain="sabarimala", is_active=True, status="APPROVED", directory_status="ACTIVE", state_id=state.id, district_id=district.id)

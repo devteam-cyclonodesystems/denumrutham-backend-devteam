@@ -377,3 +377,48 @@ async def create_execution_for_devotee_booking(db: AsyncSession, sb: ServiceBook
         db.add(fm_execution)
 
 
+from fastapi import Request
+
+@router.post("/razorpay/webhook")
+async def razorpay_webhook(
+    request: Request,
+    db: AsyncSession = Depends(get_db)
+):
+    """
+    Public webhook endpoint to receive and verify Razorpay events.
+    """
+    signature = request.headers.get("X-Razorpay-Signature", "")
+    body = await request.body()
+    
+    # Get webhook secret
+    import os
+    from app.core.payments.razorpay_provider import RazorpayProvider
+    secret = os.getenv("RAZORPAY_WEBHOOK_SECRET", "")
+    if not secret:
+        # Check PlatformGlobalSetting
+        from app.modules.governance.models.governance_models import PlatformGlobalSetting
+        try:
+            stmt = select(PlatformGlobalSetting).filter(PlatformGlobalSetting.key == "razorpay_config")
+            res = await db.execute(stmt)
+            setting = res.scalar_one_or_none()
+            if setting and isinstance(setting.value, dict):
+                secret = setting.value.get("webhook_secret", "")
+        except Exception:
+            pass
+            
+    # Verify signature
+    if not RazorpayProvider.verify_webhook_signature(body, signature, secret):
+        raise HTTPException(status_code=400, detail="Invalid webhook signature")
+        
+    try:
+        event_data = await request.json()
+    except Exception:
+        raise HTTPException(status_code=400, detail="Invalid JSON payload")
+        
+    from app.services.devotee_booking_service import DevoteeBookingService
+    success = await DevoteeBookingService.process_payment_webhook(db, event_data)
+    
+    return {"status": "ok" if success else "ignored"}
+
+
+

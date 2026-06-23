@@ -101,25 +101,31 @@ async def test_temple_suggestion_lifecycle(client, superadmin_auth_headers):
     devotee_token2 = login_resp2.json()["data"]["access_token"]
     devotee2_headers = {"Authorization": f"Bearer {devotee_token2}"}
 
-    # 2. Setup State and District
+    # 2. Setup State and District with get-or-create to avoid UNIQUE constraint clashes
     async with TestSessionLocal() as session:
-        state = StateMaster(
-            id=uuid4(),
-            name="Karnataka",
-            slug="karnataka",
-            code="KA"
-        )
-        session.add(state)
-        await session.flush()
+        state_res = await session.execute(select(StateMaster).filter(StateMaster.slug == "karnataka"))
+        state = state_res.scalars().first()
+        if not state:
+            state = StateMaster(
+                id=uuid4(),
+                name="Karnataka",
+                slug="karnataka",
+                code="KA"
+            )
+            session.add(state)
+            await session.flush()
         
-        district = DistrictMaster(
-            id=uuid4(),
-            state_id=state.id,
-            name="Bengaluru",
-            slug="bengaluru",
-            code="BLR"
-        )
-        session.add(district)
+        dist_res = await session.execute(select(DistrictMaster).filter(DistrictMaster.slug == "bengaluru"))
+        district = dist_res.scalars().first()
+        if not district:
+            district = DistrictMaster(
+                id=uuid4(),
+                state_id=state.id,
+                name="Bengaluru",
+                slug="bengaluru",
+                code="BLR"
+            )
+            session.add(district)
         
         # Add an approved temple for duplicate check validation
         existing_temple = Temple(

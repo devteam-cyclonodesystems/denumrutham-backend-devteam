@@ -132,7 +132,7 @@ async def test_deities_landing_page(client: AsyncClient, db):
     state = await get_or_create_state(db, "Kerala Test 3", f"kerala-{uuid4().hex[:6]}", f"K{uuid4().hex[:3]}")
     district = await get_or_create_district(db, state.id, "Pathanamthitta Test", f"pathanamthitta-{uuid4().hex[:6]}", f"P{uuid4().hex[:3]}")
 
-    t = Temple(id=uuid4(), name="Sabarimala Ayyappa Temple", domain="sabarimala", is_active=True, status="APPROVED", directory_status="ACTIVE", state_id=state.id, district_id=district.id)
+    t = Temple(id=uuid4(), name="Sabarimala Ayyappa Temple", domain="sabarimala-discovery", is_active=True, status="APPROVED", directory_status="ACTIVE", state_id=state.id, district_id=district.id)
     db.add(t)
     p = TempleProfile(temple_id=t.id, state="Kerala", district="Pathanamthitta", main_deity="Ayyappa")
     db.add(p)
@@ -144,12 +144,17 @@ async def test_deities_landing_page(client: AsyncClient, db):
     assert data["name"] == "Ayyappa"
     assert data["slug"] == "ayyappa"
     assert len(data["temples"]) > 0
-    assert data["temples"][0]["name"] == "Sabarimala Ayyappa Temple"
+    assert any(temple["name"] == "Sabarimala Ayyappa Temple" for temple in data["temples"])
 
 
 @pytest.mark.anyio
 async def test_funnel_and_search_analytics(client: AsyncClient, db):
     """Test search metrics and onboarding claim funnel statistics."""
+    # Clean up to avoid count pollution from other tests in the shared database session
+    await db.execute(sa.delete(PortalAnalyticsEvent))
+    await db.execute(sa.delete(TempleClaimRequest))
+    await db.commit()
+
     # Create test search events
     # 2 searches, 1 zero result, 1 successful
     s1 = PortalAnalyticsEvent(

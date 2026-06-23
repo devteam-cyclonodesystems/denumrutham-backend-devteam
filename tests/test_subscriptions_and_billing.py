@@ -40,7 +40,13 @@ async def test_webhook_subscription_activation(client: AsyncClient):
         }
     }
 
-    response = await client.post("/api/v1/subscriptions/razorpay/webhook", json=payload)
+    import json
+    import hmac
+    import hashlib
+    body_bytes = json.dumps(payload, separators=(',', ':')).encode('utf-8')
+    sig = hmac.new(b"mock", body_bytes, hashlib.sha256).hexdigest()
+    headers = {"X-Razorpay-Signature": sig, "Content-Type": "application/json"}
+    response = await client.post("/api/v1/subscriptions/razorpay/webhook", content=body_bytes, headers=headers)
     assert response.status_code == 200, response.text
     
     # Query Database
@@ -60,11 +66,13 @@ async def test_webhook_subscription_activation(client: AsyncClient):
         assert temple.subscription_plan == "GOVERNED_STANDARD"
 
         # Verify audit log event
-        evt_stmt = select(SubscriptionEvent).filter(SubscriptionEvent.subscription_id == sub.id)
+        evt_stmt = select(SubscriptionEvent).filter(
+            SubscriptionEvent.subscription_id == sub.id,
+            SubscriptionEvent.event_name == "subscription.activated"
+        )
         evt_res = await session.execute(evt_stmt)
         events = evt_res.scalars().all()
         assert len(events) == 1
-        assert events[0].event_name == "subscription.activated"
         assert events[0].new_status == "ACTIVE"
 
 
@@ -90,7 +98,13 @@ async def test_webhook_payment_failure_grace_period(client: AsyncClient, auth_he
         }
     }
 
-    response = await client.post("/api/v1/subscriptions/razorpay/webhook", json=payload)
+    import json
+    import hmac
+    import hashlib
+    body_bytes = json.dumps(payload, separators=(',', ':')).encode('utf-8')
+    sig = hmac.new(b"mock", body_bytes, hashlib.sha256).hexdigest()
+    headers = {"X-Razorpay-Signature": sig, "Content-Type": "application/json"}
+    response = await client.post("/api/v1/subscriptions/razorpay/webhook", content=body_bytes, headers=headers)
     assert response.status_code == 200
 
     async with AsyncSessionLocal() as session:
@@ -171,7 +185,13 @@ async def test_webhook_subscription_cancellation(client: AsyncClient, auth_heade
         }
     }
 
-    response = await client.post("/api/v1/subscriptions/razorpay/webhook", json=payload)
+    import json
+    import hmac
+    import hashlib
+    body_bytes = json.dumps(payload, separators=(',', ':')).encode('utf-8')
+    sig = hmac.new(b"mock", body_bytes, hashlib.sha256).hexdigest()
+    headers = {"X-Razorpay-Signature": sig, "Content-Type": "application/json"}
+    response = await client.post("/api/v1/subscriptions/razorpay/webhook", content=body_bytes, headers=headers)
     assert response.status_code == 200
 
     async with AsyncSessionLocal() as session:

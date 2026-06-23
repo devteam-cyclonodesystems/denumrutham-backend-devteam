@@ -8,6 +8,13 @@ import asyncio
 import uuid
 import pytest
 import pytest_asyncio
+import os
+
+# Set mock Razorpay environment variables for tests to avoid database queries on StaticPool
+os.environ.setdefault("RAZORPAY_KEY_ID", "mock")
+os.environ.setdefault("RAZORPAY_KEY_SECRET", "mock")
+os.environ.setdefault("RAZORPAY_WEBHOOK_SECRET", "mock")
+
 from httpx import AsyncClient, ASGITransport
 from sqlalchemy.ext.asyncio import create_async_engine, AsyncSession, async_sessionmaker
 from sqlalchemy.pool import StaticPool
@@ -45,6 +52,10 @@ def event_loop():
 # Disable rate limiting for tests
 from app.core.limiter import limiter
 limiter.enabled = False
+
+# Disable background outbox worker in tests to prevent database lock/uniqueness race conditions
+from app.modules.audit.services.activity_log_processor import OutboxMetrics
+OutboxMetrics.worker_running = True
 
 from app.main import app
 

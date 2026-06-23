@@ -254,8 +254,20 @@ class ActivityLogProcessor:
         # Commit overall transaction
         await db.commit()
 
-        # Broadcast events via Redis Pub/Sub for real-time manager UI updates
+        # Broadcast events and dispatch notifications
         for log_record in processed_logs:
+            try:
+                from app.services.notification_dispatcher import NotificationDispatcher
+                await NotificationDispatcher.dispatch_notifications(
+                    outbox_event_id=log_record.id,
+                    temple_id=log_record.temple_id,
+                    entity_name=log_record.entity_name,
+                    entity_id=log_record.entity_id,
+                    action_type=log_record.action_type
+                )
+            except Exception as e:
+                logger.error(f"Failed to dispatch notifications for event {log_record.id}: {str(e)}")
+
             try:
                 from app.services.broadcast_service import BroadcastService
                 log_data = {

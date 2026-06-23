@@ -51,7 +51,6 @@ class AuditChainWriter:
             created_utc=created_utc
         )
         db.add(registry_entry)
-        await db.flush()  # Flush immediately to catch any index duplicates early
 
         # 2. Write to the partitioned ImmutableActivityLog table
         log_record = ImmutableActivityLog(
@@ -84,4 +83,5 @@ class AuditChainWriter:
             created_utc=created_utc
         )
         db.add(log_record)
+        await db.flush()  # Flush both immediately to guarantee transaction visibility and uniqueness checks
         return log_record

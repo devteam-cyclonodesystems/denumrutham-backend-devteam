@@ -6,11 +6,33 @@ from app.schemas.domain import TokenData
 from app.schemas.devotee_portal import (
     ServiceBookingCreate, ServiceBookingResponse,
     DevoteeProfileResponse, DevoteeProfileUpdate, PaymentResponse,
+    DevoteeArchanaBookingCreate, DevoteeArchanaBookingResponse,
 )
 from app.services.devotee_booking_service import DevoteeBookingService
 from app.services.notification_service import NotificationService
 
 router = APIRouter()
+
+
+@router.post("/archana/book", response_model=DevoteeArchanaBookingResponse)
+async def devotee_archana_book(
+    data: DevoteeArchanaBookingCreate,
+    current_user: TokenData = Depends(get_current_user),
+    db: AsyncSession = Depends(get_db),
+):
+    """Create an online Archana Booking and initialize payment gateway order."""
+    booking, gross_convenience_fee, key_id = await DevoteeBookingService.create_online_archana_booking(
+        db, data, current_user.sub
+    )
+    return DevoteeArchanaBookingResponse(
+        booking_id=booking.id,
+        ref_id=booking.ref_id,
+        archana_amount=booking.total_amount,
+        convenience_fee=gross_convenience_fee,
+        total_payable=booking.total_payable,
+        gateway_order_id=booking.gateway_order_id,
+        key_id=key_id
+    )
 
 
 @router.post("/bookings", response_model=ServiceBookingResponse)

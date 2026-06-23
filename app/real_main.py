@@ -127,6 +127,18 @@ async def lifespan(app: FastAPI):
             
     asyncio.create_task(reservation_cleanup_loop())
     
+    async def payment_expiry_loop():
+        while True:
+            try:
+                async with AsyncSessionLocal() as db:
+                    from app.services.devotee_booking_service import DevoteeBookingService
+                    await DevoteeBookingService.process_payment_expiries(db)
+            except Exception as e:
+                logger.error("Error in payment_expiry_loop: %s", str(e))
+            await asyncio.sleep(60) # Run every minute
+            
+    asyncio.create_task(payment_expiry_loop())
+    
     # Start background activity log outbox processor task
     from app.modules.audit.services.activity_log_processor import run_outbox_worker
     outbox_shutdown_event = asyncio.Event()

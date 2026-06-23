@@ -106,6 +106,36 @@ class ArchanaLifecycleService:
             .values(status=QueueStatus.IN_PROGRESS, actual_start_time=now)
         )
 
+        # If the booking is an online booking, transition its online_status to IN_PROGRESS
+        # and emit a RITUAL_STARTED activity outbox event.
+        from app.models.archana import EnterpriseArchanaBooking
+        booking_stmt = select(EnterpriseArchanaBooking).filter(
+            EnterpriseArchanaBooking.id == execution.item.member.booking_id
+        )
+        booking_res = await db.execute(booking_stmt)
+        booking = booking_res.scalar_one_or_none()
+        if booking and booking.booking_channel == "ONLINE":
+            booking.online_status = "IN_PROGRESS"
+            
+            from app.modules.audit.services.activity_log_service import ActivityLogService
+            await ActivityLogService.emit_event(
+                db=db,
+                temple_id=booking.temple_id,
+                module_name="BOOKINGS",
+                entity_name="ArchanaBooking",
+                entity_id=str(booking.id),
+                action_type="RITUAL_STARTED",
+                action_category="RITUAL_EXECUTION",
+                description=f"Ritual execution started for booking {booking.ref_id}.",
+                before_value={"online_status": "PAYMENT_SUCCESS"},
+                after_value={"online_status": "IN_PROGRESS"},
+                performed_by_user_id=actor_id,
+                performed_by_name="Priest Console",
+                performed_by_role="STAFF",
+                severity="INFO",
+                risk_score=0
+            )
+
         audit = ArchanaBookingAudit(
             booking_id=execution.item.member.booking_id, # Need to ensure relationship is loaded or join
             action="RITUAL_START",
@@ -168,6 +198,36 @@ class ArchanaLifecycleService:
             update(RitualQueue).where(RitualQueue.id == execution.queue_id)
             .values(status=QueueStatus.ACKNOWLEDGED)
         )
+
+        # If the booking is an online booking, transition its online_status to ACKNOWLEDGED
+        # and emit a RITUAL_ACKNOWLEDGED activity outbox event.
+        from app.models.archana import EnterpriseArchanaBooking
+        booking_stmt = select(EnterpriseArchanaBooking).filter(
+            EnterpriseArchanaBooking.id == execution.item.member.booking_id
+        )
+        booking_res = await db.execute(booking_stmt)
+        booking = booking_res.scalar_one_or_none()
+        if booking and booking.booking_channel == "ONLINE":
+            booking.online_status = "ACKNOWLEDGED"
+            
+            from app.modules.audit.services.activity_log_service import ActivityLogService
+            await ActivityLogService.emit_event(
+                db=db,
+                temple_id=booking.temple_id,
+                module_name="BOOKINGS",
+                entity_name="ArchanaBooking",
+                entity_id=str(booking.id),
+                action_type="RITUAL_ACKNOWLEDGED",
+                action_category="RITUAL_EXECUTION",
+                description=f"Ritual execution acknowledged for booking {booking.ref_id}.",
+                before_value={"online_status": "PAYMENT_SUCCESS"},
+                after_value={"online_status": "ACKNOWLEDGED"},
+                performed_by_user_id=actor_id,
+                performed_by_name="Staff Console",
+                performed_by_role="STAFF",
+                severity="INFO",
+                risk_score=0
+            )
 
         audit = ArchanaBookingAudit(
             booking_id=execution.item.member.booking_id,
@@ -361,6 +421,36 @@ class ArchanaLifecycleService:
                 .values(status=QueueStatus.COMPLETED, completed_at=now)
             )
 
+            # If the booking is an online booking, transition its online_status to COMPLETED
+            # and emit a RITUAL_COMPLETED activity outbox event.
+            from app.models.archana import EnterpriseArchanaBooking
+            booking_stmt = select(EnterpriseArchanaBooking).filter(
+                EnterpriseArchanaBooking.id == execution.item.member.booking_id
+            )
+            booking_res = await db.execute(booking_stmt)
+            booking = booking_res.scalar_one_or_none()
+            if booking and booking.booking_channel == "ONLINE":
+                booking.online_status = "COMPLETED"
+                
+                from app.modules.audit.services.activity_log_service import ActivityLogService
+                await ActivityLogService.emit_event(
+                    db=db,
+                    temple_id=booking.temple_id,
+                    module_name="BOOKINGS",
+                    entity_name="ArchanaBooking",
+                    entity_id=str(booking.id),
+                    action_type="RITUAL_COMPLETED",
+                    action_category="RITUAL_EXECUTION",
+                    description=f"Ritual execution completed for booking {booking.ref_id}.",
+                    before_value={"online_status": "IN_PROGRESS"},
+                    after_value={"online_status": "COMPLETED"},
+                    performed_by_user_id=actor_id,
+                    performed_by_name="Priest Console" if actor_id else "System Autocomplete",
+                    performed_by_role="STAFF" if actor_id else "SYSTEM",
+                    severity="INFO",
+                    risk_score=0
+                )
+
         audit = ArchanaBookingAudit(
             booking_id=execution.item.member.booking_id,
             action="RITUAL_COMPLETE",
@@ -390,10 +480,15 @@ class ArchanaLifecycleService:
     async def process_auto_completions(db: AsyncSession):
         """Background process to auto-complete expired rituals."""
         now = datetime.now(timezone.utc)
+        from app.models.archana import ArchanaBookingItem, ArchanaCatalog
         result = await db.execute(
-            select(ArchanaExecution).filter(
+            select(ArchanaExecution)
+            .join(ArchanaExecution.item)
+            .join(ArchanaBookingItem.service)
+            .filter(
                 ArchanaExecution.status == QueueStatus.IN_PROGRESS,
-                ArchanaExecution.expected_completion_time <= now
+                ArchanaExecution.expected_completion_time <= now,
+                ArchanaCatalog.completion_mode.in_(["AUTO", "AUTO_WITH_OVERRIDE"])
             )
         )
         expired = result.scalars().all()

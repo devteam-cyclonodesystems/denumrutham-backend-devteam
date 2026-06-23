@@ -173,3 +173,26 @@ class PaymentResponse(BaseModel):
     service_booking_id: Optional[UUID4] = None
     upi_id: Optional[str] = ""
     created_at: Optional[datetime] = None
+
+
+# ---------- Online Archana Bookings (Phase 1) ----------
+class DevoteeBookingMemberCreate(BaseModel):
+    name: str
+    nakshatra: Optional[str] = None
+    is_primary: bool = False
+
+class DevoteeArchanaBookingCreate(BaseModel):
+    catalog_id: UUID4
+    booking_date: str  # YYYY-MM-DD
+    members: List[DevoteeBookingMemberCreate]
+    prasadam_mode: str  # "COLLECT" or "NONE"
+
+class DevoteeArchanaBookingResponse(BaseModel):
+    booking_id: UUID4
+    ref_id: str
+    archana_amount: float
+    convenience_fee: float
+    total_payable: float
+    gateway_order_id: str
+    key_id: str
+

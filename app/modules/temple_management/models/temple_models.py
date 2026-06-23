@@ -101,6 +101,9 @@ class Temple(Base):
     # --- Phase 2: Domain + Identifier Architecture ---
     temple_code = Column(String, unique=True, nullable=True, index=True) # Format: TMP-YYYYMMDD-XXX
 
+    is_settlement_eligible = Column(Boolean, nullable=False, default=True, server_default=text("true"))
+    settlement_hold_reason = Column(Text, nullable=True)
+
     # Dual-status: 'PENDING'/'APPROVED'/'REJECTED' for registration,
     # 'active'/'inactive' for operational (backward compat)
     status = Column(String, nullable=False, default="PENDING")

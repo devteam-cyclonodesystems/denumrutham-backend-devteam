@@ -17,8 +17,14 @@ class BroadcastService:
     @classmethod
     async def get_redis(cls):
         if cls._redis is None:
-            cls._redis = aioredis.from_url(settings.REDIS_URL, decode_responses=True)
+            cls._redis = aioredis.from_url(
+                settings.REDIS_URL,
+                decode_responses=True,
+                socket_connect_timeout=2,
+                socket_timeout=2,
+            )
         return cls._redis
+
 
     @classmethod
     async def publish_tenant_event(cls, temple_id: UUID, event_type: str, data: dict = None):
@@ -42,7 +48,10 @@ class BroadcastService:
                 
             logger.info("Published %s event for tenant %s", event_type, temple_id)
         except Exception as e:
+            # Reset cached client so the next call gets a fresh connection attempt
+            cls._redis = None
             logger.error("Failed to publish broadcast event: %s", str(e))
+
 
     @classmethod
     async def force_logout_tenant(cls, temple_id: UUID, reason: str = "Administrative action"):
