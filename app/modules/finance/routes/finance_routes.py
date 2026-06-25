@@ -205,6 +205,9 @@ async def list_platform_financial_accounts(
     validated_accounts = [PlatformFinancialAccountResponse.model_validate(ac).model_dump() for ac in accounts]
     return api_response(data=validated_accounts, message="Platform financial accounts retrieved successfully")
 
+# Sentinel UUID used for platform-level audit events that have no temple context.
+_PLATFORM_SENTINEL_TEMPLE_ID = UUID("00000000-0000-0000-0000-000000000000")
+
 @router.post("/admin/finance/platform-accounts", responses={200: {"model": PlatformFinancialAccountResponseEnvelope}})
 async def create_platform_financial_account(
     payload: PlatformFinancialAccountCreate,
@@ -221,28 +224,29 @@ async def create_platform_financial_account(
         is_active=True
     )
     db.add(ac)
-    await db.commit()
-    await db.refresh(ac)
 
-    # Emit standardized audit log
+    # Emit audit log within the same transaction (flush only — commit below)
     from app.modules.audit.services.activity_log_service import ActivityLogService
     await ActivityLogService.emit_event(
         db=db,
-        temple_id=None,
+        temple_id=_PLATFORM_SENTINEL_TEMPLE_ID,
         module_name="FINANCE",
         entity_name="PlatformFinancialAccount",
-        entity_id=str(ac.id),
+        entity_id=None,  # ac.id not yet assigned before flush
         action_type="PLATFORM_ACCOUNT_CREATED",
         action_category="GOVERNANCE_FINANCE",
-        description=f"Platform financial account {ac.account_name} created.",
+        description=f"Platform financial account '{payload.account_name}' created.",
         before_value=None,
-        after_value={"account_name": ac.account_name, "account_type": ac.account_type},
+        after_value={"account_name": payload.account_name, "account_type": payload.account_type.upper()},
         performed_by_user_id=UUID(current_user.sub),
         performed_by_name="Super Admin",
         performed_by_role="SUPERADMIN",
         severity="MEDIUM",
         risk_score=10
     )
+
+    await db.commit()
+    await db.refresh(ac)
 
     validated_ac = PlatformFinancialAccountResponse.model_validate(ac).model_dump()
     return api_response(data=validated_ac, message="Platform financial account created successfully")
@@ -261,6 +265,8 @@ async def update_platform_financial_account(
     if not ac:
         raise HTTPException(status_code=404, detail="Platform financial account not found")
 
+    before_snapshot = {"account_name": ac.account_name, "is_active": ac.is_active}
+
     if payload.account_name is not None:
         ac.account_name = payload.account_name
     if payload.account_identifier is not None:
@@ -274,21 +280,18 @@ async def update_platform_financial_account(
     if payload.is_active is not None:
         ac.is_active = payload.is_active
 
-    await db.commit()
-    await db.refresh(ac)
-
-    # Emit standardized audit log
+    # Emit audit log within the same transaction (flush only — commit below)
     from app.modules.audit.services.activity_log_service import ActivityLogService
     await ActivityLogService.emit_event(
         db=db,
-        temple_id=None,
+        temple_id=_PLATFORM_SENTINEL_TEMPLE_ID,
         module_name="FINANCE",
         entity_name="PlatformFinancialAccount",
         entity_id=str(ac.id),
         action_type="PLATFORM_ACCOUNT_UPDATED",
         action_category="GOVERNANCE_FINANCE",
-        description=f"Platform financial account {ac.account_name} updated.",
-        before_value=None,
+        description=f"Platform financial account '{ac.account_name}' updated.",
+        before_value=before_snapshot,
         after_value={"account_name": ac.account_name, "is_active": ac.is_active},
         performed_by_user_id=UUID(current_user.sub),
         performed_by_name="Super Admin",
@@ -296,6 +299,9 @@ async def update_platform_financial_account(
         severity="MEDIUM",
         risk_score=10
     )
+
+    await db.commit()
+    await db.refresh(ac)
 
     validated_ac = PlatformFinancialAccountResponse.model_validate(ac).model_dump()
     return api_response(data=validated_ac, message="Platform financial account updated successfully")
@@ -314,19 +320,18 @@ async def delete_platform_financial_account(
         raise HTTPException(status_code=404, detail="Platform financial account not found")
 
     ac.is_active = False
-    await db.commit()
 
-    # Emit standardized audit log
+    # Emit audit log within the same transaction (flush only — commit below)
     from app.modules.audit.services.activity_log_service import ActivityLogService
     await ActivityLogService.emit_event(
         db=db,
-        temple_id=None,
+        temple_id=_PLATFORM_SENTINEL_TEMPLE_ID,
         module_name="FINANCE",
         entity_name="PlatformFinancialAccount",
         entity_id=str(ac.id),
-        action_type="PLATFORM_ACCOUNT_UPDATED",
+        action_type="PLATFORM_ACCOUNT_DEACTIVATED",
         action_category="GOVERNANCE_FINANCE",
-        description=f"Platform financial account {ac.account_name} deactivated.",
+        description=f"Platform financial account '{ac.account_name}' deactivated.",
         before_value={"is_active": True},
         after_value={"is_active": False},
         performed_by_user_id=UUID(current_user.sub),
@@ -336,6 +341,7 @@ async def delete_platform_financial_account(
         risk_score=10
     )
 
+    await db.commit()
     return api_response(message="Platform financial account deactivated successfully")
 
 # ---------- Temple Bank Accounts & Payout Settlements Endpoints ----------
