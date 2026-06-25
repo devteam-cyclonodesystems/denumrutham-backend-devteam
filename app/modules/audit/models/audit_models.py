@@ -133,7 +133,7 @@ def prop_archana_audit(mapper, connection, target):
         # 1. Fetch details of the booking
         bid_bind = to_uuid_db(target.booking_id, dialect_name)
         b_res = connection.execute(
-            text("SELECT temple_id, ref_id, grand_total, primary_devotee_name FROM enterprise_archana_bookings WHERE id = :bid"),
+            text("SELECT temple_id, ref_id, grand_total, primary_devotee_name FROM archana_bookings WHERE id = :bid"),
             {"bid": bid_bind}
         ).first()
         

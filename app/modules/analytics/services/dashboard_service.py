@@ -20,7 +20,8 @@ class DashboardService:
         from datetime import datetime, time, date
         from app.modules.auth.models.auth_models import User
         from app.modules.billing.models.billing_models import Transaction, TransactionType
-        from app.modules.governance.models.governance_models import ArchanaBooking, ChangeRequest, ApprovalRequest
+        from app.modules.governance.models.governance_models import ChangeRequest, ApprovalRequest
+        from app.modules.bookings.models.archana import ArchanaBooking
         from app.modules.inventory.models.inventory_models import InventoryItem
         from app.modules.attendance.models.attendance_models import Leave
         from app.modules.temple_management.models.temple_models import TempleProfile

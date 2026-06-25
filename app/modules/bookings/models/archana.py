@@ -137,9 +137,9 @@ class CatalogVersion(Base):
     effective_to = Column(DateTime(timezone=True), nullable=True)
     created_by = Column(UUID(as_uuid=True), ForeignKey("users.id"), nullable=False)
 
-class EnterpriseArchanaBooking(Base):
+class ArchanaBooking(Base):
     """Enterprise-grade Archana Booking header (Booking entity)."""
-    __tablename__ = "enterprise_archana_bookings"
+    __tablename__ = "archana_bookings"
     id = Column(UUID(as_uuid=True), primary_key=True, default=uuid.uuid4)
     temple_id = Column(UUID(as_uuid=True), ForeignKey("temples.id"), nullable=False, index=True)
     ref_id = Column(String, index=True)
@@ -181,11 +181,14 @@ class EnterpriseArchanaBooking(Base):
     payments = relationship("ArchanaBookingPayment", back_populates="booking", cascade="all, delete-orphan")
     queue_entry = relationship("RitualQueue", back_populates="booking", uselist=False)
 
+# Backward-compatibility alias — existing imports of EnterpriseArchanaBooking continue to work.
+EnterpriseArchanaBooking = ArchanaBooking
+
 class ArchanaBookingMember(Base):
     """Individual devotees in a booking (BookingMember entity)."""
     __tablename__ = "archana_booking_members"
     id = Column(UUID(as_uuid=True), primary_key=True, default=uuid.uuid4)
-    booking_id = Column(UUID(as_uuid=True), ForeignKey("enterprise_archana_bookings.id"), nullable=False)
+    booking_id = Column(UUID(as_uuid=True), ForeignKey("archana_bookings.id"), nullable=False)
     name = Column(String, nullable=False)
     nakshatra = Column(String, nullable=True)
     is_primary = Column(Boolean, default=False)
@@ -256,7 +259,7 @@ class ArchanaBookingPayment(Base):
     """Payment details for the booking (BookingPayment entity)."""
     __tablename__ = "archana_booking_payments"
     id = Column(UUID(as_uuid=True), primary_key=True, default=uuid.uuid4)
-    booking_id = Column(UUID(as_uuid=True), ForeignKey("enterprise_archana_bookings.id"), nullable=False)
+    booking_id = Column(UUID(as_uuid=True), ForeignKey("archana_bookings.id"), nullable=False)
     amount = Column(Float, nullable=False)
     payment_mode = Column(String, nullable=False)
     transaction_ref = Column(String, nullable=True)
@@ -282,7 +285,7 @@ class RitualQueue(Base):
     __tablename__ = "ritual_queue"
     id = Column(UUID(as_uuid=True), primary_key=True, default=uuid.uuid4)
     temple_id = Column(UUID(as_uuid=True), ForeignKey("temples.id"), nullable=False, index=True)
-    booking_id = Column(UUID(as_uuid=True), ForeignKey("enterprise_archana_bookings.id"), nullable=False, unique=True)
+    booking_id = Column(UUID(as_uuid=True), ForeignKey("archana_bookings.id"), nullable=False, unique=True)
     token_number = Column(String, nullable=False)
     status = Column(Enum(QueueStatus), default=QueueStatus.WAITING)
     priest_id = Column(UUID(as_uuid=True), ForeignKey("employees.id"), nullable=True)
@@ -298,7 +301,7 @@ class ArchanaBookingAudit(Base):
     """Specialized audit log for bookings (BookingAudit entity)."""
     __tablename__ = "archana_booking_audit"
     id = Column(UUID(as_uuid=True), primary_key=True, default=uuid.uuid4)
-    booking_id = Column(UUID(as_uuid=True), ForeignKey("enterprise_archana_bookings.id"), nullable=False)
+    booking_id = Column(UUID(as_uuid=True), ForeignKey("archana_bookings.id"), nullable=False)
     action = Column(String, nullable=False)
     actor_id = Column(UUID(as_uuid=True), ForeignKey("users.id"), nullable=True)
     old_state = Column(JSON, nullable=True)
@@ -321,7 +324,7 @@ class ArchanaRefund(Base):
     id = Column(UUID(as_uuid=True), primary_key=True, default=uuid.uuid4)
     temple_id = Column(UUID(as_uuid=True), ForeignKey("temples.id"), nullable=False, index=True)
     ref_id = Column(String, index=True)
-    booking_id = Column(UUID(as_uuid=True), ForeignKey("enterprise_archana_bookings.id"), nullable=False, index=True)
+    booking_id = Column(UUID(as_uuid=True), ForeignKey("archana_bookings.id"), nullable=False, index=True)
     refund_method = Column(String, nullable=False) # Cash, UPI
     refund_status = Column(String, nullable=False) # Full, Partial
     status = Column(String, default="PENDING") # PENDING, APPROVED, CANCELLED

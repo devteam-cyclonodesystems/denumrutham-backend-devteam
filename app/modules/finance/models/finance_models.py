@@ -76,7 +76,7 @@ class OnlineSettlementLedger(Base):
     
     id = Column(UUID(as_uuid=True), primary_key=True, default=uuid.uuid4)
     temple_id = Column(UUID(as_uuid=True), ForeignKey("temples.id"), nullable=False, index=True)
-    booking_id = Column(UUID(as_uuid=True), ForeignKey("enterprise_archana_bookings.id"), nullable=False)
+    booking_id = Column(UUID(as_uuid=True), ForeignKey("archana_bookings.id"), nullable=False)
     payment_id = Column(UUID(as_uuid=True), ForeignKey("archana_booking_payments.id"), nullable=False)
     entry_type = Column(String(30), nullable=False)  # 'CREDIT', 'REFUND_DEBIT', etc.
     

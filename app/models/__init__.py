@@ -16,7 +16,8 @@ from app.models.onboarding import TempleRequest, UserRequest
 from app.models.system_rbac import SystemRole, SystemPermission, SystemRolePermission
 from app.models.archana import (
     ArchanaCatalog, 
-    EnterpriseArchanaBooking, 
+    ArchanaBooking,
+    EnterpriseArchanaBooking,  # backward-compat alias for ArchanaBooking
     ArchanaBookingMember, 
     ArchanaBookingItem, 
     ArchanaBookingPayment, 
@@ -83,7 +84,8 @@ __all__ = [
     "SystemPermission",
     "SystemRolePermission",
     "ArchanaCatalog",
-    "EnterpriseArchanaBooking",
+    "ArchanaBooking",
+    "EnterpriseArchanaBooking",  # backward-compat alias
     "ArchanaBookingMember",
     "ArchanaBookingItem",
     "ArchanaBookingPayment",
