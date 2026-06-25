@@ -49,27 +49,33 @@ class AccountingService:
 
     @staticmethod
     async def get_financial_kpis(db: AsyncSession, temple_id: UUID) -> Dict[str, Any]:
-        """Aggregates financial KPIs for the dashboard."""
+        """Aggregates financial KPIs for the dashboard from the master transactions ledger."""
+        from app.modules.billing.models.billing_models import Transaction, TransactionType
+        
         today = datetime.now(timezone.utc).replace(hour=0, minute=0, second=0, microsecond=0)
         
-        # Today's Revenue
-        query = select(func.sum(FinancialLedgerEntry.amount)).filter(
-            FinancialLedgerEntry.temple_id == temple_id,
-            FinancialLedgerEntry.created_at >= today
+        # Today's Revenue (Income in category archana)
+        query = select(func.sum(Transaction.amount)).filter(
+            Transaction.temple_id == temple_id,
+            Transaction.type == TransactionType.INCOME,
+            Transaction.category == "archana",
+            Transaction.created_at >= today
         )
         res = await db.execute(query)
         today_revenue = res.scalar() or 0.0
         
-        # Cash in Hand (Today's Cash)
-        query = select(func.sum(FinancialLedgerEntry.amount)).filter(
-            FinancialLedgerEntry.temple_id == temple_id,
-            FinancialLedgerEntry.created_at >= today,
-            FinancialLedgerEntry.payment_mode == "Cash"
+        # Cash in Hand (Today's Cash: manual source counter transactions)
+        query = select(func.sum(Transaction.amount)).filter(
+            Transaction.temple_id == temple_id,
+            Transaction.type == TransactionType.INCOME,
+            Transaction.category == "archana",
+            Transaction.source == "manual",
+            Transaction.created_at >= today
         )
         res = await db.execute(query)
         cash_in_hand = res.scalar() or 0.0
         
-        # Dakshina Liability
+        # Dakshina Liability (query legacy FinancialLedgerEntry for priest_dakshina)
         query = select(func.sum(FinancialLedgerEntry.priest_dakshina)).filter(
             FinancialLedgerEntry.temple_id == temple_id,
             FinancialLedgerEntry.created_at >= today

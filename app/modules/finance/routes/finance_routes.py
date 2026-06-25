@@ -6,7 +6,7 @@ from typing import List, Optional, Dict, Any
 from fastapi import APIRouter, Depends, HTTPException, Form, UploadFile, File, status
 from sqlalchemy.ext.asyncio import AsyncSession
 from sqlalchemy.future import select
-from pydantic import BaseModel
+from pydantic import BaseModel, ConfigDict
 
 from app.api.deps import get_db, get_current_user, get_current_superadmin, get_current_temple_id, require_permission
 from app.schemas.domain import TokenData
@@ -50,9 +50,150 @@ class PlatformFinancialAccountUpdate(BaseModel):
     ifsc_code: Optional[str] = None
     is_active: Optional[bool] = None
 
+# ---------- Response & Envelope Schemas ----------
+class PlatformFinancialAccountResponse(BaseModel):
+    model_config = ConfigDict(from_attributes=True)
+    id: UUID
+    account_name: str
+    account_identifier: str
+    account_type: str
+    bank_name: Optional[str] = None
+    ifsc_code: Optional[str] = None
+    is_active: bool
+    created_at: datetime
+    updated_at: datetime
+
+class PlatformFinancialAccountResponseEnvelope(BaseModel):
+    success: bool
+    message: str
+    data: PlatformFinancialAccountResponse
+
+class PlatformFinancialAccountListEnvelope(BaseModel):
+    success: bool
+    message: str
+    data: List[PlatformFinancialAccountResponse]
+
+class BankAccountResponse(BaseModel):
+    model_config = ConfigDict(from_attributes=True)
+    id: str
+    account_holder_name: str
+    bank_name: str
+    account_number: str  # Masked
+    ifsc_code: str
+    account_type: str
+    verification_status: str
+    version: int
+    is_active: bool
+    is_primary: bool
+    effective_from: Optional[datetime] = None
+    effective_to: Optional[datetime] = None
+    rejection_reason: Optional[str] = None
+    proof_uploaded_at: Optional[datetime] = None
+
+class BankAccountResponseEnvelope(BaseModel):
+    success: bool
+    message: str
+    data: BankAccountResponse
+
+class BankAccountListEnvelope(BaseModel):
+    success: bool
+    message: str
+    data: List[BankAccountResponse]
+
+class BankAccountPendingResponse(BaseModel):
+    model_config = ConfigDict(from_attributes=True)
+    id: str
+    temple_id: str
+    account_holder_name: str
+    bank_name: str
+    account_number: str  # Masked by default
+    ifsc_code: str
+    account_type: str
+    cancelled_cheque_url: Optional[str] = None
+    submitted_by: str
+    proof_uploaded_at: Optional[datetime] = None
+    version: int
+
+class BankAccountPendingResponseEnvelope(BaseModel):
+    success: bool
+    message: str
+    data: BankAccountPendingResponse
+
+class BankAccountPendingListEnvelope(BaseModel):
+    success: bool
+    message: str
+    data: List[BankAccountPendingResponse]
+
+class BankAccountRevealResponse(BaseModel):
+    id: str
+    account_number: str
+
+class BankAccountRevealResponseEnvelope(BaseModel):
+    success: bool
+    message: str
+    data: BankAccountRevealResponse
+
+class SettlementBatchResponse(BaseModel):
+    model_config = ConfigDict(from_attributes=True)
+    id: str
+    temple_id: str
+    batch_ref: str
+    period_start: datetime
+    period_end: datetime
+    transaction_count: int
+    total_archana_amount: float
+    total_refunds: float
+    net_payout_amount: float
+    status: str
+    approved_by: Optional[str] = None
+    payout_reference: Optional[str] = None
+    payout_method: str
+    settled_at: Optional[datetime] = None
+    bank_account_id: Optional[str] = None
+
+class SettlementBatchResponseEnvelope(BaseModel):
+    success: bool
+    message: str
+    data: SettlementBatchResponse
+
+class SettlementBatchListEnvelope(BaseModel):
+    success: bool
+    message: str
+    data: List[SettlementBatchResponse]
+
+class SettlementBatchApprovalResponse(BaseModel):
+    id: str
+    status: str
+
+class SettlementBatchApprovalEnvelope(BaseModel):
+    success: bool
+    message: str
+    data: SettlementBatchApprovalResponse
+
+class SettlementBatchCompleteResponse(BaseModel):
+    id: str
+    status: str
+    payout_reference: Optional[str] = None
+
+class SettlementBatchCompleteEnvelope(BaseModel):
+    success: bool
+    message: str
+    data: SettlementBatchCompleteResponse
+
+class SettlementBatchGenerationResult(BaseModel):
+    batch_id: str
+    batch_ref: str
+    net_payout_amount: float
+
+class SettlementBatchGenerationEnvelope(BaseModel):
+    success: bool
+    message: str
+    data: List[SettlementBatchGenerationResult]
+
+
 # ---------- Platform Financial Accounts Endpoints (Super Admin Only) ----------
 
-@router.get("/admin/finance/platform-accounts")
+@router.get("/admin/finance/platform-accounts", responses={200: {"model": PlatformFinancialAccountListEnvelope}})
 async def list_platform_financial_accounts(
     db: AsyncSession = Depends(get_db),
     current_user: TokenData = Depends(get_current_superadmin)
@@ -61,9 +202,10 @@ async def list_platform_financial_accounts(
     stmt = select(PlatformFinancialAccount).order_by(PlatformFinancialAccount.created_at.desc())
     res = await db.execute(stmt)
     accounts = res.scalars().all()
-    return api_response(data=accounts, message="Platform financial accounts retrieved successfully")
+    validated_accounts = [PlatformFinancialAccountResponse.model_validate(ac).model_dump() for ac in accounts]
+    return api_response(data=validated_accounts, message="Platform financial accounts retrieved successfully")
 
-@router.post("/admin/finance/platform-accounts")
+@router.post("/admin/finance/platform-accounts", responses={200: {"model": PlatformFinancialAccountResponseEnvelope}})
 async def create_platform_financial_account(
     payload: PlatformFinancialAccountCreate,
     db: AsyncSession = Depends(get_db),
@@ -102,9 +244,10 @@ async def create_platform_financial_account(
         risk_score=10
     )
 
-    return api_response(data=ac, message="Platform financial account created successfully")
+    validated_ac = PlatformFinancialAccountResponse.model_validate(ac).model_dump()
+    return api_response(data=validated_ac, message="Platform financial account created successfully")
 
-@router.put("/admin/finance/platform-accounts/{id}")
+@router.put("/admin/finance/platform-accounts/{id}", responses={200: {"model": PlatformFinancialAccountResponseEnvelope}})
 async def update_platform_financial_account(
     id: UUID,
     payload: PlatformFinancialAccountUpdate,
@@ -154,7 +297,8 @@ async def update_platform_financial_account(
         risk_score=10
     )
 
-    return api_response(data=ac, message="Platform financial account updated successfully")
+    validated_ac = PlatformFinancialAccountResponse.model_validate(ac).model_dump()
+    return api_response(data=validated_ac, message="Platform financial account updated successfully")
 
 @router.delete("/admin/finance/platform-accounts/{id}")
 async def delete_platform_financial_account(
@@ -196,7 +340,7 @@ async def delete_platform_financial_account(
 
 # ---------- Temple Bank Accounts & Payout Settlements Endpoints ----------
 
-@router.post("/temple/bank-account")
+@router.post("/temple/bank-account", responses={200: {"model": BankAccountResponseEnvelope}})
 async def create_temple_bank_account(
     account_holder_name: Optional[str] = Form(None),
     account_holder: Optional[str] = Form(None),
@@ -208,7 +352,7 @@ async def create_temple_bank_account(
     cheque_file: Optional[UploadFile] = File(None),
     db: AsyncSession = Depends(get_db),
     temple_id: str = Depends(get_current_temple_id),
-    current_user: TokenData = Depends(get_current_user)
+    current_user: TokenData = Depends(require_permission("finance", "write"))
 ):
     """
     Exposes POST /api/v1/temple/bank-account to Temple Manager.
@@ -250,16 +394,24 @@ async def create_temple_bank_account(
         await db.commit()
         
         masked_number = f"xxxxxx{account_number[-4:]}" if len(account_number) >= 4 else "xxxx"
+        validated_ac = BankAccountResponse(
+            id=str(bank_ac.id),
+            account_holder_name=bank_ac.account_holder_name,
+            bank_name=bank_ac.bank_name,
+            account_number=masked_number,
+            ifsc_code=bank_ac.ifsc_code,
+            account_type=bank_ac.account_type,
+            verification_status=bank_ac.verification_status,
+            version=bank_ac.version,
+            is_active=bank_ac.is_active,
+            is_primary=bank_ac.is_primary,
+            effective_from=bank_ac.effective_from,
+            effective_to=bank_ac.effective_to,
+            rejection_reason=bank_ac.rejection_reason,
+            proof_uploaded_at=bank_ac.proof_uploaded_at
+        )
         return api_response(
-            data={
-                "id": str(bank_ac.id),
-                "account_holder_name": bank_ac.account_holder_name,
-                "bank_name": bank_ac.bank_name,
-                "account_number": masked_number,
-                "ifsc_code": bank_ac.ifsc_code,
-                "verification_status": bank_ac.verification_status,
-                "version": bank_ac.version
-            },
+            data=validated_ac.model_dump(),
             message="Bank account details version submitted successfully."
         )
     except ValueError as ve:
@@ -270,11 +422,11 @@ async def create_temple_bank_account(
         raise HTTPException(status_code=500, detail=f"Failed to submit bank details: {str(e)}")
 
 
-@router.get("/temple/bank-accounts")
+@router.get("/temple/bank-accounts", responses={200: {"model": BankAccountListEnvelope}})
 async def list_temple_bank_accounts(
     db: AsyncSession = Depends(get_db),
     temple_id: str = Depends(get_current_temple_id),
-    current_user: TokenData = Depends(get_current_user)
+    current_user: TokenData = Depends(require_permission("finance", "view"))
 ):
     """Lists all bank account versions and history for the current temple manager."""
     stmt = select(TempleBankAccount).filter(
@@ -293,31 +445,32 @@ async def list_temple_bank_accounts(
         except Exception:
             masked_acc = "Decryption Failed"
             
-        result.append({
-            "id": str(ac.id),
-            "account_holder_name": ac.account_holder_name,
-            "bank_name": ac.bank_name,
-            "account_number": masked_acc,
-            "ifsc_code": ac.ifsc_code,
-            "account_type": ac.account_type,
-            "verification_status": ac.verification_status,
-            "version": ac.version,
-            "is_active": ac.is_active,
-            "is_primary": ac.is_primary,
-            "effective_from": ac.effective_from,
-            "effective_to": ac.effective_to,
-            "rejection_reason": ac.rejection_reason,
-            "proof_uploaded_at": ac.proof_uploaded_at
-        })
+        validated_ac = BankAccountResponse(
+            id=str(ac.id),
+            account_holder_name=ac.account_holder_name,
+            bank_name=ac.bank_name,
+            account_number=masked_acc,
+            ifsc_code=ac.ifsc_code,
+            account_type=ac.account_type,
+            verification_status=ac.verification_status,
+            version=ac.version,
+            is_active=ac.is_active,
+            is_primary=ac.is_primary,
+            effective_from=ac.effective_from,
+            effective_to=ac.effective_to,
+            rejection_reason=ac.rejection_reason,
+            proof_uploaded_at=ac.proof_uploaded_at
+        )
+        result.append(validated_ac.model_dump())
     return api_response(data=result, message="Temple bank accounts history retrieved successfully")
 
 
-@router.get("/admin/bank-accounts/pending")
+@router.get("/admin/bank-accounts/pending", responses={200: {"model": BankAccountPendingListEnvelope}})
 async def list_pending_bank_accounts(
     db: AsyncSession = Depends(get_db),
     current_user: TokenData = Depends(get_current_superadmin)
 ):
-    """Lists all pending bank account requests for Super Admin checker approval."""
+    """Lists all pending bank account requests for Super Admin checker approval, with bank numbers masked by default."""
     stmt = select(TempleBankAccount).filter(TempleBankAccount.verification_status == BankAccountStatus.PENDING)
     res = await db.execute(stmt)
     accounts = res.scalars().all()
@@ -327,23 +480,71 @@ async def list_pending_bank_accounts(
         from app.core.security.encryption import decrypt_data
         try:
             raw_acc = decrypt_data(ac.account_number_enc)
+            # Mask all but last 4 digits for security in display by default
+            masked_acc = f"xxxxxx{raw_acc[-4:]}" if len(raw_acc) >= 4 else "xxxx"
         except Exception:
-            raw_acc = "Decryption Failed"
+            masked_acc = "Decryption Failed"
             
-        result.append({
-            "id": str(ac.id),
-            "temple_id": str(ac.temple_id),
-            "account_holder_name": ac.account_holder_name,
-            "bank_name": ac.bank_name,
-            "account_number": raw_acc,
-            "ifsc_code": ac.ifsc_code,
-            "account_type": ac.account_type,
-            "cancelled_cheque_url": ac.cancelled_cheque_url,
-            "submitted_by": str(ac.submitted_by),
-            "proof_uploaded_at": ac.proof_uploaded_at,
-            "version": ac.version
-        })
+        validated_ac = BankAccountPendingResponse(
+            id=str(ac.id),
+            temple_id=str(ac.temple_id),
+            account_holder_name=ac.account_holder_name,
+            bank_name=ac.bank_name,
+            account_number=masked_acc,
+            ifsc_code=ac.ifsc_code,
+            account_type=ac.account_type,
+            cancelled_cheque_url=ac.cancelled_cheque_url,
+            submitted_by=str(ac.submitted_by),
+            proof_uploaded_at=ac.proof_uploaded_at,
+            version=ac.version
+        )
+        result.append(validated_ac.model_dump())
     return api_response(data=result, message="Pending bank accounts retrieved successfully")
+
+
+@router.post("/admin/bank-accounts/{id}/reveal", responses={200: {"model": BankAccountRevealResponseEnvelope}})
+async def reveal_bank_account(
+    id: UUID,
+    db: AsyncSession = Depends(get_db),
+    current_user: TokenData = Depends(get_current_superadmin)
+):
+    """Allows Super Admins to decrypt and reveal the full bank account number for verification, logging the access."""
+    stmt = select(TempleBankAccount).filter(TempleBankAccount.id == id)
+    res = await db.execute(stmt)
+    bank_ac = res.scalar_one_or_none()
+    if not bank_ac:
+        raise HTTPException(status_code=404, detail="Bank account not found")
+
+    from app.core.security.encryption import decrypt_data
+    try:
+        raw_acc = decrypt_data(bank_ac.account_number_enc)
+    except Exception:
+        raise HTTPException(status_code=500, detail="Failed to decrypt bank account number")
+
+    from app.modules.audit.services.activity_log_service import ActivityLogService
+    await ActivityLogService.emit_event(
+        db=db,
+        temple_id=bank_ac.temple_id,
+        module_name="FINANCE",
+        entity_name="TempleBankAccount",
+        entity_id=str(bank_ac.id),
+        action_type="BANK_ACCOUNT_REVEALED",
+        action_category="SECURITY_FINANCE",
+        description=f"Super Admin revealed bank account number for bank account ID {bank_ac.id} (Temple: {bank_ac.temple_id}).",
+        before_value=None,
+        after_value=None,
+        performed_by_user_id=UUID(current_user.sub),
+        performed_by_name="Super Admin",
+        performed_by_role="SUPERADMIN",
+        severity="HIGH",
+        risk_score=50
+    )
+    await db.commit()
+
+    return api_response(
+        data=BankAccountRevealResponse(id=str(bank_ac.id), account_number=raw_acc).model_dump(),
+        message="Bank account number decrypted and revealed successfully."
+    )
 
 
 @router.post("/admin/bank-accounts/{id}/verify")
@@ -378,7 +579,7 @@ async def verify_temple_bank_account(
         raise HTTPException(status_code=500, detail=str(e))
 
 
-@router.post("/admin/settlements/batches/generate")
+@router.post("/admin/settlements/batches/generate", responses={200: {"model": SettlementBatchGenerationEnvelope}})
 async def generate_settlement_batches(
     payload: SettlementBatchGenerateSchema,
     db: AsyncSession = Depends(get_db),
@@ -392,15 +593,23 @@ async def generate_settlement_batches(
             period_end=payload.period_end,
             created_by_user_id=UUID(current_user.sub)
         )
+        data = [
+            SettlementBatchGenerationResult(
+                batch_id=str(b.id),
+                batch_ref=b.batch_ref,
+                net_payout_amount=b.net_payout_amount
+            ).model_dump()
+            for b in batches
+        ]
         return api_response(
-            data=[{"batch_id": str(b.id), "batch_ref": b.batch_ref, "net_payout_amount": b.net_payout_amount} for b in batches],
+            data=data,
             message=f"Generated {len(batches)} settlement batches successfully."
         )
     except Exception as e:
         raise HTTPException(status_code=500, detail=str(e))
 
 
-@router.get("/admin/settlements/batches")
+@router.get("/admin/settlements/batches", responses={200: {"model": SettlementBatchListEnvelope}})
 async def list_settlement_batches(
     db: AsyncSession = Depends(get_db),
     current_user: TokenData = Depends(get_current_superadmin)
@@ -412,27 +621,28 @@ async def list_settlement_batches(
     
     result = []
     for b in batches:
-        result.append({
-            "id": str(b.id),
-            "temple_id": str(b.temple_id),
-            "batch_ref": b.batch_ref,
-            "period_start": b.period_start,
-            "period_end": b.period_end,
-            "transaction_count": b.transaction_count,
-            "total_archana_amount": b.total_archana_amount,
-            "total_refunds": b.total_refunds,
-            "net_payout_amount": b.net_payout_amount,
-            "status": b.status,
-            "approved_by": str(b.approved_by) if b.approved_by else None,
-            "payout_reference": b.payout_reference,
-            "payout_method": b.payout_method,
-            "settled_at": b.settled_at,
-            "bank_account_id": str(b.bank_account_id) if b.bank_account_id else None
-        })
+        validated_b = SettlementBatchResponse(
+            id=str(b.id),
+            temple_id=str(b.temple_id),
+            batch_ref=b.batch_ref,
+            period_start=b.period_start,
+            period_end=b.period_end,
+            transaction_count=b.transaction_count,
+            total_archana_amount=b.total_archana_amount,
+            total_refunds=b.total_refunds,
+            net_payout_amount=b.net_payout_amount,
+            status=b.status,
+            approved_by=str(b.approved_by) if b.approved_by else None,
+            payout_reference=b.payout_reference,
+            payout_method=b.payout_method,
+            settled_at=b.settled_at,
+            bank_account_id=str(b.bank_account_id) if b.bank_account_id else None
+        )
+        result.append(validated_b.model_dump())
     return api_response(data=result, message="Settlement batches retrieved successfully")
 
 
-@router.post("/admin/settlements/batches/{id}/approve")
+@router.post("/admin/settlements/batches/{id}/approve", responses={200: {"model": SettlementBatchApprovalEnvelope}})
 async def approve_settlement_batch(
     id: UUID,
     db: AsyncSession = Depends(get_db),
@@ -446,7 +656,7 @@ async def approve_settlement_batch(
             approver_id=UUID(current_user.sub)
         )
         return api_response(
-            data={"id": str(batch.id), "status": batch.status},
+            data=SettlementBatchApprovalResponse(id=str(batch.id), status=batch.status).model_dump(),
             message="Settlement batch approved successfully."
         )
     except ValueError as ve:
@@ -455,7 +665,7 @@ async def approve_settlement_batch(
         raise HTTPException(status_code=500, detail=str(e))
 
 
-@router.post("/admin/settlements/batches/{id}/complete")
+@router.post("/admin/settlements/batches/{id}/complete", responses={200: {"model": SettlementBatchCompleteEnvelope}})
 async def complete_settlement_batch(
     id: UUID,
     payload: BatchCompleteSchema,
@@ -471,7 +681,11 @@ async def complete_settlement_batch(
             existing = res.scalar_one_or_none()
             if existing and existing.id == id:
                 return api_response(
-                    data={"id": str(existing.id), "status": existing.status, "payout_reference": existing.payout_reference},
+                    data=SettlementBatchCompleteResponse(
+                        id=str(existing.id),
+                        status=existing.status,
+                        payout_reference=existing.payout_reference
+                    ).model_dump(),
                     message="Settlement batch already completed (Idempotency Hit)."
                 )
 
@@ -489,7 +703,11 @@ async def complete_settlement_batch(
             await db.commit()
 
         return api_response(
-            data={"id": str(batch.id), "status": batch.status, "payout_reference": batch.payout_reference},
+            data=SettlementBatchCompleteResponse(
+                id=str(batch.id),
+                status=batch.status,
+                payout_reference=batch.payout_reference
+            ).model_dump(),
             message="Settlement batch completed successfully."
         )
     except ValueError as ve:
@@ -503,7 +721,7 @@ async def complete_settlement_batch(
 async def get_temple_settlement_history(
     db: AsyncSession = Depends(get_db),
     temple_id: str = Depends(get_current_temple_id),
-    current_user: TokenData = Depends(require_permission("website", "view"))
+    current_user: TokenData = Depends(require_permission("finance", "view"))
 ):
     """Exposes history and pending payouts overview to Temple Manager."""
     try:

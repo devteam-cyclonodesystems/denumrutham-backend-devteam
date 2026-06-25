@@ -287,6 +287,19 @@ class ArchanaService:
             await AccountingService.record_booking_ledger(
                 db=db, temple_id=tid, booking=booking, recorded_by=booking.created_by
             )
+            # Master Ledger SOT Unification: Write booking to transactions table
+            from app.services.transaction_service import TransactionService
+            txn_source = "manual" if (booking.booking_channel or "").upper() == "COUNTER" else "system"
+            await TransactionService.create_transaction(
+                db=db,
+                temple_id=str(tid),
+                txn_type="income",
+                category="archana",
+                amount=booking.grand_total,
+                description=f"Archana Booking {booking.ref_id} for {booking.primary_devotee_name}",
+                reference_id=booking.ref_id,
+                source=txn_source
+            )
 
         # 5.1 Initialize Executions
         if queue_entry:

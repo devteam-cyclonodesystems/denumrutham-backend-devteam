@@ -53,7 +53,7 @@ async def test_bank_account_encryption_and_verification(client, auth_headers, su
         from app.core.security.encryption import decrypt_data
         assert decrypt_data(bank_ac.account_number_enc) == "12345678901"
 
-    # 3. Retrieve pending bank accounts as Super Admin
+    # 3. Retrieve pending bank accounts as Super Admin (masked by default)
     pending_resp = await client.get(
         "/api/v1/admin/bank-accounts/pending",
         headers=superadmin_auth_headers
@@ -61,9 +61,17 @@ async def test_bank_account_encryption_and_verification(client, auth_headers, su
     assert pending_resp.status_code == 200, pending_resp.text
     pending_data = pending_resp.json()["data"]
     assert len(pending_data) > 0
-    # Super Admin sees decrypted details
     matched_ac = [ac for ac in pending_data if ac["id"] == str(bank_account_id)][0]
-    assert matched_ac["account_number"] == "12345678901"
+    assert matched_ac["account_number"] == "xxxxxx8901"
+
+    # 3.5 Reveal bank account details as Super Admin
+    reveal_resp = await client.post(
+        f"/api/v1/admin/bank-accounts/{bank_account_id}/reveal",
+        headers=superadmin_auth_headers
+    )
+    assert reveal_resp.status_code == 200, reveal_resp.text
+    reveal_data = reveal_resp.json()["data"]
+    assert reveal_data["account_number"] == "12345678901"
 
     # 4. Verify Bank account
     verify_resp = await client.post(
