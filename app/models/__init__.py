@@ -23,12 +23,16 @@ from app.models.archana import (
     RitualQueue, 
     ArchanaBookingAudit, 
     ArchanaSyncState,
-    OnlineSettlementLedger,
+    NotificationTemplate,
+    NotificationDeliveryLog
+)
+from app.modules.finance.models import (
     TempleBankAccount,
     SettlementBatch,
     SettlementBatchItem,
-    NotificationTemplate,
-    NotificationDeliveryLog
+    OnlineSettlementLedger,
+    PlatformFinancialAccount,
+    BankAccountStatus
 )
 from app.models.accounting import (
     FinancialLedgerEntry,
@@ -90,6 +94,8 @@ __all__ = [
     "TempleBankAccount",
     "SettlementBatch",
     "SettlementBatchItem",
+    "PlatformFinancialAccount",
+    "BankAccountStatus",
     "NotificationTemplate",
     "NotificationDeliveryLog",
     "FinancialLedgerEntry",

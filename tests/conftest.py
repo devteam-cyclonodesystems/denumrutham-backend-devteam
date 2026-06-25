@@ -14,6 +14,7 @@ import os
 os.environ.setdefault("RAZORPAY_KEY_ID", "mock")
 os.environ.setdefault("RAZORPAY_KEY_SECRET", "mock")
 os.environ.setdefault("RAZORPAY_WEBHOOK_SECRET", "mock")
+os.environ.setdefault("TESTING", "True")
 
 from httpx import AsyncClient, ASGITransport
 from sqlalchemy.ext.asyncio import create_async_engine, AsyncSession, async_sessionmaker

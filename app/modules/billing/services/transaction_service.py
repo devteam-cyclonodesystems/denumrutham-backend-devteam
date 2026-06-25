@@ -37,6 +37,35 @@ class TransactionService:
         await db.flush()
         await db.refresh(txn)
         logger.info("Transaction created: %s %s ₹%.2f ref=%s", txn_type, category, amount, reference_id)
+        
+        # Emit standardized audit log
+        from app.modules.audit.services.activity_log_service import ActivityLogService
+        action_type = "INCOME_CREATED" if txn_type == "income" else "EXPENSE_CREATED"
+        if category.lower() in ("adjustment", "correction"):
+            action_type = "FINANCE_LEDGER_ADJUSTED"
+
+        await ActivityLogService.emit_event(
+            db=db,
+            temple_id=tid,
+            module_name="FINANCE",
+            entity_name="Transaction",
+            entity_id=str(txn.id),
+            action_type=action_type,
+            action_category="TRANSACTION_FINANCE",
+            description=f"Transaction {action_type} - {description} (Amount: INR {amount:.2f}).",
+            before_value=None,
+            after_value={"type": txn_type, "category": category, "amount": amount},
+            performed_by_user_id=None,
+            performed_by_name="System / Finance Service",
+            performed_by_role="MANAGER",
+            severity="MEDIUM",
+            risk_score=10
+        )
+
+        # Invalidate finance dashboard cache
+        from app.modules.finance.services.finance_service import FinanceService
+        await FinanceService.invalidate_dashboard_cache(tid)
+
         return txn
 
     @staticmethod

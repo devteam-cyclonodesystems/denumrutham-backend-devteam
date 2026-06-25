@@ -35,7 +35,7 @@ from app.models.archana import (
     ArchanaRefund, SettlementBatch, SettlementBatchItem,
     TempleBankAccount, QueueStatus, ArchanaStatus,
 )
-from app.models import ActivityOutbox
+from app.models import ActivityOutbox, BankAccountStatus
 from app.services.settlement_service import SettlementService
 
 
@@ -151,7 +151,7 @@ async def seed_bank_and_verify(db, temple_id: UUID, user_id: UUID) -> TempleBank
     # Fetch the newly created account and verify it within the same session
     stmt = select(TempleBankAccount).filter(
         TempleBankAccount.temple_id == temple_id,
-        TempleBankAccount.is_active == True,
+        TempleBankAccount.verification_status == BankAccountStatus.PENDING,
     )
     res = await db.execute(stmt)
     bank_ac = res.scalar_one()

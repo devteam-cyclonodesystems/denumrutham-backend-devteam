@@ -17,7 +17,7 @@ from app.modules.temple_management.routes.temple_advertisements import router as
 from app.modules.governance.routes.claims import router as claims_router
 from app.modules.governance.routes.suggestions import router as suggestions_router
 from app.modules.billing.routes.subscriptions import router as subscriptions_router
-from app.modules.billing.routes.settlements import router as settlements_router
+from app.modules.finance.routes.finance_routes import router as finance_router
 from app.modules.analytics.routes.telemetry import (
     public_router as telemetry_public_router,
     manager_router as telemetry_manager_router,
@@ -78,7 +78,7 @@ api_router.include_router(telemetry_manager_router, prefix="/manager", tags=["Ma
 api_router.include_router(employees.router, prefix="/employees", tags=["HR & Payroll"])
 api_router.include_router(archana_bookings.router, prefix="/archana-bookings", tags=["Archana Bookings"])
 api_router.include_router(transactions.router, prefix="/transactions", tags=["Financial Transactions"])
-api_router.include_router(settlements_router, prefix="", tags=["Settlement Management"])
+api_router.include_router(finance_router, prefix="", tags=["Finance Management"])
 api_router.include_router(inventory_routes.router, prefix="/inventory", tags=["Inventory Management"])
 api_router.include_router(dashboard_routes.router, prefix="/dashboard", tags=["Analytics Dashboard"])
 
