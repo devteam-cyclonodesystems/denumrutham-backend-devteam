@@ -17,6 +17,9 @@ depends_on = None
 
 
 def upgrade() -> None:
+    # 0. Drop the legacy empty table if it exists
+    op.execute("DROP TABLE IF EXISTS archana_bookings CASCADE")
+
     # 1. Rename the primary table
     op.rename_table('enterprise_archana_bookings', 'archana_bookings')
 
@@ -39,15 +42,15 @@ def upgrade() -> None:
         ('online_settlement_ledger',  'online_settlement_ledger_booking_id_fkey'),
     ]
     for table, old_fk in fk_renames:
-        op.execute(
-            f"ALTER TABLE {table} RENAME CONSTRAINT {old_fk} TO {old_fk}_renamed"
-            if False else  # constraint rename is idempotent-safe via IF EXISTS workaround below
-            f"DO $$ BEGIN "
-            f"  IF EXISTS (SELECT 1 FROM pg_constraint WHERE conname = '{old_fk}') THEN "
-            f"    ALTER TABLE {table} RENAME CONSTRAINT {old_fk} TO {old_fk.replace('enterprise_', '')}; "
-            f"  END IF; "
-            f"END $$;"
-        )
+        new_fk = old_fk.replace('enterprise_', '')
+        if old_fk != new_fk:
+            op.execute(
+                f"DO $$ BEGIN "
+                f"  IF EXISTS (SELECT 1 FROM pg_constraint WHERE conname = '{old_fk}') THEN "
+                f"    ALTER TABLE {table} RENAME CONSTRAINT {old_fk} TO {new_fk}; "
+                f"  END IF; "
+                f"END $$;"
+            )
 
 
 def downgrade() -> None:
