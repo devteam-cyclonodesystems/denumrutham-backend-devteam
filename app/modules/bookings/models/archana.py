@@ -193,7 +193,7 @@ class ArchanaBookingMember(Base):
     nakshatra = Column(String, nullable=True)
     is_primary = Column(Boolean, default=False)
     
-    booking = relationship("EnterpriseArchanaBooking", back_populates="members")
+    booking = relationship("ArchanaBooking", back_populates="members")
     items = relationship("ArchanaBookingItem", back_populates="member", cascade="all, delete-orphan")
 
 class ArchanaBookingItem(Base):
@@ -278,7 +278,7 @@ class ArchanaBookingPayment(Base):
     webhook_received_at = Column(DateTime(timezone=True), nullable=True)
     settlement_status = Column(String(30), default="PENDING")
 
-    booking = relationship("EnterpriseArchanaBooking", back_populates="payments")
+    booking = relationship("ArchanaBooking", back_populates="payments")
 
 class RitualQueue(Base):
     """Operational ritual queue system (RitualQueue entity)."""
@@ -294,7 +294,7 @@ class RitualQueue(Base):
     actual_start_time = Column(DateTime(timezone=True), nullable=True)
     completed_at = Column(DateTime(timezone=True), nullable=True)
     
-    booking = relationship("EnterpriseArchanaBooking", back_populates="queue_entry")
+    booking = relationship("ArchanaBooking", back_populates="queue_entry")
     executions = relationship("ArchanaExecution", back_populates="queue", cascade="all, delete-orphan")
 
 class ArchanaBookingAudit(Base):
@@ -347,7 +347,7 @@ class ArchanaRefund(Base):
         UniqueConstraint("temple_id", "ref_id", name="uq_archana_refund_ref_id"),
     )
 
-    booking = relationship("EnterpriseArchanaBooking")
+    booking = relationship("ArchanaBooking")
 
 
 

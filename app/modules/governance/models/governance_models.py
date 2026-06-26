@@ -79,32 +79,7 @@ class Notification(Base):
 
 
 
-class ArchanaBooking(Base):
-    """Archana / Pooja booking — matches UI payload exactly."""
-    __tablename__ = "archana_bookings"
 
-    id = Column(UUID(as_uuid=True), primary_key=True, default=uuid.uuid4)
-    temple_id = Column(UUID(as_uuid=True), ForeignKey("temples.id"), nullable=False, index=True)
-    ref_number = Column(String, nullable=True)  # e.g. AR01/0226
-    devotee_name = Column(String, nullable=False)
-    phone = Column(String, default="")
-    nakshatra = Column(String, default="")
-    items = Column(JSON, default=list)  # [{name, price}]
-    family = Column(JSON, default=list)  # [{name, nakshatra, archana}]
-    dakshina = Column(Float, default=0.0)
-    booking_date = Column(String, nullable=False)
-    booking_time = Column(String, default="")
-    total = Column(Float, nullable=False, default=0.0)
-    payment_mode = Column(String, default="Cash")
-    booking_mode = Column(String, default="Counter")
-    remarks = Column(Text, default="")
-    consent = Column(Boolean, default=False)
-    status = Column(String, default="confirmed")  # confirmed | cancelled
-    is_active = Column(Boolean, default=True, index=True)
-    deleted_at = Column(DateTime(timezone=True), nullable=True)
-    created_by = Column(String, default="Admin")
-    created_at = Column(DateTime(timezone=True), default=utcnow)
-    updated_at = Column(DateTime(timezone=True), default=utcnow, onupdate=utcnow)
 
 
 
