@@ -44,6 +44,7 @@
 | FEAT-008 | Ad Placements Integration & Scrollable Audit Modal | Feature Delivery |  Shipped | 2026-06-17 |
 | FEAT-009 | Impressions and Click Counts in Campaign Audit History | Feature Delivery |  Shipped | 2026-06-18 |
 | FEAT-010 | KPI Card Clicks & Campaign Expiry Metric Adjustments | Feature Delivery |  Shipped | 2026-06-18 |
+| INC-026 | HTTP 500 DATABASE_ERROR on all /archana-bookings endpoints due to missing ACKNOWLEDGED enum value | P1 – Critical | ✅ Resolved | 2026-06-26 |
 
 ---
 
@@ -1730,6 +1731,83 @@ Optimized the state and district directory grid cards so that long place names (
 
 
 
+
+## INC-026: HTTP 500 DATABASE_ERROR on All /archana-bookings Endpoints
+
+| Field | Value |
+|-------|-------|
+| **Incident ID** | INC-026 |
+| **Incident Title** | HTTP 500 DATABASE_ERROR on all /archana-bookings and /archana-bookings/queue endpoints due to missing `ACKNOWLEDGED` PostgreSQL enum value |
+| **Date and Time** | 2026-06-26T07:30:00Z |
+| **Severity/Priority** | P1 – Critical |
+| **Current Status** | ✅ Resolved |
+
+### Description
+
+Every GET request to `/api/v1/archana-bookings`, `/api/v1/archana-bookings/queue`, and `/api/v1/archana-bookings/kpis` returned a `500 DATABASE_ERROR`. The frontend ArchanaPoojaModule had a `setInterval` polling loop that called these endpoints repeatedly, causing the page to auto-refresh continuously and block any new booking from being created.
+
+Console error observed:
+```
+Error fetching Archana data: {code: 'DATABASE_ERROR', message: 'Internal database error', traceId: '9fe8e7c9-ee0', timestamp: '2026-06-26T07:12:04.413419+00:00'}
+```
+
+### Root Cause
+
+The `QueueStatus` Python enum (in `app/modules/bookings/models/archana.py`) defined `ACKNOWLEDGED = "ACKNOWLEDGED"` as one of its values. The `/archana-bookings/queue` endpoint filters the `ritual_queue` table:
+
+```sql
+WHERE ritual_queue.status IN ('WAITING', 'ACKNOWLEDGED', 'IN_PROGRESS')
+```
+
+However, the PostgreSQL `queuestatus` enum type in the production Neon database was **missing the `ACKNOWLEDGED` value**. This caused:
+
+```
+InvalidTextRepresentationError: invalid input value for enum queuestatus: "ACKNOWLEDGED"
+```
+
+This SQLAlchemy error was caught by the global `SQLAlchemyError` handler in `real_main.py` and returned as a generic `DATABASE_ERROR 500`. Because the `setInterval` loop on the frontend continued polling every few seconds, the page appeared to auto-refresh endlessly.
+
+**Why was it missing?** The `ACKNOWLEDGED` status was added to the Python model at some point without a corresponding Alembic migration to update the PostgreSQL enum type. PostgreSQL native enum types require explicit `ALTER TYPE ... ADD VALUE` commands — they are not automatically updated by SQLAlchemy `autogenerate`.
+
+### Diagnosis Method
+
+1. Ran `python -m app.scripts.diagnose_archana_500` — a purpose-built isolation script that tested each endpoint call independently using fresh DB sessions.
+2. Identified that `get_queue` was the only failing call: `InvalidTextRepresentationError: invalid input value for enum queuestatus: "ACKNOWLEDGED"`.
+3. Verified with `python -m app.scripts.check_enum_values`: DB had `['WAITING', 'IN_PROGRESS', 'COMPLETED', 'CANCELLED', 'SKIPPED', 'SYNC_PENDING']` — missing `ACKNOWLEDGED`.
+
+### Fix Applied
+
+**Migration**: `alembic/versions/f1a2b3c4d5e6_add_acknowledged_to_queuestatus_enum.py`
+
+```python
+def upgrade() -> None:
+    op.execute("ALTER TYPE queuestatus ADD VALUE IF NOT EXISTS 'ACKNOWLEDGED' AFTER 'WAITING'")
+```
+
+The `IF NOT EXISTS` clause makes this idempotent — safe to run on any environment.
+
+**Steps**:
+1. Created migration file `f1a2b3c4d5e6`.
+2. Ran `alembic upgrade head` locally against production Neon DB.
+3. Verified all endpoints pass via `diagnose_archana_500.py`.
+4. Pushed migration to `main` branch; Railway will apply it again on next deploy (idempotent).
+
+### Verification
+
+After fix, all 7 diagnostic steps passed:
+```
+OK promote_matured_bookings: promoted 0 bookings
+OK get_queue: returned 0 queue entries
+OK get_kpis: returned kpis: {...}
+OK get_financial_kpis: returned: {...}
+OK get_bookings: returned 0 bookings
+OK full_kpis_endpoint: full kpis response: [all keys present]
+OK full_queue_endpoint: queue response: 0 entries
+```
+
+### Prevention
+
+**Rule added**: When adding a new value to a Python `str, enum.Enum` that maps to a PostgreSQL native enum column, **always create an Alembic migration** that runs `ALTER TYPE <typename> ADD VALUE IF NOT EXISTS '<VALUE>'`. SQLAlchemy autogenerate does NOT detect enum value additions.
 
 
 
