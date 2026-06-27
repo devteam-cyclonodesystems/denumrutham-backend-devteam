@@ -45,6 +45,7 @@
 | FEAT-009 | Impressions and Click Counts in Campaign Audit History | Feature Delivery |  Shipped | 2026-06-18 |
 | FEAT-010 | KPI Card Clicks & Campaign Expiry Metric Adjustments | Feature Delivery |  Shipped | 2026-06-18 |
 | INC-026 | HTTP 500 DATABASE_ERROR on all /archana-bookings endpoints due to missing ACKNOWLEDGED enum value | P1 – Critical | ✅ Resolved | 2026-06-26 |
+| INC-027 | Web service exceeded memory limit and crashed on Render deploy | P1 – Critical | ✅ Resolved | 2026-06-27 |
 
 ---
 
@@ -1808,6 +1809,42 @@ OK full_queue_endpoint: queue response: 0 entries
 ### Prevention
 
 **Rule added**: When adding a new value to a Python `str, enum.Enum` that maps to a PostgreSQL native enum column, **always create an Alembic migration** that runs `ALTER TYPE <typename> ADD VALUE IF NOT EXISTS '<VALUE>'`. SQLAlchemy autogenerate does NOT detect enum value additions.
+
+
+## INC-027: Web Service Exceeded Memory Limit (OOM) on Render Deploy
+
+| Field | Value |
+|-------|-------|
+| **Incident ID** | INC-027 |
+| **Incident Title** | Web service exceeded memory limit (OOM) and crashed on Render deploy |
+| **Date and Time** | 2026-06-27T11:20:00Z |
+| **Severity/Priority** | P1 – Critical |
+| **Current Status** | ✅ Resolved |
+
+### Description
+
+During the initial deployment test of the backend service on Render, the container failed to boot and crashed with:
+`An instance of your Web Service denumrutham-backend exceeded its memory limit, which triggered an automatic restart.`
+Because of the loop restarts, the API docs at `/docs` were not loading.
+
+### Root Cause
+
+The production `Dockerfile` had a hardcoded `gunicorn` start command with `--workers 4`. 
+Under Render's Free/Starter tier (which defaults to a strict 512 MB memory limit), running 4 concurrent Gunicorn workers utilizing the Uvicorn worker class loaded 4 instances of Python, FastAPI, SQLAlchemy, and metadata. This pushed the total memory consumption past the 512 MB threshold (to around ~550-600 MB), triggering Render's OOM (Out Of Memory) killer and restarting the container.
+
+### Fix Applied
+
+Updated the `Dockerfile` CMD to dynamic concurrency checking using Gunicorn's and Render's standard `WEB_CONCURRENCY` environment variable, defaulting to `2` instead of `4` when not defined:
+
+```dockerfile
+CMD ["sh", "-c", "alembic upgrade head && gunicorn app.main:app --worker-class uvicorn.workers.UvicornWorker --workers ${WEB_CONCURRENCY:-2} --bind 0.0.0.0:${PORT:-8000} --forwarded-allow-ips='*' --timeout 120 --access-logfile - --error-logfile -"]
+```
+
+This reduces default memory footprint to below ~350 MB on startup, allowing the app to successfully boot, run migrations, and serve requests stably.
+
+### Verification
+
+Pushed the updated `Dockerfile` to the main repository branch. Render will automatically pick up the new commit and rebuild the container with the memory-optimized configuration.
 
 
 
