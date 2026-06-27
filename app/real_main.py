@@ -169,6 +169,12 @@ app = FastAPI(
     redirect_slashes=True,
 )
 
+from fastapi.responses import RedirectResponse
+
+@app.get("/")
+async def root_redirect():
+    return RedirectResponse(url="/docs")
+
 @app.get("/health/live")
 async def health_live():
     return {"status": "alive", "commit": "check-deploy-1"}
