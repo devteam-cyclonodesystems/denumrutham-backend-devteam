@@ -46,6 +46,7 @@
 | FEAT-010 | KPI Card Clicks & Campaign Expiry Metric Adjustments | Feature Delivery |  Shipped | 2026-06-18 |
 | INC-026 | HTTP 500 DATABASE_ERROR on all /archana-bookings endpoints due to missing ACKNOWLEDGED enum value | P1 – Critical | ✅ Resolved | 2026-06-26 |
 | INC-027 | Web service exceeded memory limit and crashed on Render deploy | P1 – Critical | ✅ Resolved | 2026-06-27 |
+| INC-028 | 502 Bad Gateway on Render due to hardcoded port in Dockerfile healthcheck | P1 – Critical | ✅ Resolved | 2026-06-27 |
 
 ---
 
@@ -1845,6 +1846,46 @@ This reduces default memory footprint to below ~350 MB on startup, allowing the 
 ### Verification
 
 Pushed the updated `Dockerfile` to the main repository branch. Render will automatically pick up the new commit and rebuild the container with the memory-optimized configuration.
+
+
+## INC-028: 502 Bad Gateway on Render due to Hardcoded Port in Dockerfile Healthcheck
+
+| Field | Value |
+|-------|-------|
+| **Incident ID** | INC-028 |
+| **Incident Title** | HTTP 502 Bad Gateway on Render due to hardcoded port in Dockerfile `HEALTHCHECK` directive |
+| **Date and Time** | 2026-06-27T11:32:00Z |
+| **Severity/Priority** | P1 – Critical |
+| **Current Status** | ✅ Resolved |
+
+### Description
+
+After resolving the memory limits (OOM), the backend service successfully built and ran migrations, but any external request to the service returned `502 Bad Gateway (net::ERR_HTTP_RESPONSE_CODE_FAILURE)`.
+
+### Root Cause
+
+The `Dockerfile` contained a hardcoded `HEALTHCHECK` directive:
+```dockerfile
+HEALTHCHECK --interval=30s --timeout=5s --start-period=10s --retries=3 \
+    CMD curl -f http://localhost:8000/health/live || exit 1
+```
+
+Render sets a dynamic port at runtime using the `PORT` environment variable (e.g. `10000`). Because Gunicorn correctly binds to `0.0.0.0:${PORT:-8000}`, the server was listening on the dynamic port (e.g., `10000`), but the built-in Docker healthcheck attempted to query port `8000`.
+
+This port mismatch caused the local `curl` healthcheck to fail continuously inside the container. Docker marked the container as unhealthy, leading Render's routing proxy to drop traffic and return `502 Bad Gateway` while repeatedly restarting the container.
+
+### Fix Applied
+
+Updated the `HEALTHCHECK` directive in the `Dockerfile` to use the dynamic `PORT` environment variable:
+
+```dockerfile
+HEALTHCHECK --interval=30s --timeout=5s --start-period=10s --retries=3 \
+    CMD curl -f http://localhost:${PORT:-8000}/health/live || exit 1
+```
+
+### Verification
+
+Pushed the fix to the repository. Render will automatically rebuild and deploy the new version. The internal container healthcheck will now query the correct port, allowing the container status to shift to healthy and Render to correctly route traffic.
 
 
 
