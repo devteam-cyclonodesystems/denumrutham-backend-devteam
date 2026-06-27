@@ -45,7 +45,7 @@ logger = setup_logging()
 async def lifespan(app: FastAPI):
     """Startup / shutdown lifecycle."""
     import os
-    build_commit = os.getenv("RAILWAY_GIT_COMMIT_SHA") or os.getenv("COMMIT_SHA") or "4cf6efdfb0032b49eb12818c1db2dfec94cb1fec"
+    build_commit = os.getenv("RENDER_GIT_COMMIT") or os.getenv("RAILWAY_GIT_COMMIT_SHA") or os.getenv("COMMIT_SHA") or "4cf6efdfb0032b49eb12818c1db2dfec94cb1fec"
     logger.warning(
         "ARCHANA HOTFIX BUILD ACTIVE",
         extra={
