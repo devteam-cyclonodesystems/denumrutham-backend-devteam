@@ -255,7 +255,7 @@ async def main():
     await seed_db("Local PostgreSQL (5432)", local_pg_url)
     
     # 3. Production Neon DB
-    neon_url = "postgresql+asyncpg://neondb_owner:npg_Zwt1jpEPrWd7@ep-curly-shape-aow2jmi7-pooler.c-2.ap-southeast-1.aws.neon.tech/neondb"
+    neon_url = "postgresql+asyncpg://neondb_owner:npg_6Ii0uTBKbaZP@ep-old-queen-aoeyozad-pooler.c-2.ap-southeast-1.aws.neon.tech/neondb?sslmode=require&channel_binding=require"
     await seed_db("Production Neon DB", neon_url)
 
 if __name__ == "__main__":
