@@ -104,10 +104,7 @@ async def list_temple_requests(
     current_user: TokenData = Depends(require_system_permission("APPROVE_TEMPLE")),
 ):
     """List temple registration requests. Defaults to all; filter by status."""
-    if status_filter:
-        result = await OnboardingService.list_all_requests(db, status_filter)
-    else:
-        result = await OnboardingService.list_pending_requests(db)
+    result = await OnboardingService.list_all_requests(db, status_filter)
 
     return api_response(
         data=result,
