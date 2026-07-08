@@ -104,8 +104,14 @@ class HomepageService:
         if category == "FEATURED":
             stmt = stmt.filter(Temple.is_featured == True)
         elif category == "TRENDING":
-            # Trending sorts will be scored inside Python using trending_scores maps to satisfy normalization requirement
-            pass
+            if trending_scores:
+                sorted_trending_ids = [k for k, v in sorted(trending_scores.items(), key=lambda item: item[1], reverse=True)[:limit]]
+                if sorted_trending_ids:
+                    stmt = stmt.filter(Temple.id.in_(sorted_trending_ids))
+                else:
+                    stmt = stmt.limit(limit)
+            else:
+                stmt = stmt.limit(limit)
         elif category == "RECENTLY_ADDED":
             stmt = stmt.order_by(Temple.created_at.desc())
         else:
@@ -197,6 +203,7 @@ class HomepageService:
                 Temple.directory_status == "ACTIVE"
             )
             .order_by(TempleFestival.priority.desc(), TempleFestival.start_date.asc())
+            .limit(100) # Prevents fetching thousands of records before Python-level sorting
         )
         result = await db.execute(stmt)
         festivals = result.scalars().all()
