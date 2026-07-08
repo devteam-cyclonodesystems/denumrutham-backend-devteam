@@ -244,13 +244,10 @@ class HomepageService:
         
         stmt = (
             select(
-                sa.func.coalesce(StateMaster.name, TempleProfile.state, Temple.state).label("state_name"),
+                sa.func.coalesce(Temple.state, 'Unknown').label("state_name"),
                 sa.func.count(Temple.id).label("temple_count")
             )
             .select_from(Temple)
-            .outerjoin(TempleProfile, Temple.id == TempleProfile.temple_id)
-            .outerjoin(StateMaster, Temple.state_id == StateMaster.id)
-            .join(TempleWebsiteSettingsLive, Temple.id == TempleWebsiteSettingsLive.temple_id)
             .filter(Temple.is_active == True, Temple.status == "APPROVED", Temple.directory_status == "ACTIVE")
             .group_by(sa.text("state_name"))
             .order_by(sa.text("state_name ASC"))
@@ -419,31 +416,54 @@ class HomepageService:
         # Cache miss or Redis unavailable, query DB in bulk
         logger.info("Homepage data cache miss - querying database")
         
+        t0 = time.time()
+        
         # 1. Bulk fetch follower counts to avoid N+1 queries
-        follower_stmt = (
-            select(TempleFollower.temple_id, sa.func.count(TempleFollower.id).label("count"))
-            .filter(TempleFollower.is_active == True)
-            .group_by(TempleFollower.temple_id)
-        )
-        follower_res = await db.execute(follower_stmt)
-        followers_map = {row.temple_id: row.count for row in follower_res.all() if row.temple_id}
+        try:
+            follower_stmt = (
+                select(TempleFollower.temple_id, sa.func.count(TempleFollower.id).label("count"))
+                .filter(TempleFollower.is_active == True)
+                .group_by(TempleFollower.temple_id)
+            )
+            follower_res = await asyncio.wait_for(db.execute(follower_stmt), timeout=2.0)
+            followers_map = {row.temple_id: row.count for row in follower_res.all() if row.temple_id}
+        except Exception as e:
+            logger.error(f"Followers query failed or timed out: {e}")
+            followers_map = {}
+            
+        t1 = time.time()
         
         # 1.5 Bulk fetch pending claims to avoid N+1
-        claim_stmt = select(TempleClaimRequest.temple_id).filter(TempleClaimRequest.status == "PENDING")
-        claim_res = await db.execute(claim_stmt)
-        claims_map = {row[0]: True for row in claim_res.all() if row[0]}
+        try:
+            claim_stmt = select(TempleClaimRequest.temple_id).filter(TempleClaimRequest.status == "PENDING")
+            claim_res = await asyncio.wait_for(db.execute(claim_stmt), timeout=2.0)
+            claims_map = {row[0]: True for row in claim_res.all() if row[0]}
+        except Exception as e:
+            logger.error(f"Claims query failed or timed out: {e}")
+            claims_map = {}
+            
+        t2 = time.time()
         
         # 2. Calculate trending scores
         trending_scores = await cls.calculate_trending_scores(db, followers_map)
         
         popular_searches = ["Sabarimala", "Guruvayur", "Tirupati", "Meenakshi", "Kedarnath", "Puri Jagannath"]
         
+        t3 = time.time()
         featured = await cls.get_temples_by_category(db, "FEATURED", limit=6, followers_map=followers_map, claims_map=claims_map)
+        t4 = time.time()
         trending = await cls.get_temples_by_category(db, "TRENDING", limit=6, followers_map=followers_map, trending_scores=trending_scores, claims_map=claims_map)
+        t5 = time.time()
         recently_added = await cls.get_temples_by_category(db, "RECENTLY_ADDED", limit=12, followers_map=followers_map, claims_map=claims_map)
+        t6 = time.time()
         upcoming_festivals = await cls.get_upcoming_festivals(db, limit=10, followers_map=followers_map)
+        t7 = time.time()
         states = await cls.get_states_directory(db)
+        t8 = time.time()
         spotlight = await cls.get_temple_spotlight(db, followers_map=followers_map, trending_scores=trending_scores, claims_map=claims_map)
+        t9 = time.time()
+        
+        logger.info(f"Homepage query timings: followers={t1-t0:.2f}s, claims={t2-t1:.2f}s, scores={t3-t2:.2f}s, featured={t4-t3:.2f}s, trending={t5-t4:.2f}s, recent={t6-t5:.2f}s, festivals={t7-t6:.2f}s, states={t8-t7:.2f}s, spotlight={t9-t8:.2f}s")
         
         # Fetch curated homepage layout with fallback protection
         layout_list = None
