@@ -90,7 +90,7 @@ def get_image_variants(image_url: str) -> dict:
     }
 
 
-async def resolve_claim_status(db: AsyncSession, temple: Temple) -> str:
+async def resolve_claim_status(db: AsyncSession, temple: Temple, claims_map: dict = None) -> str:
     """
     Resolves claim status based on verification levels:
     - Level 0: UNCLAIMED (if no PENDING claim request)
@@ -104,6 +104,15 @@ async def resolve_claim_status(db: AsyncSession, temple: Temple) -> str:
         return "CLAIMED"
     elif temple.verification_level == 2:
         return "CLAIMED"
+        
+    if claims_map is not None:
+        if claims_map.get(temple.id):
+            if temple.verification_level < 1:
+                temple.verification_level = 1
+            return "CLAIM_PENDING"
+        if temple.verification_level == 1:
+            return "CLAIM_PENDING"
+        return "UNCLAIMED"
         
     from app.modules.governance.models.governance_models import TempleClaimRequest
     stmt = select(TempleClaimRequest).filter(
@@ -462,6 +471,16 @@ async def list_public_temples(
     result = await db.execute(stmt)
     temples = result.scalars().all()
 
+    # Bulk fetch claims for these temples
+    temple_ids = [t.id for t in temples if t.id]
+    claims_map = {}
+    if temple_ids:
+        from app.modules.governance.models.governance_models import TempleClaimRequest
+        claim_stmt = select(TempleClaimRequest.temple_id).filter(TempleClaimRequest.temple_id.in_(temple_ids), TempleClaimRequest.status == "PENDING")
+        claim_res = await db.execute(claim_stmt)
+        for row in claim_res.all():
+            claims_map[row[0]] = True
+
     items = []
     for temple in temples:
         profile = temple.profile
@@ -506,7 +525,7 @@ async def list_public_temples(
         )
 
         # 4. Resolve claim status badge
-        claim_badge = await resolve_claim_status(db, temple)
+        claim_badge = await resolve_claim_status(db, temple, claims_map=claims_map)
 
         # Build list of active activities
         activities_list = []

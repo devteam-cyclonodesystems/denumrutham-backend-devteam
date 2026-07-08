@@ -58,13 +58,18 @@ class HomepageService:
         }
 
     @classmethod
-    async def resolve_claim_status(cls, db: AsyncSession, temple: Temple) -> str:
+    async def resolve_claim_status(cls, db: AsyncSession, temple: Temple, claims_map: Dict[UUID, bool] = None) -> str:
         if temple.verification_level == 3:
             return "OFFICIAL"
         if temple.management_mode in ("SELF_MANAGED", "GOVERNED"):
             return "CLAIMED"
         if temple.verification_level == 2:
             return "CLAIMED"
+            
+        if claims_map is not None:
+            if claims_map.get(temple.id):
+                return "CLAIM_PENDING"
+            return "UNCLAIMED"
             
         stmt = (
             select(TempleClaimRequest)
@@ -82,7 +87,8 @@ class HomepageService:
         category: str, 
         limit: int = 6,
         followers_map: Dict[UUID, int] = None,
-        trending_scores: Dict[UUID, float] = None
+        trending_scores: Dict[UUID, float] = None,
+        claims_map: Dict[UUID, bool] = None
     ) -> List[Dict[str, Any]]:
         # Avoid N+1 queries by fetching active followers and claims in bulk if possible,
         # but let's first load base temples query.
@@ -147,7 +153,7 @@ class HomepageService:
             profile = temple.profile
             resolved_img = cls.resolve_temple_image(temple)
             variants = cls.get_image_variants(resolved_img)
-            claim_badge = await cls.resolve_claim_status(db, temple)
+            claim_badge = await cls.resolve_claim_status(db, temple, claims_map=claims_map)
             
             # Resolve follower count from pre-fetched map or fallback
             follower_count = 0
@@ -260,19 +266,19 @@ class HomepageService:
     @classmethod
     async def calculate_trending_scores(cls, db: AsyncSession, followers_map: Dict[UUID, int]) -> Dict[UUID, float]:
         """
-        Rank trending temples over the last 7 days using normalized signals.
+        Rank trending temples over the last 24 hours using normalized signals.
         Score = 40% Views + 30% Searches + 20% Followers + 10% Activities
         """
-        seven_days_ago = datetime.now(timezone.utc) - timedelta(days=7)
+        one_day_ago = datetime.now(timezone.utc) - timedelta(days=1)
         
-        # 1. Bulk query view and search events in the last 7 days
+        # 1. Bulk query view and search events in the last 24 hours
         event_stmt = (
             select(
                 PortalAnalyticsEvent.temple_id,
                 PortalAnalyticsEvent.event_name,
                 sa.func.count(PortalAnalyticsEvent.id).label("count")
             )
-            .filter(PortalAnalyticsEvent.created_at >= seven_days_ago)
+            .filter(PortalAnalyticsEvent.created_at >= one_day_ago)
             .group_by(PortalAnalyticsEvent.temple_id, PortalAnalyticsEvent.event_name)
         )
         event_res = await db.execute(event_stmt)
@@ -327,7 +333,7 @@ class HomepageService:
         return trending_scores
 
     @classmethod
-    async def get_temple_spotlight(cls, db: AsyncSession, followers_map: Dict[UUID, int], trending_scores: Dict[UUID, float]) -> Optional[Dict[str, Any]]:
+    async def get_temple_spotlight(cls, db: AsyncSession, followers_map: Dict[UUID, int], trending_scores: Dict[UUID, float], claims_map: Dict[UUID, bool] = None) -> Optional[Dict[str, Any]]:
         """
         Highlight one temple according to the priority rules:
         1. Governance Configured Spotlight (from PlatformGlobalSetting "temple_spotlight_config")
@@ -369,7 +375,7 @@ class HomepageService:
             profile = t.profile
             resolved_img = cls.resolve_temple_image(t)
             variants = cls.get_image_variants(resolved_img)
-            claim_badge = await cls.resolve_claim_status(db, t)
+            claim_badge = await cls.resolve_claim_status(db, t, claims_map=claims_map)
             
             return {
                 "id": str(t.id),
@@ -476,17 +482,22 @@ class HomepageService:
         follower_res = await db.execute(follower_stmt)
         followers_map = {row.temple_id: row.count for row in follower_res.all() if row.temple_id}
         
+        # 1.5 Bulk fetch pending claims to avoid N+1
+        claim_stmt = select(TempleClaimRequest.temple_id).filter(TempleClaimRequest.status == "PENDING")
+        claim_res = await db.execute(claim_stmt)
+        claims_map = {row[0]: True for row in claim_res.all() if row[0]}
+        
         # 2. Calculate trending scores
         trending_scores = await cls.calculate_trending_scores(db, followers_map)
         
         popular_searches = ["Sabarimala", "Guruvayur", "Tirupati", "Meenakshi", "Kedarnath", "Puri Jagannath"]
         
-        featured = await cls.get_temples_by_category(db, "FEATURED", limit=6, followers_map=followers_map)
-        trending = await cls.get_temples_by_category(db, "TRENDING", limit=6, followers_map=followers_map, trending_scores=trending_scores)
-        recently_added = await cls.get_temples_by_category(db, "RECENTLY_ADDED", limit=12, followers_map=followers_map)
+        featured = await cls.get_temples_by_category(db, "FEATURED", limit=6, followers_map=followers_map, claims_map=claims_map)
+        trending = await cls.get_temples_by_category(db, "TRENDING", limit=6, followers_map=followers_map, trending_scores=trending_scores, claims_map=claims_map)
+        recently_added = await cls.get_temples_by_category(db, "RECENTLY_ADDED", limit=12, followers_map=followers_map, claims_map=claims_map)
         upcoming_festivals = await cls.get_upcoming_festivals(db, limit=10, followers_map=followers_map)
         states = await cls.get_states_directory(db)
-        spotlight = await cls.get_temple_spotlight(db, followers_map=followers_map, trending_scores=trending_scores)
+        spotlight = await cls.get_temple_spotlight(db, followers_map=followers_map, trending_scores=trending_scores, claims_map=claims_map)
         
         # Fetch curated homepage layout with fallback protection
         layout_list = None
