@@ -413,72 +413,117 @@ class HomepageService:
                 cls._redis_unavailable_until = now_ts + 60.0
                 redis = None
 
-        # Cache miss or Redis unavailable, query DB in bulk
-        logger.info("Homepage data cache miss - querying database")
+        # Cache miss or Redis unavailable — query DB with PARALLEL execution
+        logger.info("Homepage data cache miss - querying database in parallel")
+        
+        from app.core.database.database import AsyncSessionLocal
         
         t0 = time.time()
-        
-        # 1. Bulk fetch follower counts to avoid N+1 queries
-        try:
-            follower_stmt = (
+
+        # ── Helper: run a coroutine with its own DB session and a timeout ──
+        async def _run_with_session(coro_factory, label, timeout=3.0):
+            """Open a fresh session, run coro_factory(session), return result."""
+            try:
+                async with AsyncSessionLocal() as sess:
+                    return await asyncio.wait_for(coro_factory(sess), timeout=timeout)
+            except Exception as e:
+                logger.error(f"Homepage parallel query '{label}' failed: {e}")
+                return None
+
+        # ── Phase 1: Followers + Claims + Settings — all independent ──
+        async def _fetch_followers(sess):
+            stmt = (
                 select(TempleFollower.temple_id, sa.func.count(TempleFollower.id).label("count"))
                 .filter(TempleFollower.is_active == True)
                 .group_by(TempleFollower.temple_id)
             )
-            follower_res = await asyncio.wait_for(db.execute(follower_stmt), timeout=2.0)
-            followers_map = {row.temple_id: row.count for row in follower_res.all() if row.temple_id}
-        except Exception as e:
-            logger.error(f"Followers query failed or timed out: {e}")
-            followers_map = {}
-            
+            res = await sess.execute(stmt)
+            return {row.temple_id: row.count for row in res.all() if row.temple_id}
+
+        async def _fetch_claims(sess):
+            stmt = select(TempleClaimRequest.temple_id).filter(TempleClaimRequest.status == "PENDING")
+            res = await sess.execute(stmt)
+            return {row[0]: True for row in res.all() if row[0]}
+
+        async def _fetch_layout(sess):
+            stmt = select(PlatformGlobalSetting).filter(PlatformGlobalSetting.key == "homepage_layout_live")
+            res = await sess.execute(stmt)
+            setting = res.scalar_one_or_none()
+            if setting and setting.value:
+                if isinstance(setting.value, dict):
+                    return setting.value.get("layout")
+                elif isinstance(setting.value, list):
+                    return setting.value
+            return None
+
+        async def _fetch_carousel_config(sess):
+            stmt = select(PlatformGlobalSetting).filter(PlatformGlobalSetting.key == "homepage_carousel_live")
+            res = await sess.execute(stmt)
+            setting = res.scalar_one_or_none()
+            if setting and setting.value:
+                if isinstance(setting.value, dict):
+                    return setting.value.get("slides", [])
+                elif isinstance(setting.value, list):
+                    return setting.value
+            return []
+
+        phase1 = await asyncio.gather(
+            _run_with_session(_fetch_followers, "followers"),
+            _run_with_session(_fetch_claims, "claims"),
+            _run_with_session(_fetch_layout, "layout"),
+            _run_with_session(_fetch_carousel_config, "carousel_config"),
+        )
+        followers_map = phase1[0] or {}
+        claims_map = phase1[1] or {}
+        layout_list = phase1[2]
+        carousel_slides = phase1[3] or []
+
         t1 = time.time()
-        
-        # 1.5 Bulk fetch pending claims to avoid N+1
-        try:
-            claim_stmt = select(TempleClaimRequest.temple_id).filter(TempleClaimRequest.status == "PENDING")
-            claim_res = await asyncio.wait_for(db.execute(claim_stmt), timeout=2.0)
-            claims_map = {row[0]: True for row in claim_res.all() if row[0]}
-        except Exception as e:
-            logger.error(f"Claims query failed or timed out: {e}")
-            claims_map = {}
-            
-        t2 = time.time()
-        
-        # 2. Calculate trending scores
+        logger.info(f"Homepage Phase 1 (followers+claims+settings) took {t1-t0:.2f}s")
+
+        # ── Phase 2: Trending scores (pure computation, no DB) ──
         trending_scores = await cls.calculate_trending_scores(db, followers_map)
-        
+
         popular_searches = ["Sabarimala", "Guruvayur", "Tirupati", "Meenakshi", "Kedarnath", "Puri Jagannath"]
-        
-        t3 = time.time()
-        featured = await cls.get_temples_by_category(db, "FEATURED", limit=6, followers_map=followers_map, claims_map=claims_map)
-        t4 = time.time()
-        trending = await cls.get_temples_by_category(db, "TRENDING", limit=6, followers_map=followers_map, trending_scores=trending_scores, claims_map=claims_map)
-        t5 = time.time()
-        recently_added = await cls.get_temples_by_category(db, "RECENTLY_ADDED", limit=12, followers_map=followers_map, claims_map=claims_map)
-        t6 = time.time()
-        upcoming_festivals = await cls.get_upcoming_festivals(db, limit=10, followers_map=followers_map)
-        t7 = time.time()
-        states = await cls.get_states_directory(db)
-        t8 = time.time()
-        spotlight = await cls.get_temple_spotlight(db, followers_map=followers_map, trending_scores=trending_scores, claims_map=claims_map)
-        t9 = time.time()
-        
-        logger.info(f"Homepage query timings: followers={t1-t0:.2f}s, claims={t2-t1:.2f}s, scores={t3-t2:.2f}s, featured={t4-t3:.2f}s, trending={t5-t4:.2f}s, recent={t6-t5:.2f}s, festivals={t7-t6:.2f}s, states={t8-t7:.2f}s, spotlight={t9-t8:.2f}s")
-        
-        # Fetch curated homepage layout with fallback protection
-        layout_list = None
-        try:
-            layout_stmt = select(PlatformGlobalSetting).filter(PlatformGlobalSetting.key == "homepage_layout_live")
-            layout_res = await db.execute(layout_stmt)
-            layout_setting = layout_res.scalar_one_or_none()
-            if layout_setting and layout_setting.value:
-                if isinstance(layout_setting.value, dict):
-                    layout_list = layout_setting.value.get("layout")
-                elif isinstance(layout_setting.value, list):
-                    layout_list = layout_setting.value
-        except Exception as e:
-            logger.warning(f"Failed to fetch homepage layout from database: {e}")
-            
+
+        # ── Phase 3: All temple sections in parallel ──
+        async def _fetch_featured(sess):
+            return await cls.get_temples_by_category(sess, "FEATURED", limit=6, followers_map=followers_map, claims_map=claims_map)
+
+        async def _fetch_trending(sess):
+            return await cls.get_temples_by_category(sess, "TRENDING", limit=6, followers_map=followers_map, trending_scores=trending_scores, claims_map=claims_map)
+
+        async def _fetch_recent(sess):
+            return await cls.get_temples_by_category(sess, "RECENTLY_ADDED", limit=12, followers_map=followers_map, claims_map=claims_map)
+
+        async def _fetch_festivals(sess):
+            return await cls.get_upcoming_festivals(sess, limit=10, followers_map=followers_map)
+
+        async def _fetch_states(sess):
+            return await cls.get_states_directory(sess)
+
+        async def _fetch_spotlight(sess):
+            return await cls.get_temple_spotlight(sess, followers_map=followers_map, trending_scores=trending_scores, claims_map=claims_map)
+
+        phase3 = await asyncio.gather(
+            _run_with_session(_fetch_featured, "featured", timeout=5.0),
+            _run_with_session(_fetch_trending, "trending", timeout=5.0),
+            _run_with_session(_fetch_recent, "recently_added", timeout=5.0),
+            _run_with_session(_fetch_festivals, "festivals", timeout=5.0),
+            _run_with_session(_fetch_states, "states"),
+            _run_with_session(_fetch_spotlight, "spotlight", timeout=5.0),
+        )
+        featured = phase3[0] or []
+        trending = phase3[1] or []
+        recently_added = phase3[2] or []
+        upcoming_festivals = phase3[3] or []
+        states = phase3[4] or []
+        spotlight = phase3[5]
+
+        t2 = time.time()
+        logger.info(f"Homepage Phase 3 (temple sections) took {t2-t1:.2f}s, total={t2-t0:.2f}s")
+
+        # ── Layout fallback ──
         if not layout_list or not isinstance(layout_list, list) or len(layout_list) == 0:
             layout_list = [
                 {"key": "hero", "is_visible": True, "display_order": 0, "config": {}},
@@ -492,24 +537,10 @@ class HomepageService:
                 {"key": "directory", "is_visible": True, "display_order": 8, "config": {}}
             ]
 
-        # Fetch and resolve homepage carousel slides
-        carousel_slides = []
-        try:
-            carousel_stmt = select(PlatformGlobalSetting).filter(PlatformGlobalSetting.key == "homepage_carousel_live")
-            carousel_res = await db.execute(carousel_stmt)
-            carousel_setting = carousel_res.scalar_one_or_none()
-            if carousel_setting and carousel_setting.value:
-                if isinstance(carousel_setting.value, dict):
-                    carousel_slides = carousel_setting.value.get("slides", [])
-                elif isinstance(carousel_setting.value, list):
-                    carousel_slides = carousel_setting.value
-        except Exception as e:
-            logger.warning(f"Failed to fetch homepage carousel from database: {e}")
-
+        # ── Resolve carousel slides ──
         resolved_slides = []
         if carousel_slides:
             from uuid import uuid4
-            # Gather references
             temple_ids = set()
             festival_ids = set()
             for slide in carousel_slides:
@@ -527,9 +558,10 @@ class HomepageService:
                     except ValueError:
                         pass
 
-            # Bulk fetch temples
-            temples_map = {}
-            if temple_ids:
+            # Bulk fetch carousel temples + festivals in parallel
+            async def _fetch_carousel_temples(sess):
+                if not temple_ids:
+                    return {}
                 t_stmt = (
                     select(Temple)
                     .options(
@@ -539,24 +571,28 @@ class HomepageService:
                     )
                     .filter(Temple.id.in_(temple_ids), Temple.is_active == True, Temple.status == "APPROVED")
                 )
-                t_res = await db.execute(t_stmt)
-                for t in t_res.scalars().all():
-                    temples_map[t.id] = t
+                t_res = await sess.execute(t_stmt)
+                return {t.id: t for t in t_res.scalars().all()}
 
-            # Bulk fetch festivals
-            festivals_map = {}
-            if festival_ids:
+            async def _fetch_carousel_festivals(sess):
+                if not festival_ids:
+                    return {}
                 f_stmt = (
                     select(TempleFestival)
                     .join(Temple, TempleFestival.temple_id == Temple.id)
                     .options(joinedload(TempleFestival.temple))
                     .filter(TempleFestival.id.in_(festival_ids), TempleFestival.is_active == True)
                 )
-                f_res = await db.execute(f_stmt)
-                for f in f_res.scalars().all():
-                    festivals_map[f.id] = f
+                f_res = await sess.execute(f_stmt)
+                return {f.id: f for f in f_res.scalars().all()}
 
-            # Resolve slide by slide
+            carousel_results = await asyncio.gather(
+                _run_with_session(_fetch_carousel_temples, "carousel_temples"),
+                _run_with_session(_fetch_carousel_festivals, "carousel_festivals"),
+            )
+            temples_map = carousel_results[0] or {}
+            festivals_map = carousel_results[1] or {}
+
             for slide in carousel_slides:
                 if not isinstance(slide, dict):
                     continue
@@ -667,4 +703,7 @@ class HomepageService:
                 logger.warning(f"Failed to write to Redis cache, disabling for 60s: {e}")
                 cls._redis_unavailable_until = now_ts + 60.0
 
+        t_end = time.time()
+        logger.info(f"Homepage total build time: {t_end-t0:.2f}s")
         return data
+
