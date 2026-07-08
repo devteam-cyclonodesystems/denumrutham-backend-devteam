@@ -94,14 +94,10 @@ class HomepageService:
         # but let's first load base temples query.
         stmt = (
             select(Temple)
-            .outerjoin(TempleWebsiteSettingsLive, Temple.id == TempleWebsiteSettingsLive.temple_id)
-            .outerjoin(TempleProfile, Temple.id == TempleProfile.temple_id)
             .options(
                 selectinload(Temple.profile),
                 selectinload(Temple.website_settings_live),
-                selectinload(Temple.images),
-                selectinload(Temple.activities),
-                selectinload(Temple.festivals)
+                selectinload(Temple.images)
             )
             .filter(Temple.is_active == True, Temple.status == "APPROVED", Temple.directory_status == "ACTIVE")
         )
@@ -266,69 +262,21 @@ class HomepageService:
     @classmethod
     async def calculate_trending_scores(cls, db: AsyncSession, followers_map: Dict[UUID, int]) -> Dict[UUID, float]:
         """
-        Rank trending temples over the last 24 hours using normalized signals.
-        Score = 40% Views + 30% Searches + 20% Followers + 10% Activities
+        Rank trending temples using normalized follower signals.
+        (Analytics aggregation temporarily bypassed to prevent homepage timeouts)
         """
-        one_day_ago = datetime.now(timezone.utc) - timedelta(days=1)
-        
-        # 1. Bulk query view and search events in the last 24 hours
-        event_stmt = (
-            select(
-                PortalAnalyticsEvent.temple_id,
-                PortalAnalyticsEvent.event_name,
-                sa.func.count(PortalAnalyticsEvent.id).label("count")
-            )
-            .filter(PortalAnalyticsEvent.created_at >= one_day_ago)
-            .group_by(PortalAnalyticsEvent.temple_id, PortalAnalyticsEvent.event_name)
-        )
-        event_res = await db.execute(event_stmt)
-        
-        views_map = {}
-        searches_map = {}
-        activity_map = {}
-        
-        for row in event_res.all():
-            tid, ename, cnt = row.temple_id, row.event_name, row.count
-            if not tid:
-                continue
-            if ename == "TEMPLE_VIEW":
-                views_map[tid] = cnt
-            elif ename == "TEMPLE_CARD_CLICK":
-                searches_map[tid] = cnt
-            else:
-                activity_map[tid] = activity_map.get(tid, 0) + cnt
-                
-        # 2. Get list of all active temple IDs
-        temple_stmt = select(Temple.id).filter(Temple.is_active == True, Temple.status == "APPROVED", Temple.directory_status == "ACTIVE")
-        temple_res = await db.execute(temple_stmt)
-        temple_ids = [row[0] for row in temple_res.all()]
-        
-        if not temple_ids:
+        if not followers_map:
             return {}
             
-        # 3. Calculate max metrics for normalization
-        max_views = max(views_map.values()) if views_map else 1
-        max_searches = max(searches_map.values()) if searches_map else 1
         max_followers = max(followers_map.values()) if followers_map else 1
-        max_activity = max(activity_map.values()) if activity_map else 1
-        
-        if max_views == 0: max_views = 1
-        if max_searches == 0: max_searches = 1
-        if max_followers == 0: max_followers = 1
-        if max_activity == 0: max_activity = 1
-        
-        # 4. Score temples
-        trending_scores = {}
-        for tid in temple_ids:
-            # Normalized signals (0-1 range)
-            norm_views = views_map.get(tid, 0) / max_views
-            norm_searches = searches_map.get(tid, 0) / max_searches
-            norm_followers = followers_map.get(tid, 0) / max_followers
-            norm_activity = activity_map.get(tid, 0) / max_activity
+        if max_followers == 0:
+            max_followers = 1
             
-            # Weighted trending score calculation
-            score = (0.4 * norm_views) + (0.3 * norm_searches) + (0.2 * norm_followers) + (0.1 * norm_activity)
-            trending_scores[tid] = round(score, 4)
+        trending_scores = {}
+        for tid, count in followers_map.items():
+            norm_followers = count / max_followers
+            # Use followers as the primary proxy for trending to avoid heavy DB aggregations on the critical path
+            trending_scores[tid] = round(float(norm_followers), 4)
             
         return trending_scores
 
@@ -359,8 +307,6 @@ class HomepageService:
         async def fetch_spotlight_details(temple_id: UUID) -> Optional[Dict[str, Any]]:
             stmt = (
                 select(Temple)
-                .outerjoin(TempleWebsiteSettingsLive, Temple.id == TempleWebsiteSettingsLive.temple_id)
-                .outerjoin(TempleProfile, Temple.id == TempleProfile.temple_id)
                 .options(
                     selectinload(Temple.profile),
                     selectinload(Temple.website_settings_live),
@@ -566,8 +512,6 @@ class HomepageService:
             if temple_ids:
                 t_stmt = (
                     select(Temple)
-                    .outerjoin(TempleWebsiteSettingsLive, Temple.id == TempleWebsiteSettingsLive.temple_id)
-                    .outerjoin(TempleProfile, Temple.id == TempleProfile.temple_id)
                     .options(
                         selectinload(Temple.profile),
                         selectinload(Temple.website_settings_live),
